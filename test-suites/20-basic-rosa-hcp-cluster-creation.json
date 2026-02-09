@@ -6,12 +6,17 @@
   "notifyOnComplete": true,
   "playbooks": [
     {
-      "name": "create_rosa_hcp_cluster.yml",
+      "name": "Create Rosa Hcp Cluster",
       "description": "Create ROSA HCP cluster using Cluster API",
       "timeout": 2400,
-      "required": true
+      "required": true,
+      "file": "playbooks/create_rosa_hcp_cluster.yml"
     }
   ],
-  "tags": ["rosa-hcp", "basic", "cluster-creation"],
+  "tags": [
+    "rosa-hcp",
+    "basic",
+    "cluster-creation"
+  ],
   "schedule": null
 }

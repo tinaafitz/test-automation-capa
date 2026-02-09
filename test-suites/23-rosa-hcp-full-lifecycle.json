@@ -6,30 +6,38 @@
   "notifyOnComplete": true,
   "playbooks": [
     {
-      "name": "cap-enable-test.yml",
+      "name": "Cap-Enable-Test",
       "description": "Ensure CAPI/CAPA are enabled",
       "timeout": 600,
-      "required": true
+      "required": true,
+      "file": "playbooks/cap-enable-test.yml"
     },
     {
-      "name": "capi-rosa-basic-test.yml",
+      "name": "Capi-Rosa-Basic-Test",
       "description": "Create ROSA HCP cluster",
       "timeout": 2400,
-      "required": true
+      "required": true,
+      "file": "playbooks/capi-rosa-basic-test.yml"
     },
     {
-      "name": "test-rosa-log-forwarding.yml",
+      "name": "Test-Rosa-Log-Forwarding",
       "description": "Test log forwarding configuration",
       "timeout": 600,
-      "required": false
+      "required": false,
+      "file": "playbooks/test-rosa-log-forwarding.yml"
     },
     {
-      "name": "capi-rosahcp-test.yml",
+      "name": "Capi-Rosahcp-Test",
       "description": "Validate cluster health and features",
       "timeout": 900,
-      "required": true
+      "required": true,
+      "file": "playbooks/capi-rosahcp-test.yml"
     }
   ],
-  "tags": ["nightly", "rosa-hcp", "lifecycle"],
+  "tags": [
+    "nightly",
+    "rosa-hcp",
+    "lifecycle"
+  ],
   "schedule": "0 3 * * *"
 }
