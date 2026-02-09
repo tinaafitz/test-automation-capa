@@ -9,7 +9,7 @@
     template_debug: true
 
 - name: Resolve ROSANetwork template
-  include_tasks: tasks/template_resolver.yml
+  include_tasks: template_resolver.yml
 
 - name: Create output directory for ROSANetwork
   file:

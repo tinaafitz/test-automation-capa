@@ -43,14 +43,14 @@
             cluster_config_file: "{{ scenario_config_file }}"
 
         - name: Validate AutoNode setup for scenario
-          include_tasks: tasks/validate_autonode_setup.yml
+          include_tasks: validate_autonode_setup.yml
           when: scenario_autonode_mode == "enabled"
 
     # Phase 2: Cluster creation
     - name: Phase 2 - Cluster creation
       block:
         - name: Create cluster with AutoNode configuration
-          include_tasks: tasks/create_rosa_control_plane_autonode.yml
+          include_tasks: create_rosa_control_plane_autonode.yml
 
         - name: Wait for cluster to be provisioning
           shell: |
