@@ -1,0 +1,181 @@
+---
+# Task 12: Test AutoNode Scaling
+# Tests AutoNode scaling functionality with a test workload
+
+- name: Display scaling test start
+  debug:
+    msg: |
+      ========================================
+      AutoNode Scaling Test
+      ========================================
+      Test Replicas: {{ autonode_test_replicas }}
+      CPU Request: {{ autonode_test_cpu }}
+      Memory Request: {{ autonode_test_memory }}
+
+- name: Set test deployment manifest path
+  set_fact:
+    test_deployment_manifest: "/tmp/autonode-scale-test-deployment.yaml"
+
+- name: Generate test deployment manifest from template
+  template:
+    src: test-deployment.yaml.j2
+    dest: "{{ test_deployment_manifest }}"
+    mode: '0644'
+
+- name: Get current node count
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get nodes --no-headers | wc -l
+  register: initial_node_count
+  changed_when: false
+
+- name: Display initial state
+  debug:
+    msg: |
+      Initial Node Count: {{ initial_node_count.stdout }}
+      Test Replicas: {{ autonode_test_replicas }}
+
+- name: Apply test deployment
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} apply -f {{ test_deployment_manifest }}
+  register: deployment_apply
+  changed_when: deployment_apply.rc == 0
+
+- name: Record test start time
+  set_fact:
+    test_start_time: "{{ ansible_date_time.epoch }}"
+
+- name: Wait for pods to be scheduled
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get pods -l app=autonode-scale-test -o jsonpath='{.items[*].status.phase}'
+  register: pod_status
+  until: "'Pending' not in pod_status.stdout or 'Running' in pod_status.stdout"
+  retries: 60
+  delay: 10
+  changed_when: false
+
+- name: Record pods scheduled time
+  set_fact:
+    pods_scheduled_time: "{{ ansible_date_time.epoch }}"
+
+- name: Calculate scheduling duration
+  set_fact:
+    scheduling_duration: "{{ (pods_scheduled_time | int) - (test_start_time | int) }}"
+
+- name: Get new node count
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get nodes --no-headers | wc -l
+  register: final_node_count
+  changed_when: false
+
+- name: Calculate nodes provisioned
+  set_fact:
+    nodes_provisioned: "{{ (final_node_count.stdout | int) - (initial_node_count.stdout | int) }}"
+
+- name: Get nodes with Karpenter labels
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get nodes -l karpenter.sh/nodepool={{ nodepool_name }} --no-headers
+  register: karpenter_nodes
+  changed_when: false
+  failed_when: false
+
+- name: Get pod distribution across nodes
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get pods -l app=autonode-scale-test -o wide
+  register: pod_distribution
+  changed_when: false
+
+- name: Get Karpenter logs during scaling
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} logs -n kube-system -l app.kubernetes.io/name=karpenter --since={{ scheduling_duration }}s --tail=100
+  register: karpenter_scaling_logs
+  changed_when: false
+  failed_when: false
+
+- name: Display scaling test results
+  debug:
+    msg: |
+      ========================================
+      AutoNode Scaling Test Results
+      ========================================
+       Test Completed
+
+      Metrics:
+      - Initial Nodes: {{ initial_node_count.stdout }}
+      - Final Nodes: {{ final_node_count.stdout }}
+      - Nodes Provisioned: {{ nodes_provisioned }}
+      - Karpenter-managed Nodes: {{ karpenter_nodes.stdout_lines | default([]) | length }}
+      - Scheduling Duration: {{ scheduling_duration }} seconds
+
+      Pod Distribution:
+      {{ pod_distribution.stdout }}
+
+      Karpenter Nodes:
+      {{ karpenter_nodes.stdout | default('No Karpenter nodes found') }}
+
+- name: Verify scaling was successful
+  assert:
+    that:
+      - nodes_provisioned | int >= 0
+      - scheduling_duration | int < autonode_scaling_timeout
+    fail_msg: |
+      Scaling test failed:
+      - Nodes provisioned: {{ nodes_provisioned }}
+      - Scheduling duration: {{ scheduling_duration }}s (timeout: {{ autonode_scaling_timeout }}s)
+    success_msg: |
+       Scaling test successful!
+      Provisioned {{ nodes_provisioned }} node(s) in {{ scheduling_duration }} seconds
+
+- name: Save scaling test results
+  copy:
+    content: |
+      # AutoNode Scaling Test Results
+      # Generated: {{ ansible_date_time.iso8601 }}
+      # Cluster: {{ cluster_name }}
+
+      ## Test Configuration
+      - Replicas: {{ autonode_test_replicas }}
+      - CPU Request: {{ autonode_test_cpu }}
+      - Memory Request: {{ autonode_test_memory }}
+
+      ## Results
+      - Initial Nodes: {{ initial_node_count.stdout }}
+      - Final Nodes: {{ final_node_count.stdout }}
+      - Nodes Provisioned: {{ nodes_provisioned }}
+      - Karpenter-managed Nodes: {{ karpenter_nodes.stdout_lines | default([]) | length }}
+      - Scheduling Duration: {{ scheduling_duration }} seconds
+      - Test Status: {{ 'PASSED' if (nodes_provisioned | int >= 0 and scheduling_duration | int < autonode_scaling_timeout) else 'FAILED' }}
+
+      ## Pod Distribution
+      {{ pod_distribution.stdout }}
+
+      ## Karpenter Nodes
+      {{ karpenter_nodes.stdout | default('No Karpenter nodes found') }}
+
+      ## Karpenter Logs
+      {{ karpenter_scaling_logs.stdout }}
+    dest: "{{ autonode_results_dir }}/scaling-test-{{ cluster_name }}-{{ ansible_date_time.epoch }}.txt"
+    mode: '0644'
+  when: autonode_results_dir is defined
+
+- name: Wait before cleanup (optional observation period)
+  pause:
+    seconds: 30
+    prompt: "Observing scaled environment for 30 seconds..."
+  when: autonode_observe_scaling | default(false)
+
+- name: Delete test deployment
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} delete -f {{ test_deployment_manifest }}
+  register: deployment_delete
+  changed_when: deployment_delete.rc == 0
+  when: autonode_cleanup_test_deployment | default(true)
+
+- name: Wait for node scale-down (optional)
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get nodes --no-headers | wc -l
+  register: scaledown_node_count
+  until: scaledown_node_count.stdout | int <= initial_node_count.stdout | int
+  retries: 30
+  delay: 20
+  changed_when: false
+  when: autonode_wait_for_scaledown | default(false)

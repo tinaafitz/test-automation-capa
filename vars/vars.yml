@@ -1,0 +1,251 @@
+#==== Common ====
+output_dir: "{{ lookup('env', 'HOME') }}/output"
+skip_ansible_runner: false
+# ansible_async_dir: '/root/.ansible_async'
+ansible_async_dir: '/tmp/.ansible_async'
+
+#==== CAPI Installation ====
+# Installation method for CAPI providers: 'clusterctl' (default) or 'helm'
+# - clusterctl: Uses official clusterctl tool (fast, simple, matches upstream docs)
+# - helm: Uses Helm charts from stolostron/cluster-api-installer (GitOps friendly, customizable)
+capi_installation_method: "clusterctl"
+helm_repo_url: "https://stolostron.github.io/cluster-api-installer"
+helm_chart_version: "latest"  # or specific version like "1.0.0"
+
+#==== Multi-Provider Support ====
+cloud_provider: "aws"                            # Default provider: aws, azure
+supported_providers: ["aws", "azure"]
+provider_config_path: "providers/{{ cloud_provider }}"
+
+#==== Version Management ====
+openshift_version: "4.20"                    # Default OpenShift version
+supported_versions: ["4.18", "4.19", "4.20"]
+template_version_path: "templates/versions/{{ openshift_version }}"
+common_template_path: "templates/common"
+schemas_path: "templates/schemas"
+feature_matrix_file: "{{ schemas_path }}/feature-matrix.yml"
+version_compatibility_file: "{{ schemas_path }}/version-compatibility.yml"
+
+#==== OCP ====
+api_url: ""
+catalog_sources:
+  production:
+    app_registry:
+      source: "redhat-operators"
+    index_image:
+      source: ""
+  stage:
+    app_registry:
+      source: "redhat-operators"
+    index_image:
+      source: "brew.registry.redhat.io/rh-osbs/iib-pub-pending"
+  acmd:
+    app_registry:
+      source: ""
+    index_image:
+      source: "quay.io:443/acm-d"
+  brew:
+    app_registry:
+      source: ""
+    index_image:
+      source: "brew.registry.redhat.io/rh-osbs/iib"
+
+#==== ACM/MCE ====
+acm_repo: "production"
+acm_release_version: ""
+acm_sub_name: "advanced-cluster-management"
+acm_namespace: "open-cluster-management"
+
+capi_namespace: "ns-rosa-hcp"
+capa_system_namespace: "multicluster-engine"
+rosa_creds_secret: "rosa-creds-secret"
+
+
+mce_sub_name: "multicluster-engine"
+mce_namespace: "multicluster-engine"
+mce_name: "multiclusterengine"
+default_lc_name: "local-cluster"
+infra_nodes: false
+ingress_cert_secret: "custom-cert"
+labeled_resources: []
+unannotated_resources: []
+acm_resources: ["deployment",
+                "configmap",
+                "service",
+                "serviceaccount",
+                "subscription",
+                "policy",
+                "ValidatingWebhookConfiguration",
+                "MutatingWebhookConfiguration",
+                "clusterrole",
+                "clusterrolebinding",
+                "role",
+                "rolebinding"]
+
+#==== Upgrade ====
+upgraded_to_release_version: ""
+eus_upgrade: false
+mce_comps_to_be_removed:
+mce_comps_to_be_added:
+  - name: cluster-api
+    status: false
+  - name: cluster-api-provider-aws
+    status: false
+  - name: cluster-api-provider-azure
+    status: false
+mch_comps_to_be_removed: []
+mch_comps_to_be_added:
+  - name: multicluster-engine
+    status: true
+
+#==== Others ====
+operators:
+  oadp:
+    src: 'redhat-operators'
+    channel: ''
+    iib_tag: ''
+
+
+#==== STS ====
+oadp_arn: 'arn:aws:iam::902449478968:role/rosa-classic-tn-openshift-oadp-aws-cloud-credentials'
+
+env_var_name: "foo"
+env_add_name: "bar"
+env_override_name: "baz"
+
+capa_pod_label: "infrastructure-aws"
+capi_pod_label: "infrastructure-aws"
+
+#==== ACM-21174 ROSANetwork Configuration ====
+acm21174_config:
+  # Feature name and description
+  feature_name: "ROSANetwork"
+  feature_description: "Automated VPC and subnet creation for ROSA HCP clusters"
+  test_case: "ACM-21174"
+
+  # Default OpenShift version for ROSANetwork
+  openshift_version: "4.20.0"
+
+  # Kind cluster configuration for testing
+  kind_cluster_name: "capa-network-test"
+
+  # Feature flags for CAPA controller
+  feature_flags:
+    EXP_ROSA: "true"
+    EXP_MACHINE_POOL: "true"
+    CLUSTER_TOPOLOGY: "true"
+
+  # Default network configuration
+  default_network_config:
+    cidr_block: "10.0.0.0/16"
+    availability_zones:
+      - "us-west-2a"
+      - "us-west-2b"
+    tags:
+      Environment: "test"
+      CreatedBy: "ansible-automation"
+      Purpose: "rosanetwork-automation"
+
+  # Testing configuration
+  test_config:
+    timeout: 1800  # 30 minutes
+    enable_cleanup_test: true
+    enable_manual_comparison: false
+    enable_cluster_creation_test: false
+
+#==== CAPA Controller Network Configuration ====
+capa_controller_network:
+  # Milan's image with ROSANetwork support
+  image: "quay.io/milanvala/cluster-api-provider-aws"
+  tag: "milan-rosanetwork-latest"
+
+  # Milan's CRDs repository for ROSANetwork
+  milan_crds_base_url: "https://raw.githubusercontent.com/milanvala/cluster-api-provider-aws/rosa-network-crd/config/crd/bases"
+
+#==== ACM-21162 ROSARoleConfig Configuration ====
+# Configuration for ROSARoleConfig automated AWS IAM role creation
+acm21162:
+  enabled: true
+  test_case: "ACM-21162"
+  description: "ROSARoleConfig automated AWS IAM role creation for ROSA HCP clusters"
+
+  # ROSARoleConfig defaults
+  rosa_role_config:
+    # Default timeout for role creation (seconds)
+    creation_timeout: 1800
+    # Default timeout for role validation (seconds)
+    validation_timeout: 300
+    # Default timeout for cleanup (seconds)
+    cleanup_timeout: 600
+    # Default polling interval for status checks (seconds)
+    poll_interval: 30
+    # Enable deletion protection by default
+    deletion_protection: false
+
+  # AWS configuration
+  aws:
+    # Default AWS region for testing
+    default_region: "us-east-1"
+    # ROSA service account ID for trust policies
+    rosa_service_account_id: "710019948333"
+    # Default external ID for role assumption
+    default_external_id: ""
+
+  # OIDC provider configuration
+  oidc_provider:
+    # Default OIDC thumbprints for AWS
+    default_thumbprints:
+      - "9e99a48a9960b14926bb7f3b02e22da2b0ab7280"
+      - "a9d53002e97e00e043244f3d170d6f4c414104fd"
+    # Default client IDs
+    default_client_ids:
+      - "sts.amazonaws.com"
+    # Test OIDC accessibility during validation
+    test_accessibility: false
+
+  # CAPA controller configuration
+  capa_controller:
+    # Backup deployment before updates
+    backup_before_update: true
+    # Update ClusterRole with ROSARoleConfig permissions
+    update_clusterrole: true
+    # Verification timeout (seconds)
+    verification_timeout: 300
+    # Test controller connectivity
+    test_connectivity: false
+
+  # Testing configuration
+  testing:
+    # Enable manual vs automated comparison tests
+    enable_manual_comparison: false
+    # Enable full cluster creation tests
+    enable_cluster_creation_test: false
+    # Enable cleanup tests
+    enable_cleanup_test: true
+    # Emergency cleanup on critical failures
+    emergency_cleanup: false
+    # Generate detailed test reports
+    generate_reports: true
+
+  # Default tags for AWS resources
+  default_tags:
+    Environment: "test"
+    Project: "ACM-CAPI-Automation"
+    TestCase: "ACM-21162"
+    CreatedBy: "ansible-automation"
+
+  # Role naming patterns
+  role_naming:
+    installer_suffix: "-installer-role"
+    support_suffix: "-support-role"
+    worker_suffix: "-worker-role"
+
+  # Template configuration
+  templates:
+    # Default template category for ROSARoleConfig
+    default_category: "features"
+    # Template debug mode
+    debug_mode: true
+    # Generate static test configurations
+    generate_test_configs: true
+

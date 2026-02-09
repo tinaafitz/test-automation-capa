@@ -1,0 +1,16 @@
+- set_fact:
+    oc_yaml_filename: "capi-demo.yaml"
+    fq_oc_yaml_filename: "{{ lookup('env', 'PWD') }}/capi-demo.yml"
+
+- name: Print the oc yaml filename
+  debug:
+    msg: "oc yaml filename: {{ fq_oc_yaml_filename }}"
+
+- name: OC delete file
+  shell: |
+    oc delete -f {{ fq_oc_yaml_filename }}
+  register: results
+
+- name: Print the results
+  debug:
+    msg: "results: {{ results.stdout }}"

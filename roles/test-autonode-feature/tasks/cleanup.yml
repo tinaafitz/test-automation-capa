@@ -1,0 +1,131 @@
+---
+# Cleanup Task - Remove AutoNode Test Resources
+# Cleans up Kubernetes resources, IAM resources, and temporary files
+
+- name: Display cleanup start message
+  debug:
+    msg: |
+      ========================================
+      AutoNode Cleanup
+      ========================================
+      Cluster: {{ cluster_name }}
+      Cleanup IAM: {{ autonode_cleanup_iam_resources | default(false) }}
+
+- name: Cleanup Kubernetes resources
+  block:
+    - name: Delete test deployments
+      shell: |
+        kubectl --kubeconfig={{ autonode_kubeconfig_path }} delete deployment autonode-scale-test --ignore-not-found=true
+      register: deployment_cleanup
+      changed_when: deployment_cleanup.rc == 0
+      failed_when: false
+
+    - name: Delete NodePools
+      shell: |
+        kubectl --kubeconfig={{ autonode_kubeconfig_path }} delete nodepool {{ nodepool_name }} --ignore-not-found=true
+      register: nodepool_cleanup
+      changed_when: nodepool_cleanup.rc == 0
+      failed_when: false
+
+    - name: Delete EC2NodeClass
+      shell: |
+        kubectl --kubeconfig={{ autonode_kubeconfig_path }} delete ec2nodeclass {{ nodeclass_name }} --ignore-not-found=true
+      register: ec2nodeclass_cleanup
+      changed_when: ec2nodeclass_cleanup.rc == 0
+      failed_when: false
+
+    - name: Display Kubernetes cleanup results
+      debug:
+        msg: |
+          Kubernetes Resources Cleaned:
+          - Test Deployments: {{ 'Deleted' if deployment_cleanup.rc == 0 else 'Not found' }}
+          - NodePools: {{ 'Deleted' if nodepool_cleanup.rc == 0 else 'Not found' }}
+          - EC2NodeClass: {{ 'Deleted' if ec2nodeclass_cleanup.rc == 0 else 'Not found' }}
+
+- name: Remove autoNode configuration from RosaControlPlane
+  block:
+    - name: Patch RosaControlPlane to remove autoNode
+      shell: |
+        oc patch rosacontrolplane {{ cluster_name }} -n {{ cluster_namespace }} --type json \
+          -p '[{"op": "remove", "path": "/spec/autoNode"}]'
+      register: rosacontrolplane_patch
+      changed_when: rosacontrolplane_patch.rc == 0
+      failed_when: false
+
+    - name: Display RosaControlPlane cleanup result
+      debug:
+        msg: "{{ 'AutoNode configuration removed from RosaControlPlane' if rosacontrolplane_patch.rc == 0 else 'AutoNode configuration not found or already removed' }}"
+
+- name: Cleanup IAM resources
+  block:
+    - name: Detach policy from role
+      shell: |
+        aws iam detach-role-policy \
+          --role-name {{ autonode_role_name }} \
+          --policy-arn {{ autonode_policy_arn }}
+      environment:
+        AWS_DEFAULT_REGION: "{{ aws_region }}"
+      register: policy_detach
+      changed_when: policy_detach.rc == 0
+      failed_when: false
+
+    - name: Delete IAM role
+      shell: |
+        aws iam delete-role --role-name {{ autonode_role_name }}
+      environment:
+        AWS_DEFAULT_REGION: "{{ aws_region }}"
+      register: role_delete
+      changed_when: role_delete.rc == 0
+      failed_when: false
+
+    - name: Delete IAM policy
+      shell: |
+        aws iam delete-policy --policy-arn {{ autonode_policy_arn }}
+      environment:
+        AWS_DEFAULT_REGION: "{{ aws_region }}"
+      register: policy_delete
+      changed_when: policy_delete.rc == 0
+      failed_when: false
+
+    - name: Display IAM cleanup results
+      debug:
+        msg: |
+          IAM Resources Cleaned:
+          - Policy Detached: {{ 'Yes' if policy_detach.rc == 0 else 'No' }}
+          - Role Deleted: {{ 'Yes' if role_delete.rc == 0 else 'No' }}
+          - Policy Deleted: {{ 'Yes' if policy_delete.rc == 0 else 'No' }}
+
+  when: autonode_cleanup_iam_resources | default(false)
+
+- name: Cleanup temporary files
+  block:
+    - name: Remove temporary policy files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/{{ autonode_policy_name }}.json"
+        - "/tmp/{{ autonode_role_name }}-trust-policy.json"
+        - "/tmp/{{ nodeclass_name }}-ec2nodeclass.yaml"
+        - "/tmp/{{ nodepool_name }}-nodepool.yaml"
+        - "/tmp/autonode-scale-test-deployment.yaml"
+        - "/tmp/autonode-cluster-info-{{ cluster_name }}.env"
+      failed_when: false
+
+    - name: Display temporary files cleanup result
+      debug:
+        msg: " Temporary files removed"
+
+- name: Display cleanup completion message
+  debug:
+    msg: |
+      ========================================
+      Cleanup Completed
+      ========================================
+      Cluster: {{ cluster_name }}
+       Kubernetes resources cleaned
+      {{ ' IAM resources cleaned' if autonode_cleanup_iam_resources else '  IAM resources retained (cleanup disabled)' }}
+       Temporary files removed
+
+      Note: The cluster itself has not been deleted.
+      To delete the cluster, run: rosa delete cluster {{ cluster_name }}

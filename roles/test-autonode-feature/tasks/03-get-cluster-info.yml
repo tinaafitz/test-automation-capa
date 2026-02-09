@@ -1,0 +1,94 @@
+---
+# Task 03: Get Cluster Information
+# Retrieves cluster details including OIDC provider information
+
+- name: Display cluster info retrieval start
+  debug:
+    msg: |
+      ========================================
+      Retrieving Cluster Information
+      ========================================
+      Cluster Name: {{ cluster_name }}
+
+- name: Get detailed cluster information
+  shell: |
+    rosa describe cluster --cluster {{ cluster_name }} --output json
+  register: cluster_details_raw
+  failed_when: cluster_details_raw.rc != 0
+  changed_when: false
+
+- name: Parse cluster details
+  set_fact:
+    cluster_details: "{{ cluster_details_raw.stdout | from_json }}"
+
+- name: Extract cluster ID
+  set_fact:
+    cluster_id: "{{ cluster_details.id }}"
+
+- name: Extract OIDC provider URL
+  set_fact:
+    oidc_provider_url: "{{ cluster_details.aws.sts.oidc_endpoint_url | regex_replace('^https://', '') }}"
+
+- name: Extract OIDC config ID
+  set_fact:
+    oidc_config_id: "{{ cluster_details.aws.sts.oidc_config_id | default('') }}"
+
+- name: Use AWS account ID from prerequisites
+  set_fact:
+    cluster_aws_account: "{{ aws_account_id }}"
+
+- name: Extract AWS region from cluster
+  set_fact:
+    aws_region: "{{ cluster_details.region.id }}"
+
+- name: Validate extracted cluster information
+  assert:
+    that:
+      - cluster_id is defined
+      - cluster_id != ""
+      - oidc_provider_url is defined
+      - oidc_provider_url != ""
+    fail_msg: "Failed to extract required cluster information"
+    success_msg: " Successfully extracted cluster information"
+
+- name: Verify AWS account matches
+  assert:
+    that:
+      - cluster_aws_account == aws_account_id
+    fail_msg: |
+      AWS account mismatch!
+      Cluster account: {{ cluster_aws_account }}
+      Configured account: {{ aws_account_id }}
+    success_msg: " AWS account verified"
+  when: aws_account_id is defined
+
+- name: Display extracted cluster information
+  debug:
+    msg: |
+      ========================================
+      Cluster Information
+      ========================================
+      Cluster Name: {{ cluster_name }}
+      Cluster ID: {{ cluster_id }}
+      OIDC Provider URL: {{ oidc_provider_url }}
+      OIDC Config ID: {{ oidc_config_id }}
+      AWS Account ID: {{ cluster_aws_account }}
+      Region: {{ cluster_details.region.id }}
+      OpenShift Version: {{ cluster_details.version.raw_id }}
+      State: {{ cluster_details.state }}
+
+- name: Save cluster information to file
+  copy:
+    content: |
+      # AutoNode Test - Cluster Information
+      # Generated: {{ ansible_date_time.iso8601 }}
+
+      CLUSTER_NAME={{ cluster_name }}
+      CLUSTER_ID={{ cluster_id }}
+      OIDC_PROVIDER_URL={{ oidc_provider_url }}
+      OIDC_CONFIG_ID={{ oidc_config_id }}
+      AWS_ACCOUNT_ID={{ cluster_aws_account }}
+      AWS_REGION={{ cluster_details.region.id }}
+      OPENSHIFT_VERSION={{ cluster_details.version.raw_id }}
+    dest: "/tmp/autonode-cluster-info-{{ cluster_name }}.env"
+    mode: '0644'

@@ -1,0 +1,122 @@
+---
+# Task 06: Update RosaControlPlane with AutoNode Configuration
+# Patches the RosaControlPlane resource with AutoNode settings
+
+- name: Display RosaControlPlane update start
+  debug:
+    msg: |
+      ========================================
+      Updating RosaControlPlane
+      ========================================
+      Cluster: {{ cluster_name }}
+      Namespace: {{ cluster_namespace }}
+      AutoNode Mode: {{ autonode_mode }}
+      Role ARN: {{ autonode_role_arn }}
+
+- name: Detect Kind cluster context for RosaControlPlane
+  shell: |
+    kubectl config get-contexts -o name | grep -E 'kind-.*combo.*test' | head -1
+  register: kind_context_detect
+  failed_when: false
+  changed_when: false
+
+- name: Set kubectl context for RosaControlPlane operations
+  set_fact:
+    rosa_kubectl_context: "{{ kind_context_detect.stdout if kind_context_detect.rc == 0 and kind_context_detect.stdout != '' else '' }}"
+
+- name: Display detected context
+  debug:
+    msg: |
+      {% if rosa_kubectl_context != '' %}
+       Using kubectl context: {{ rosa_kubectl_context }}
+      {% else %}
+       Using default kubectl context
+      {% endif %}
+
+- name: Check if RosaControlPlane exists
+  shell: |
+    {% if rosa_kubectl_context != '' %}
+    kubectl get rosacontrolplane {{ cluster_name }} -n {{ cluster_namespace }} --context {{ rosa_kubectl_context }} -o json
+    {% else %}
+    oc get rosacontrolplane {{ cluster_name }} -n {{ cluster_namespace }} -o json
+    {% endif %}
+  register: rosacontrolplane_check
+  failed_when: rosacontrolplane_check.rc != 0
+  changed_when: false
+
+- name: Parse current RosaControlPlane
+  set_fact:
+    current_rosacontrolplane: "{{ rosacontrolplane_check.stdout | from_json }}"
+
+- name: Check if autoNode is already configured
+  set_fact:
+    autonode_configured: "{{ current_rosacontrolplane.spec.autoNode is defined }}"
+
+- name: Display current autoNode configuration
+  debug:
+    msg: |
+      Current autoNode configuration:
+      {{ current_rosacontrolplane.spec.autoNode | default('Not configured') }}
+  when: autonode_configured
+
+- name: Create autoNode patch
+  set_fact:
+    autonode_patch:
+      spec:
+        autoNode:
+          mode: "{{ autonode_mode }}"
+          roleARN: "{{ autonode_role_arn }}"
+
+- name: Apply autoNode configuration to RosaControlPlane
+  shell: |
+    {% if rosa_kubectl_context != '' %}
+    kubectl patch rosacontrolplane {{ cluster_name }} -n {{ cluster_namespace }} --context {{ rosa_kubectl_context }} \
+      --type merge \
+      --patch '{{ autonode_patch | to_json }}'
+    {% else %}
+    oc patch rosacontrolplane {{ cluster_name }} -n {{ cluster_namespace }} \
+      --type merge \
+      --patch '{{ autonode_patch | to_json }}'
+    {% endif %}
+  register: patch_result
+  changed_when: patch_result.rc == 0
+
+- name: Wait for RosaControlPlane to reconcile
+  shell: |
+    {% if rosa_kubectl_context != '' %}
+    kubectl get rosacontrolplane {{ cluster_name }} -n {{ cluster_namespace }} --context {{ rosa_kubectl_context }} -o json
+    {% else %}
+    oc get rosacontrolplane {{ cluster_name }} -n {{ cluster_namespace }} -o json
+    {% endif %}
+  register: rosacontrolplane_status
+  until: (rosacontrolplane_status.stdout | from_json).status.ready == true
+  retries: 30
+  delay: 10
+  changed_when: false
+  failed_when: false
+
+- name: Verify autoNode configuration
+  shell: |
+    {% if rosa_kubectl_context != '' %}
+    kubectl get rosacontrolplane {{ cluster_name }} -n {{ cluster_namespace }} --context {{ rosa_kubectl_context }} -o yaml | grep -A 5 autoNode
+    {% else %}
+    oc get rosacontrolplane {{ cluster_name }} -n {{ cluster_namespace }} -o yaml | grep -A 5 autoNode
+    {% endif %}
+  register: autonode_verification
+  changed_when: false
+
+- name: Display updated RosaControlPlane autoNode section
+  debug:
+    msg: |
+      ========================================
+      RosaControlPlane AutoNode Configuration
+      ========================================
+      {{ autonode_verification.stdout }}
+
+- name: Validate autoNode is enabled
+  assert:
+    that:
+      - "'mode: {{ autonode_mode }}' in autonode_verification.stdout"
+      - "autonode_role_arn in autonode_verification.stdout"
+    fail_msg: "AutoNode configuration not properly applied"
+    success_msg: " AutoNode configuration successfully applied to RosaControlPlane"

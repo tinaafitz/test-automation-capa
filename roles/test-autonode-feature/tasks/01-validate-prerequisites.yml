@@ -1,0 +1,120 @@
+---
+# Task 01: Validate Prerequisites for AutoNode Testing
+# This task ensures all required tools, credentials, and cluster prerequisites are met
+
+- name: Display validation start message
+  debug:
+    msg: |
+      ========================================
+      AutoNode Prerequisites Validation
+      ========================================
+      Cluster: {{ cluster_name }}
+      Namespace: {{ cluster_namespace }}
+      AWS Region: {{ aws_region }}
+
+- name: Check if ROSA HCP cluster exists
+  shell: |
+    rosa describe cluster --cluster {{ cluster_name }} --output json
+  register: cluster_info_raw
+  failed_when: cluster_info_raw.rc != 0
+  changed_when: false
+
+- name: Parse cluster information
+  set_fact:
+    cluster_info: "{{ cluster_info_raw.stdout | from_json }}"
+
+- name: Validate cluster state
+  assert:
+    that:
+      - cluster_info.state == "ready"
+    fail_msg: "Cluster {{ cluster_name }} is not in 'ready' state. Current state: {{ cluster_info.state }}"
+    success_msg: " Cluster {{ cluster_name }} is ready"
+
+- name: Validate cluster type is HCP
+  assert:
+    that:
+      - cluster_info.hypershift.enabled == true
+    fail_msg: "Cluster {{ cluster_name }} is not a HCP cluster"
+    success_msg: " Cluster is HCP type"
+
+- name: Check AWS CLI availability
+  shell: which aws
+  register: aws_cli_check
+  failed_when: aws_cli_check.rc != 0
+  changed_when: false
+
+- name: Validate AWS credentials
+  shell: |
+    aws sts get-caller-identity
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: aws_identity
+  failed_when: aws_identity.rc != 0
+  changed_when: false
+
+- name: Set AWS account ID from identity
+  set_fact:
+    aws_account_id: "{{ (aws_identity.stdout | from_json).Account }}"
+
+- name: Display AWS account information
+  debug:
+    msg: |
+      AWS Account: {{ aws_account_id }}
+      User ARN: {{ (aws_identity.stdout | from_json).Arn }}
+
+- name: Check ROSA CLI availability
+  shell: which rosa
+  register: rosa_cli_check
+  failed_when: rosa_cli_check.rc != 0
+  changed_when: false
+
+- name: Verify ROSA authentication
+  shell: rosa whoami
+  register: rosa_whoami
+  failed_when: rosa_whoami.rc != 0
+  changed_when: false
+
+- name: Check kubectl CLI availability
+  shell: which kubectl
+  register: kubectl_check
+  failed_when: kubectl_check.rc != 0
+  changed_when: false
+
+- name: Check oc CLI availability
+  shell: which oc
+  register: oc_check
+  failed_when: oc_check.rc != 0
+  changed_when: false
+
+- name: Check jq availability
+  shell: which jq
+  register: jq_check
+  failed_when: jq_check.rc != 0
+  changed_when: false
+
+- name: Validate required permissions for IAM operations
+  shell: |
+    aws iam get-user
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: iam_check
+  failed_when: false
+  changed_when: false
+
+- name: Display prerequisites validation summary
+  debug:
+    msg: |
+      ========================================
+      Prerequisites Validation Summary
+      ========================================
+       Cluster {{ cluster_name }} is ready
+       Cluster is HCP type
+       AWS CLI available
+       AWS credentials valid
+       ROSA CLI available and authenticated
+       kubectl CLI available
+       oc CLI available
+       jq utility available
+      {% if iam_check.rc == 0 %}{% else %}{% endif %} IAM permissions available
+
+      Ready to proceed with AutoNode setup!

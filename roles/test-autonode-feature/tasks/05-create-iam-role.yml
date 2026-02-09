@@ -1,0 +1,102 @@
+---
+# Task 05: Create IAM Role for AutoNode
+# Creates IAM role with trust policy and attaches AutoNode policy
+
+- name: Display IAM role creation start
+  debug:
+    msg: |
+      ========================================
+      Creating AutoNode IAM Role
+      ========================================
+      Role Name: {{ autonode_role_name }}
+      Policy ARN: {{ autonode_policy_arn }}
+
+- name: Check if AutoNode IAM role already exists
+  shell: |
+    aws iam get-role --role-name {{ autonode_role_name }} --query 'Role.Arn' --output text
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: existing_role_check
+  changed_when: false
+  failed_when: false
+
+- name: Create AutoNode IAM role
+  shell: |
+    aws iam create-role \
+      --role-name {{ autonode_role_name }} \
+      --assume-role-policy-document file://{{ trust_policy_file }} \
+      --description "AutoNode (Karpenter) role for ROSA HCP cluster {{ cluster_name }}" \
+      --query 'Role.Arn' \
+      --output text
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: role_creation_result
+  when: existing_role_check.rc != 0
+  changed_when: role_creation_result.rc == 0
+
+- name: Set role ARN fact (newly created)
+  set_fact:
+    autonode_role_arn: "{{ role_creation_result.stdout }}"
+  when: existing_role_check.rc != 0
+
+- name: Set role ARN fact (existing)
+  set_fact:
+    autonode_role_arn: "{{ existing_role_check.stdout }}"
+  when: existing_role_check.rc == 0
+
+- name: Update role trust policy (if role already exists)
+  shell: |
+    aws iam update-assume-role-policy \
+      --role-name {{ autonode_role_name }} \
+      --policy-document file://{{ trust_policy_file }}
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  when: existing_role_check.rc == 0
+  changed_when: true
+
+- name: Check if policy is already attached to role
+  shell: |
+    aws iam list-attached-role-policies \
+      --role-name {{ autonode_role_name }} \
+      --query 'AttachedPolicies[?PolicyArn==`{{ autonode_policy_arn }}`].PolicyArn' \
+      --output text
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: policy_attachment_check
+  changed_when: false
+
+- name: Attach AutoNode policy to role
+  shell: |
+    aws iam attach-role-policy \
+      --role-name {{ autonode_role_name }} \
+      --policy-arn {{ autonode_policy_arn }}
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  when: policy_attachment_check.stdout == ""
+  changed_when: true
+
+- name: Verify role and policy attachment
+  shell: |
+    aws iam get-role --role-name {{ autonode_role_name }}
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: role_verification
+  failed_when: role_verification.rc != 0
+  changed_when: false
+
+- name: Display role information
+  debug:
+    msg: |
+      ========================================
+      AutoNode IAM Role
+      ========================================
+      {{ ' Created' if existing_role_check.rc != 0 else ' Already exists (updated)' }}
+      Role Name: {{ autonode_role_name }}
+      Role ARN: {{ autonode_role_arn }}
+      Policy Attached: {{ autonode_policy_arn }}
+      OIDC Provider: {{ oidc_provider_url }}
+
+- name: Clean up temporary trust policy file
+  file:
+    path: "{{ trust_policy_file }}"
+    state: absent

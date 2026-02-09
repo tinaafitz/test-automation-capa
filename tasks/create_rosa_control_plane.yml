@@ -1,0 +1,17 @@
+- set_fact:
+    oc_yaml_filename: "capi-demo.yaml"
+    fq_oc_yaml_filename: "{{ lookup('env', 'PWD') }}/capi-demo.yml"
+
+- name: Printing the ROSA hcp yaml filename.
+  debug:
+    msg: "fq_oc_yaml_filename: {{ fq_oc_yaml_filename }}"
+
+- name: OC apply file
+  shell: |
+    oc apply -f {{ fq_oc_yaml_filename }}
+  register: results
+
+- name: Print the results
+  debug:
+    msg: "results: {{ results.stdout }}"
+

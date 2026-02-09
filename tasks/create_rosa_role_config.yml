@@ -1,0 +1,178 @@
+---
+# Create ROSARoleConfig for ACM-21162
+# Automates AWS IAM role creation for ROSA HCP clusters
+# Eliminates manual role setup requirements
+
+- name: Set ROSARoleConfig creation variables
+  set_fact:
+    rosa_role_config_name: "{{ cluster_name }}-roles"
+    template_name: "rosa-role-config"
+    template_category: "features"
+    template_extension: ".yaml.j2"
+    template_debug: true
+
+- name: Debug openshift_version before template
+  debug:
+    msg: "openshift_version = {{ openshift_version }}"
+
+- name: Validate required variables for ROSARoleConfig
+  fail:
+    msg: "Required variable {{ item }} is not defined"
+  when: vars[item] is not defined or vars[item] == ""
+  loop:
+    - cluster_name
+    - aws_account_id
+    - aws_region
+    - capi_namespace
+
+- name: Resolve ROSARoleConfig template
+  include_tasks: tasks/template_resolver.yml
+
+- name: Create output directory for ROSARoleConfig
+  file:
+    path: "{{ output_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Generate ROSARoleConfig from template
+  template:
+    src: "{{ resolved_template_path }}"
+    dest: "{{ output_dir }}/{{ rosa_role_config_name }}.yaml"
+    mode: '0644'
+  register: rosa_role_config_template_result
+
+- name: Display ROSARoleConfig generation info
+  debug:
+    msg: |
+      ROSARoleConfig generated:
+      - Name: {{ rosa_role_config_name }}
+      - Template Source: {{ template_source }}
+      - Template Path: {{ resolved_template_path }}
+      - Output File: {{ output_dir }}/{{ rosa_role_config_name }}.yaml
+      - AWS Account ID: {{ aws_account_id }}
+      - AWS Region: {{ aws_region }}
+      - Namespace: {{ capi_namespace }}
+
+- name: Check if ROSARoleConfig already exists
+  shell: |
+    oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} -o json 2>/dev/null || echo '{}'
+  register: existing_rosa_role_config_raw
+  failed_when: false
+  changed_when: false
+
+- name: Parse ROSARoleConfig JSON
+  set_fact:
+    existing_rosa_role_config_json: "{{ existing_rosa_role_config_raw.stdout | from_json }}"
+
+- name: Check if existing ROSARoleConfig is ready
+  set_fact:
+    rosa_role_config_exists: "{{ existing_rosa_role_config_json.metadata is defined }}"
+    rosa_role_config_is_ready: false
+
+- name: Check existing resource ready status
+  set_fact:
+    rosa_role_config_is_ready: true
+  when:
+    - existing_rosa_role_config_json.metadata is defined
+    - existing_rosa_role_config_json.status is defined
+    - existing_rosa_role_config_json.status.conditions is defined
+    - existing_rosa_role_config_json.status.conditions | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0
+
+- name: Display existing ROSARoleConfig status
+  debug:
+    msg: |
+      ✅ ROSARoleConfig {{ rosa_role_config_name }} already exists and is Ready
+      Skipping creation and using existing resource.
+  when:
+    - rosa_role_config_exists | default(false) | bool
+    - rosa_role_config_is_ready | default(false) | bool
+
+- name: Display ROSARoleConfig creation needed
+  debug:
+    msg: |
+      Creating new ROSARoleConfig {{ rosa_role_config_name }} in namespace {{ capi_namespace }}
+  when:
+    - not (rosa_role_config_exists | default(false) | bool and rosa_role_config_is_ready | default(false) | bool)
+
+- name: Apply ROSARoleConfig to cluster
+  shell: oc apply -f {{ output_dir }}/{{ rosa_role_config_name }}.yaml -o json
+  register: rosa_role_config_apply_result_raw
+  when:
+    - not (rosa_role_config_exists | default(false) | bool and rosa_role_config_is_ready | default(false) | bool)
+
+- name: Parse apply result
+  set_fact:
+    rosa_role_config_apply_result:
+      result: "{{ rosa_role_config_apply_result_raw.stdout | from_json }}"
+      method: "applied"
+  when:
+    - rosa_role_config_apply_result_raw is defined
+    - rosa_role_config_apply_result_raw.stdout is defined
+
+- name: Display ROSARoleConfig apply result
+  debug:
+    msg: |
+      ROSARoleConfig application result:
+      - Status: {{ rosa_role_config_apply_result.result.status | default('Unknown') }}
+      - Method: {{ rosa_role_config_apply_result.method }}
+      - Name: {{ rosa_role_config_apply_result.result.metadata.name }}
+      - Namespace: {{ rosa_role_config_apply_result.result.metadata.namespace }}
+      - Creation Timestamp: {{ rosa_role_config_apply_result.result.metadata.creationTimestamp | default('N/A') }}
+  when:
+    - rosa_role_config_apply_result is defined
+    - rosa_role_config_apply_result.result is defined
+
+- name: Wait for ROSARoleConfig to be ready
+  shell: |
+    oc wait --for=condition=Ready \
+      rosaroleconfig/{{ rosa_role_config_name }} \
+      -n {{ capi_namespace }} \
+      --timeout=900s
+  when:
+    - not (rosa_role_config_exists | default(false) | bool and rosa_role_config_is_ready | default(false) | bool)
+
+- name: Get final ROSARoleConfig status
+  shell: oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} -o json
+  register: rosa_role_config_ready_result_raw
+  when:
+    - not (rosa_role_config_exists | default(false) | bool and rosa_role_config_is_ready | default(false) | bool)
+
+- name: Parse ready result
+  set_fact:
+    rosa_role_config_ready_result:
+      resources:
+        - "{{ rosa_role_config_ready_result_raw.stdout | from_json }}"
+  when:
+    - rosa_role_config_ready_result_raw is defined
+    - rosa_role_config_ready_result_raw.stdout is defined
+
+- name: Use existing ready ROSARoleConfig
+  set_fact:
+    rosa_role_config_ready_result:
+      resources:
+        - "{{ existing_rosa_role_config_json }}"
+  when:
+    - rosa_role_config_exists | default(false) | bool
+    - rosa_role_config_is_ready | default(false) | bool
+
+- name: Set ROSARoleConfig facts for subsequent tasks
+  set_fact:
+    rosa_role_config_created: true
+    rosa_role_config_resource: "{{ rosa_role_config_ready_result.resources[0] }}"
+    installer_role_arn: "{{ rosa_role_config_ready_result.resources[0].status.installerRoleArn | default('') }}"
+    support_role_arn: "{{ rosa_role_config_ready_result.resources[0].status.supportRoleArn | default('') }}"
+    worker_role_arn: "{{ rosa_role_config_ready_result.resources[0].status.workerRoleArn | default('') }}"
+    oidc_provider_arn: "{{ rosa_role_config_ready_result.resources[0].status.oidcProviderArn | default('') }}"
+
+- name: Display created AWS resources
+  debug:
+    msg: |
+      ROSARoleConfig {{ rosa_role_config_name }} created successfully!
+
+      AWS Resources Created:
+      - Installer Role ARN: {{ installer_role_arn }}
+      - Support Role ARN: {{ support_role_arn }}
+      - Worker Role ARN: {{ worker_role_arn }}
+      - OIDC Provider ARN: {{ oidc_provider_arn }}
+
+      Status: {{ rosa_role_config_resource.status.phase | default('Unknown') }}

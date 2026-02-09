@@ -1,0 +1,49 @@
+---
+apiVersion: karpenter.k8s.aws/v1beta1
+kind: EC2NodeClass
+metadata:
+  name: {{ nodeclass_name }}
+spec:
+  amiFamily: AL2
+  role: {{ autonode_iam_role_name | default(autonode_role_name) }}
+
+  # Security groups and subnets are discovered via tags
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: {{ cluster_id }}
+
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: {{ cluster_id }}
+
+  # User data for node initialization
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh {{ cluster_name }}
+
+  # Block device mappings
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: {{ autonode_volume_size | default('100Gi') }}
+        volumeType: {{ autonode_volume_type | default('gp3') }}
+        deleteOnTermination: true
+        encrypted: true
+
+  # Metadata options
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 2
+    httpTokens: required
+
+  # Tags for EC2 instances
+  tags:
+    Name: {{ cluster_name }}-karpenter-node
+    kubernetes.io/cluster/{{ cluster_name }}: owned
+    karpenter.sh/nodepool: {{ nodepool_name }}
+    {% if autonode_additional_tags is defined %}
+    {% for key, value in autonode_additional_tags.items() %}
+    {{ key }}: {{ value }}
+    {% endfor %}
+    {% endif %}

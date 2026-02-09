@@ -1,0 +1,43 @@
+# Credentials and secrets
+vars/user_vars.yml
+*.pem
+*.key
+*.crt
+kubeconfig
+
+# Test results
+test-results/
+results/
+*.xml
+*.json
+
+# Generated files
+generated-yamls/
+*.backup
+*.swp
+*.old
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# Ansible
+*.retry
+.ansible/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

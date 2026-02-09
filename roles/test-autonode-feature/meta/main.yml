@@ -1,0 +1,44 @@
+---
+# meta file for test-autonode-feature
+# Role metadata and dependencies
+
+galaxy_info:
+  role_name: test_autonode_feature
+  author: CAPA Team
+  description: Ansible role to test AutoNode (Karpenter) feature on ROSA HCP clusters
+  company: Red Hat
+
+  # License
+  license: Apache-2.0
+
+  # Minimum Ansible version required
+  min_ansible_version: "2.12"
+
+  # Supported platforms
+  platforms:
+    - name: GenericLinux
+      versions:
+        - all
+    - name: MacOSX
+      versions:
+        - all
+
+  # Categories
+  galaxy_tags:
+    - cloud
+    - aws
+    - rosa
+    - openshift
+    - kubernetes
+    - karpenter
+    - autoscaling
+    - cluster
+    - testing
+    - capi
+    - capa
+
+# Role dependencies
+dependencies: []
+
+# Allow duplicates (in case role is included multiple times)
+allow_duplicates: false

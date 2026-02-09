@@ -1,0 +1,75 @@
+---
+# Task 10: Create NodePool
+# Creates Karpenter NodePool with instance and capacity configurations
+
+- name: Display NodePool creation start
+  debug:
+    msg: |
+      ========================================
+      Creating NodePool
+      ========================================
+      Name: {{ nodepool_name }}
+      Instance Types: {{ autonode_instance_types | join(', ') }}
+      Capacity Types: {{ autonode_capacity_types | join(', ') }}
+
+- name: Set NodePool manifest path
+  set_fact:
+    nodepool_manifest: "/tmp/{{ nodepool_name }}-nodepool.yaml"
+
+- name: Generate NodePool manifest from template
+  template:
+    src: nodepool.yaml.j2
+    dest: "{{ nodepool_manifest }}"
+    mode: '0644'
+
+- name: Check if NodePool already exists
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get nodepool {{ nodepool_name }}
+  register: nodepool_check
+  failed_when: false
+  changed_when: false
+
+- name: Apply NodePool manifest
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} apply -f {{ nodepool_manifest }}
+  register: nodepool_apply
+  changed_when: "'created' in nodepool_apply.stdout or 'configured' in nodepool_apply.stdout"
+
+- name: Wait for NodePool to be ready
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get nodepool {{ nodepool_name }} -o json
+  register: nodepool_status
+  until: nodepool_status.rc == 0
+  retries: 10
+  delay: 3
+  changed_when: false
+
+- name: Get NodePool details
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get nodepool {{ nodepool_name }} -o yaml
+  register: nodepool_details
+  changed_when: false
+
+- name: Display NodePool information
+  debug:
+    msg: |
+      ========================================
+      NodePool Created
+      ========================================
+      Name: {{ nodepool_name }}
+      Instance Types: {{ autonode_instance_types | join(', ') }}
+      Capacity Types: {{ autonode_capacity_types | join(', ') }}
+      EC2NodeClass: {{ nodeclass_name }}
+
+- name: Verify NodePool configuration
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} describe nodepool {{ nodepool_name }}
+  register: nodepool_describe
+  changed_when: false
+
+- name: Save NodePool manifest
+  copy:
+    src: "{{ nodepool_manifest }}"
+    dest: "{{ autonode_results_dir }}/{{ nodepool_name }}-nodepool-{{ ansible_date_time.epoch }}.yaml"
+    mode: '0644'
+  when: autonode_results_dir is defined

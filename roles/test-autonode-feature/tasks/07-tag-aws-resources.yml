@@ -1,0 +1,136 @@
+---
+# Task 07: Tag AWS Resources for Karpenter Discovery
+# Tags security groups and subnets with karpenter.sh/discovery
+
+- name: Display AWS resource tagging start
+  debug:
+    msg: |
+      ========================================
+      Tagging AWS Resources for Karpenter
+      ========================================
+      Cluster ID: {{ cluster_id }}
+      AWS Region: {{ aws_region }}
+
+- name: Get security group ID
+  shell: |
+    aws ec2 describe-security-groups \
+      --filters "Name=tag:Name,Values={{ cluster_id }}-default-sg" \
+      --query 'SecurityGroups[0].GroupId' \
+      --output text \
+      --region {{ aws_region }}
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: security_group_result
+  failed_when: false
+  changed_when: false
+
+- name: Check if security group was found
+  set_fact:
+    security_group_found: "{{ security_group_result.rc == 0 and security_group_result.stdout != 'None' and security_group_result.stdout != '' }}"
+
+- name: Set security group ID fact
+  set_fact:
+    security_group_id: "{{ security_group_result.stdout }}"
+  when: security_group_found
+
+- name: Get private subnet IDs
+  shell: |
+    aws ec2 describe-subnets \
+      --filters "Name=tag:kubernetes.io/role/internal-elb,Values=*" \
+                "Name=tag:kubernetes.io/cluster/{{ cluster_id }},Values=shared" \
+      --query 'Subnets[*].SubnetId' \
+      --output text \
+      --region {{ aws_region }}
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: subnet_result
+  failed_when: false
+  changed_when: false
+
+- name: Check if subnets were found
+  set_fact:
+    subnets_found: "{{ subnet_result.rc == 0 and subnet_result.stdout != '' }}"
+
+- name: Set subnet IDs fact
+  set_fact:
+    private_subnet_ids: "{{ subnet_result.stdout.split() if subnets_found else [] }}"
+
+- name: Display discovered resources
+  debug:
+    msg: |
+      ========================================
+      AWS Resources for Karpenter
+      ========================================
+      Security Group Found: {{ security_group_found }}
+      {% if security_group_found %}Security Group ID: {{ security_group_id }}{% endif %}
+      Subnets Found: {{ subnets_found }}
+      {% if subnets_found %}Private Subnets: {{ private_subnet_ids | join(', ') }}{% endif %}
+
+      {% if not security_group_found or not subnets_found %}
+       Note: For ROSA HCP clusters, AWS resources may be managed by Red Hat.
+       Karpenter may discover resources automatically via OIDC/IAM role.
+      {% endif %}
+
+- name: Combine resource IDs for tagging
+  set_fact:
+    resources_to_tag: "{{ ([security_group_id] if security_group_found else []) + private_subnet_ids }}"
+
+- name: Check if any resources need tagging
+  set_fact:
+    has_resources_to_tag: "{{ resources_to_tag | length > 0 }}"
+
+- name: Check existing karpenter discovery tags
+  shell: |
+    aws ec2 describe-tags \
+      --filters "Name=resource-id,Values={{ item }}" \
+                "Name=key,Values=karpenter.sh/discovery" \
+      --query 'Tags[0].Value' \
+      --output text \
+      --region {{ aws_region }}
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: existing_tags
+  loop: "{{ resources_to_tag }}"
+  changed_when: false
+  failed_when: false
+  when: has_resources_to_tag
+
+- name: Tag resources with karpenter.sh/discovery
+  shell: |
+    aws ec2 create-tags \
+      --resources {{ resources_to_tag | join(' ') }} \
+      --tags Key=karpenter.sh/discovery,Value={{ cluster_id }} \
+      --region {{ aws_region }}
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: tagging_result
+  changed_when: tagging_result.rc == 0
+  when: has_resources_to_tag
+
+- name: Verify tags were applied
+  shell: |
+    aws ec2 describe-tags \
+      --filters "Name=resource-id,Values={{ resources_to_tag | join(',') }}" \
+                "Name=key,Values=karpenter.sh/discovery" \
+      --region {{ aws_region }}
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+  register: tag_verification
+  changed_when: false
+  when: has_resources_to_tag
+
+- name: Display tagging results
+  debug:
+    msg: |
+      ========================================
+      Karpenter Discovery Tags
+      ========================================
+      {% if has_resources_to_tag %}
+       Security Group {{ security_group_id if security_group_found else 'N/A' }} tagged
+       {{ private_subnet_ids | length }} subnet(s) tagged
+       Discovery Tag: karpenter.sh/discovery={{ cluster_id }}
+      {% else %}
+       No AWS resources found to tag
+       For ROSA HCP clusters, Karpenter may auto-discover resources via IAM role
+       Proceeding with AutoNode configuration...
+      {% endif %}

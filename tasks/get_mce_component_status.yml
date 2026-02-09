@@ -1,0 +1,13 @@
+- name: Get the {{ component }} status in MCE
+  shell: |
+    oc get mce --output json | jq -r '.items[].spec.overrides.components[] | select(.name == "{{ component }}")' | jq -r '.enabled'
+  register: "mce_component_status"
+
+- name: print mce_component_status
+  debug:
+    msg: "{{ component }} enabled={{ mce_component_status.stdout }}"
+
+- name: Export component status for parent playbook
+  set_fact:
+    component_enabled: "{{ mce_component_status }}"
+

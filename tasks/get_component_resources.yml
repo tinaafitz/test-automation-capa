@@ -1,0 +1,97 @@
+- set_fact:
+    components_with_svc: ['capi', 'capa']
+    component_with_mutatingwebhookconfiguration: ['capi', 'capa']
+    component_with_validatingwebhookconfiguration: ['capi', 'capa']
+
+- name: Get name of MCE
+  shell: oc get mce -n {{ mce_namespace }} -ojson | jq -r '.items[].metadata.name'
+  register: mce_name
+
+- name: Get {{ component_name }} deployment
+  shell: |
+    oc get deployment -n {{ target_namespace }} -ojson |\
+    jq -r '.items[].metadata | select(.labels["installer.namespace"]=="{{ target_namespace }}" or .labels["backplaneconfig.name"]=="{{ mce_name.stdout }}" or .labels["app"]=="{{ component_name }}") | .name' | grep {{ component_name }}
+  register: deploy_name
+  until: >
+    {% if enable | bool %}
+    deploy_name.stdout_lines | length > 0
+    {% else %}
+    deploy_name.stdout_lines | length == 0
+    {% endif %}
+  retries: 20
+  delay: 15
+  ignore_errors: true
+
+- name: Get {{ component_name }} service
+  shell: |
+    oc get service -n {{ target_namespace }} -ojson |\
+    jq -r '.items[].metadata | .name' | grep {{ component_name }}
+  register: svc_name
+  ignore_errors: true
+  when: "component_name in components_with_svc"
+
+- name: Get {{ component_name }} serviceaccount
+  shell: |
+    oc get serviceaccount -n {{ target_namespace }} -ojson |\
+    jq -r '.items[].metadata | select(.labels["installer.namespace"]=="{{ target_namespace }}" or .labels["backplaneconfig.name"]=="{{ mce_name.stdout }}") | .name' | grep -E '{{ component_name }}|{{ component }}'
+  register: sa_name
+  ignore_errors: true
+
+- name: Get {{ component_name }} clusterrole
+  shell: |
+    oc get clusterrole -n {{ target_namespace }} -ojson |\
+    jq -r '.items[].metadata | select(.labels["installer.namespace"]=="{{ target_namespace }}" or .labels["backplaneconfig.name"]=="{{ mce_name.stdout }}") | .name' | grep -E '{{ component_name }}|{{ component }}'
+  register: clusterrole_names
+  ignore_errors: true
+
+- name: Get {{ component_name }} clusterrolebinding
+  shell: |
+    oc get clusterrolebinding -n {{ target_namespace }} -ojson |\
+    jq -r '.items[].metadata | select(.labels["installer.namespace"]=="{{ target_namespace }}" or .labels["backplaneconfig.name"]=="{{ mce_name.stdout }}") | .name' | grep -E '{{ component_name }}|{{ component }}'
+  register: clusterrolebinding_names
+  ignore_errors: true
+
+- name: Get {{ component_name }} role
+  shell: |
+    oc get role -n {{ target_namespace }} -ojson |\
+    jq -r '.items[].metadata.name' | grep -E '{{ component_name }}|{{ component }}'
+  register: role_names
+  ignore_errors: true
+
+- name: Get {{ component_name }} rolebinding
+  shell: |
+    oc get rolebinding -n {{ target_namespace }} -ojson |\
+    jq -r '.items[].metadata | select(.labels["installer.namespace"]=="{{ target_namespace }}" or .labels["backplaneconfig.name"]=="{{ mce_name.stdout }}") | .name' | grep -E '{{ component_name }}|{{ component }}'
+  register: rolebinding_names
+  ignore_errors: true
+
+- name: Get {{ component_name }} mutatingwebhookconfiguration
+  shell: |
+    oc get mutatingwebhookconfiguration -n {{ target_namespace }} -ojson |\
+    jq -r '.items[].metadata | select(.labels["installer.namespace"]=="{{ target_namespace }}" or .labels["backplaneconfig.name"]=="{{ mce_name.stdout }}") | .name' | grep -E '{{ component_name }}|{{ component }}'
+  register: mutatingwebhookconfiguration_names
+  ignore_errors: true
+  when: "component_name in component_with_mutatingwebhookconfiguration"
+
+- name: Get {{ component_name }} validatingwebhookconfiguration
+  shell: |
+    oc get validatingwebhookconfiguration -n {{ target_namespace }} -ojson |\
+    jq -r '.items[].metadata | select(.labels["installer.namespace"]=="{{ target_namespace }}" or .labels["backplaneconfig.name"]=="{{ mce_name.stdout }}") | .name' | grep -E '{{ component_name }}|{{ component }}'
+  register: validatingwebhookconfiguration_names
+  ignore_errors: true
+  when: "component_name in component_with_validatingwebhookconfiguration"
+
+- name: Get {{ component_name }} secret
+  shell: |
+    oc get secret -n {{ target_namespace }} -ojson |\
+    jq -r '.items[].metadata.name' | grep -E '{{ component_name }}|{{ component }}'
+  register: secret_names
+  ignore_errors: true
+
+- name: Get {{ component_name }} namespace
+  shell: |
+    oc get namespace -ojson |\
+    jq -r '.items[].metadata | select(.labels["backplaneconfig.name"]=="{{ mce_name.stdout }}") | .name' | grep -E '{{ component_name }}|{{ component }}'
+  register: namespace_names
+  ignore_errors: true
+

@@ -1,0 +1,24 @@
+---
+# ================================================================
+# User Variables Template
+# ================================================================
+# Copy this file to user_vars.yml and fill in your credentials
+# IMPORTANT: Never commit user_vars.yml to git!
+# ================================================================
+
+# OpenShift Hub Cluster Connection
+OCP_HUB_API_URL: ""                    # e.g., https://api.example.com:6443
+OCP_HUB_CLUSTER_USER: ""               # e.g., kubeadmin
+OCP_HUB_CLUSTER_PASSWORD: ""           # OpenShift login password
+
+# AWS Credentials
+AWS_REGION: "us-west-2"                # Default AWS region
+AWS_ACCESS_KEY_ID: ""                  # AWS access key
+AWS_SECRET_ACCESS_KEY: ""              # AWS secret key
+
+# OpenShift Cluster Manager (OCM) Credentials
+OCM_CLIENT_ID: ""                      # OCM client ID
+OCM_CLIENT_SECRET: ""                  # OCM client secret
+
+# MCE Configuration
+MCE_NAMESPACE: "multicluster-engine"   # MCE namespace (default)

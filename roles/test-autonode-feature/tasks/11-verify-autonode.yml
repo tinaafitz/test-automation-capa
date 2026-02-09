@@ -1,0 +1,125 @@
+---
+# Task 11: Verify AutoNode Components
+# Verifies all AutoNode components are properly installed and functioning
+
+- name: Display AutoNode verification start
+  debug:
+    msg: |
+      ========================================
+      Verifying AutoNode Installation
+      ========================================
+      Cluster: {{ cluster_name }}
+
+- name: Check Karpenter pods in kube-system namespace
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get pods -n kube-system | grep karpenter
+  register: karpenter_pods
+  failed_when: karpenter_pods.rc != 0
+  changed_when: false
+
+- name: Verify Karpenter pods are running
+  assert:
+    that:
+      - "'Running' in karpenter_pods.stdout"
+    fail_msg: "Karpenter pods are not in Running state"
+    success_msg: " Karpenter pods are running"
+
+- name: Get Karpenter pod details
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get pods -n kube-system -l app.kubernetes.io/name=karpenter -o yaml
+  register: karpenter_pod_details
+  changed_when: false
+
+- name: Check Karpenter logs for errors
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} logs -n kube-system -l app.kubernetes.io/name=karpenter --tail=50
+  register: karpenter_logs
+  changed_when: false
+  failed_when: false
+
+- name: Verify NodePools exist
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get nodepools
+  register: nodepools_list
+  failed_when: nodepools_list.rc != 0
+  changed_when: false
+
+- name: Verify EC2NodeClass exists
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get ec2nodeclass
+  register: ec2nodeclass_list
+  failed_when: ec2nodeclass_list.rc != 0
+  changed_when: false
+
+- name: Check RosaControlPlane autoNode configuration
+  shell: |
+    oc get rosacontrolplane {{ cluster_name }} -n {{ cluster_namespace }} -o yaml | grep -A 5 autoNode
+  register: rosacontrolplane_autonode
+  changed_when: false
+
+- name: Verify autoNode mode is enabled
+  assert:
+    that:
+      - "'mode: " + autonode_mode + "' in rosacontrolplane_autonode.stdout"
+    fail_msg: "AutoNode mode is not enabled in RosaControlPlane"
+    success_msg: " AutoNode mode is enabled"
+
+- name: Get cluster events related to AutoNode
+  shell: |
+    kubectl --kubeconfig={{ autonode_kubeconfig_path }} get events --all-namespaces --sort-by='.lastTimestamp' | grep -i "karpenter\|nodepool\|ec2nodeclass" | tail -20
+  register: autonode_events
+  changed_when: false
+  failed_when: false
+
+- name: Check for any error events
+  set_fact:
+    has_errors: "{{ 'Error' in autonode_events.stdout or 'Failed' in autonode_events.stdout }}"
+
+- name: Display verification summary
+  debug:
+    msg: |
+      ========================================
+      AutoNode Verification Summary
+      ========================================
+       Karpenter Pods: Running
+       NodePools: {{ nodepools_list.stdout_lines | length }} found
+       EC2NodeClass: {{ ec2nodeclass_list.stdout_lines | length }} found
+       RosaControlPlane: AutoNode mode {{ autonode_mode }}
+      {{ '  Warning: Errors found in events' if has_errors else ' No errors in recent events' }}
+
+      Karpenter Pods:
+      {{ karpenter_pods.stdout }}
+
+      NodePools:
+      {{ nodepools_list.stdout }}
+
+      EC2NodeClass:
+      {{ ec2nodeclass_list.stdout }}
+
+- name: Save verification results
+  copy:
+    content: |
+      # AutoNode Verification Results
+      # Generated: {{ ansible_date_time.iso8601 }}
+      # Cluster: {{ cluster_name }}
+
+      ## Karpenter Pods
+      {{ karpenter_pods.stdout }}
+
+      ## NodePools
+      {{ nodepools_list.stdout }}
+
+      ## EC2NodeClass
+      {{ ec2nodeclass_list.stdout }}
+
+      ## RosaControlPlane AutoNode Configuration
+      {{ rosacontrolplane_autonode.stdout }}
+
+      ## Recent Events
+      {{ autonode_events.stdout }}
+
+      ## Karpenter Logs (Last 50 lines)
+      {{ karpenter_logs.stdout }}
+    dest: "{{ autonode_results_dir }}/verification-{{ cluster_name }}-{{ ansible_date_time.epoch }}.txt"
+    mode: '0644'
+  when: autonode_results_dir is defined
