@@ -15,7 +15,7 @@
   hosts: localhost
   gather_facts: yes
   vars_files:
-    - vars/user_vars.yml
+    - ../vars/user_vars.yml
 
   vars:
     # Cluster configuration
@@ -66,7 +66,7 @@
     # Step 1: Setup AWS Prerequisites
     # ======================================
     - name: Setup AWS prerequisites for log forwarding
-      include_tasks: tasks/setup-rosa-log-forwarding.yml
+      include_tasks: ../tasks/setup-rosa-log-forwarding.yml
 
     - name: Display setup completion
       debug:
@@ -263,7 +263,7 @@
     # Cleanup Tags
     # ======================================
     - name: Cleanup log forwarding resources
-      include_tasks: tasks/cleanup-rosa-log-forwarding.yml
+      include_tasks: ../tasks/cleanup-rosa-log-forwarding.yml
       tags:
         - never
         - cleanup

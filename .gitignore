@@ -9,7 +9,8 @@ kubeconfig
 test-results/
 results/
 *.xml
-*.json
+test-results/**/*.json
+results/**/*.json
 
 # Generated files
 generated-yamls/
