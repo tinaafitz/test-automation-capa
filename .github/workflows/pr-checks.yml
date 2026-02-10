@@ -8,6 +8,10 @@ jobs:
   pr-validation:
     name: PR Validation
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -115,29 +119,35 @@ jobs:
               comment += '\nPlease ensure no credentials are committed.\n\n';
             }
 
-            // Post comment
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: pr.number
-            });
-
-            const botComment = comments.data.find(c =>
-              c.user.type === 'Bot' && c.body.includes('Changed Files Analysis')
-            );
-
-            if (botComment) {
-              await github.rest.issues.updateComment({
+            // Post comment (or log if no permissions)
+            try {
+              const comments = await github.rest.issues.listComments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: comment
+                issue_number: pr.number
               });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                body: comment
-              });
+
+              const botComment = comments.data.find(c =>
+                c.user.type === 'Bot' && c.body.includes('Changed Files Analysis')
+              );
+
+              if (botComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: comment
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: comment
+                });
+              }
+              console.log('Posted changed files analysis to PR');
+            } catch (error) {
+              console.log('Unable to post comment (permissions issue), logging analysis instead:');
+              console.log(comment);
             }
