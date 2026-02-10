@@ -1,0 +1,75 @@
+---
+# Pre-commit hooks for CAPA Test Automation
+# Install: pip install pre-commit
+# Setup: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '^.*\.(md|rst)$'
+      - id: end-of-file-fixer
+        exclude: '^.*\.(json)$'
+      - id: check-yaml
+        args: ['--allow-multiple-documents']
+        exclude: '^templates/.*\.j2$'
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.33.0
+    hooks:
+      - id: yamllint
+        args: ['-d', '{extends: default, rules: {line-length: {max: 200}, comments: {min-spaces-from-content: 1}}}']
+        files: \.(yaml|yml)$
+        exclude: '^templates/.*\.j2$'
+
+  # Python formatting
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        language_version: python3.11
+        files: \.py$
+
+  # Python linting
+  - repo: https://github.com/pycqa/pylint
+    rev: v3.0.3
+    hooks:
+      - id: pylint
+        args: ['--disable=C,R,W0613,W0212']
+        files: \.py$
+
+  # Ansible linting
+  - repo: https://github.com/ansible/ansible-lint
+    rev: v6.22.1
+    hooks:
+      - id: ansible-lint
+        args: ['--exclude', 'templates/', '--exclude', 'vars/']
+        files: \.(yaml|yml)$
+        exclude: '^(templates/|vars/|test-suites/)'
+
+  # Security - detect secrets
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: '^(\.secrets\.baseline|vars/user_vars\.yml)$'
+
+  # JSON formatting
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        files: \.json$
+        args: ['--write', '--tab-width=2']
