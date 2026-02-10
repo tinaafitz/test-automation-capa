@@ -4,6 +4,8 @@
 // ============================================================================
 // CAPI/CAPA Test Pipeline - E2E ROSA HCP Testing
 // ============================================================================
+//
+// Test: Verifying branch protection and CI/CD pipeline integration
 // Pipeline Flow:
 //   1. Configure MCE Environment (suite 10) - Enable CAPI/CAPA
 //   2. Provision ROSA HCP Cluster (suite 20) - Only runs if configuration passes
