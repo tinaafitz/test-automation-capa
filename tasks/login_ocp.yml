@@ -39,10 +39,13 @@
      ocp_password == 'your-password' or
      ocp_password == '')
 
-- name: Attempt OCP login with {{ ocp_user }}
+- name: Attempt OCP login with {{ ocp_user }} (with retry for intermittent API errors)
   shell: |
     oc --insecure-skip-tls-verify login -u {{ ocp_user }} -p {{ ocp_password }} -s {{ api_url }}
   register: ocp_login_result
+  until: ocp_login_result.rc == 0
+  retries: 5
+  delay: 10
   failed_when: false
   changed_when: ocp_login_result.rc == 0
 
