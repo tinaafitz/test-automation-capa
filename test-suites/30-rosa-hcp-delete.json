@@ -78,8 +78,7 @@
     "monitoring": [
       "oc get rosacontrolplane,rosamachinepool,rosanetwork,rosaroleconfig -n ns-rosa-hcp",
       "oc describe rosacontrolplane <cluster-name> -n ns-rosa-hcp",
-      "oc get rosacontrolplane --all-namespaces -o wide",
-      "oc get managedclusters"
+      "oc get rosacontrolplane --all-namespaces -o wide"
     ],
     "troubleshooting": {
       "stuck_deletion": {

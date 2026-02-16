@@ -261,8 +261,8 @@ oc get rosacontrolplane -n ns-rosa-hcp -o jsonpath='{range .items[*]}{.metadata.
 # View MCE configuration
 oc get mce multiclusterengine -n multicluster-engine -o yaml
 
-# Check managed clusters
-oc get managedclusters
+# Check CAPA controller logs
+oc logs -n multicluster-engine deployment/capa-controller-manager
 ```
 
 ### View Test Results

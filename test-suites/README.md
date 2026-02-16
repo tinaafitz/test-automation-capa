@@ -207,9 +207,6 @@ oc get mce multiclusterengine -n multicluster-engine -o yaml
 
 # Check CAPA controller logs
 oc logs -n multicluster-engine deployment/capa-controller-manager
-
-# Check managed clusters
-oc get managedclusters
 ```
 
 ### View Test Results
