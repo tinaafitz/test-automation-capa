@@ -44,7 +44,7 @@ This repository contains comprehensive test automation for CAPI/CAPA environment
 - **OCM (OpenShift Cluster Manager)** credentials
 - **Ansible** 2.9+ installed
 - **Python** 3.8+ installed
-- **ROSA CLI** installed
+- **oc CLI** installed and configured
 
 ### Setup
 
@@ -246,17 +246,23 @@ Automatically creates AWS IAM resources:
 
 ### Check Cluster Resources
 ```bash
+# View all ROSA cluster resources
 oc get rosacontrolplane,rosamachinepool,rosanetwork,rosaroleconfig -n ns-rosa-hcp
-```
 
-### Check ROSA Clusters
-```bash
-rosa list clusters --region us-west-2
+# View all ROSA clusters across all namespaces
+oc get rosacontrolplane --all-namespaces -o wide
+
+# Get detailed cluster information
+oc get rosacontrolplane -n ns-rosa-hcp -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.ready}{"\t"}{.spec.region}{"\n"}{end}'
 ```
 
 ### Check MCE Components
 ```bash
+# View MCE configuration
 oc get mce multiclusterengine -n multicluster-engine -o yaml
+
+# Check managed clusters
+oc get managedclusters
 ```
 
 ### View Test Results
@@ -289,11 +295,14 @@ oc logs -n multicluster-engine deployment/capa-controller-manager
 
 #### 4. Deletion Timeout
 ```bash
-# Check CloudFormation stacks (for ROSANetwork)
-aws cloudformation list-stacks --region us-west-2
+# Check deletion status of network resources
+oc get rosanetwork -n ns-rosa-hcp -o wide
 
-# Check IAM roles (for ROSARoleConfig)
-aws iam list-roles | grep CLUSTER_PREFIX
+# Check deletion status of role resources
+oc get rosaroleconfig -n ns-rosa-hcp -o wide
+
+# View deletion events
+oc get events -n ns-rosa-hcp --sort-by='.lastTimestamp'
 ```
 
 ## Development
