@@ -4,7 +4,6 @@ import { CheckCircleIcon, Cog6ToothIcon, ClockIcon, ExclamationCircleIcon } from
 
 import JenkinsSidebar from '../components/sidebar/JenkinsSidebar';
 import RosaHcpClustersSection from '../components/sections/RosaHcpClustersSection';
-import CredentialsModal from '../components/modals/CredentialsModal';
 import MCEEnvironmentSelector from '../components/MCEEnvironmentSelector';
 import ActiveEnvironmentBanner from '../components/ActiveEnvironmentBanner';
 import { YamlEditorModal } from '../components/YamlEditorModal';
@@ -14,7 +13,6 @@ import TestSuiteSection from '../components/sections/TestSuiteSection';
 import HelmChartTestDashboard from '../components/sections/HelmChartTestDashboard';
 import ResourcesViewer from '../components/ResourcesViewer';
 import {
-  AppProvider,
   useMinikubeContext,
   useRecentOperationsContext,
   useApp,
@@ -1529,15 +1527,4 @@ const MinikubeDashboardContent = () => {
   );
 };
 
-/**
- * MinikubeDashboard - Wrapper component with AppProvider
- */
-const MinikubeDashboard = () => {
-  return (
-    <AppProvider>
-      <MinikubeDashboardContent />
-    </AppProvider>
-  );
-};
-
-export default MinikubeDashboard;
+export default MinikubeDashboardContent;
