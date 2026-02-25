@@ -25,6 +25,7 @@ import { useRecentOperationsContext, useApiStatusContext } from '../../store/App
  */
 const JenkinsSidebar = ({
   onComponentsClick,
+  onVerifyClick,
   onConfigureClick,
   onReconfigureClick,
   onProvisionClick,
@@ -90,6 +91,13 @@ const JenkinsSidebar = ({
       label: 'Credentials',
       icon: <span className="text-lg">🔑</span>,
       onClick: onCredentialsClick,
+      showInEnvironments: ['mce'] // Only show in MCE, not minikube
+    },
+    {
+      id: 'verify',
+      label: 'Verify',
+      icon: <CheckCircleIcon className="h-5 w-5" />,
+      onClick: onVerifyClick,
       showInEnvironments: ['mce'] // Only show in MCE, not minikube
     },
     {
@@ -239,8 +247,15 @@ const JenkinsSidebar = ({
       )}
 
       {/* Sidebar Footer */}
-      <div className="flex-shrink-0 border-t border-blue-200 bg-gradient-to-r from-blue-50 to-cyan-50 px-4 py-2 text-xs text-blue-700 font-medium">
-        <div>{environment === 'minikube' ? 'Minikube Environment' : 'MCE Environment'}</div>
+      <div className={`flex-shrink-0 border-t px-4 py-3 text-sm font-semibold ${
+        environment === 'minikube'
+          ? 'bg-gradient-to-r from-purple-600 to-violet-500 border-purple-400 text-white'
+          : 'bg-gradient-to-r from-blue-600 to-cyan-500 border-blue-400 text-white'
+      }`}>
+        <div className="flex items-center gap-2">
+          <span className="text-base">{environment === 'minikube' ? '🔮' : '🌐'}</span>
+          <span>{environment === 'minikube' ? 'Minikube Environment' : 'MCE Environment'}</span>
+        </div>
       </div>
     </div>
   );

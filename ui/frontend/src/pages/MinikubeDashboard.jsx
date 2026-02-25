@@ -488,7 +488,6 @@ const MinikubeDashboardContent = () => {
 
   // UI State
   const [activeSection, setActiveSection] = useState('environments');
-  const [showYamlEditorModal, setShowYamlEditorModal] = useState(false);
   const [yamlEditorData, setYamlEditorData] = useState(null);
   const [showReconfigureForm, setShowReconfigureForm] = useState(false);
   const [useCustomImage, setUseCustomImage] = useState(false);
@@ -500,6 +499,9 @@ const MinikubeDashboardContent = () => {
   const [minikubeInfo, setMinikubeInfo] = useState(null); // Active minikube cluster info
   const [isConfiguring, setIsConfiguring] = useState(false); // Track configuration state
   const [configurationResults, setConfigurationResults] = useState(null); // Configuration output results
+  const [provisionResults, setProvisionResults] = useState(null); // Provision output results
+  const [isProvisioning, setIsProvisioning] = useState(false); // Track provisioning state
+  const [bannerRefreshKey, setBannerRefreshKey] = useState(0); // Force banner refresh
 
   const {
     verifiedMinikubeClusterInfo,
@@ -648,15 +650,9 @@ const MinikubeDashboardContent = () => {
               const logsData = await logsResponse.json();
               const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
 
-              // Update configuration results every 5 seconds with current output
+              // Update Recent Operations every 5 seconds with current output
+              // Don't set configurationResults yet - wait for completion
               if (attempts % 5 === 0 && currentOutput) {
-                setConfigurationResults({
-                  success: jobData.status !== 'failed',
-                  timestamp: new Date().toISOString(),
-                  output: currentOutput,
-                });
-
-                // Also update Recent Operations
                 updateRecentOperationStatus(configureId, '⏳ Configuration running...', currentOutput);
               }
 
@@ -743,11 +739,82 @@ const MinikubeDashboardContent = () => {
     }
   };
 
-  // Handle provision submit
+  // Handle provision submit - Shows YAML preview first
   const handleProvisionSubmit = async (config) => {
+    try {
+      // Step 1: Generate YAML preview
+      console.log('📄 Generating YAML preview...');
+      const previewResponse = await fetch(buildApiUrl('/api/provisioning/generate-yaml'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config }),
+      });
+
+      const previewResult = await previewResponse.json();
+
+      if (!previewResult.success) {
+        console.error('Failed to generate YAML:', previewResult.error);
+        dispatch({
+          type: AppActionTypes.ADD_NOTIFICATION,
+          payload: {
+            id: Date.now(),
+            type: 'error',
+            title: 'Preview Failed',
+            message: previewResult.error || 'Failed to generate YAML preview',
+            duration: 7000,
+          },
+        });
+        return;
+      }
+
+      // Step 2: Show YAML preview inline (replaces form)
+      console.log('✅ YAML generated, showing preview inline');
+      setYamlEditorData({
+        yaml_content: previewResult.yaml,  // YamlEditorModal expects yaml_content
+        cluster_name: config.clusterName,
+        feature_type: 'rosa-hcp',
+        config: config,
+      });
+
+    } catch (error) {
+      console.error('Error generating preview:', error);
+      dispatch({
+        type: AppActionTypes.ADD_NOTIFICATION,
+        payload: {
+          id: Date.now(),
+          type: 'error',
+          title: 'Preview Error',
+          message: `Failed to generate preview: ${error.message}`,
+          duration: 7000,
+        },
+      });
+    }
+  };
+
+  // Handle actual provision after YAML preview is confirmed
+  const handleActualProvision = async (editedYaml) => {
+    const config = yamlEditorData?.config;
+    if (!config) {
+      console.error('Configuration data not found');
+      return;
+    }
+
     const provisionId = `provision-rosa-${Date.now()}`;
 
     try {
+      console.log('🚀 [Provision] Starting actual provisioning...');
+      setIsProvisioning(true);
+
+      // Immediately show "Starting..." state with provision results
+      setProvisionResults({
+        success: true,
+        timestamp: new Date().toISOString(),
+        output: `🚀 Starting provisioning for ${config.clusterName}...\n\nInitializing ROSA HCP cluster provisioning...\nCluster: ${config.clusterName}\nVersion: ${config.openShiftVersion}\nRegion: ${config.awsRegion}\n\nConnecting to backend...`,
+      });
+
+      // Clear YAML preview to show provision results
+      setYamlEditorData(null);
+
       addToRecent({
         id: provisionId,
         title: `🚀 Provision ROSA HCP: ${config.clusterName}`,
@@ -763,8 +830,8 @@ const MinikubeDashboardContent = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           playbook: 'playbooks/create_rosa_hcp_cluster.yml',
-          description: `Provision ROSA HCP: ${config.clusterName}`,
-          extra_vars: config,
+          description: `Provision ROSA HCP: ${yamlEditorData?.config?.clusterName || 'cluster'}`,
+          extra_vars: yamlEditorData?.config,
         }),
       });
 
@@ -801,6 +868,15 @@ const MinikubeDashboardContent = () => {
               const logsData = await logsResponse.json();
               const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
 
+              // Update provision results with live output every 5 seconds
+              if (attempts % 5 === 0 && currentOutput) {
+                setProvisionResults({
+                  success: jobData.status !== 'failed',
+                  timestamp: new Date().toISOString(),
+                  output: currentOutput,
+                });
+              }
+
               // Update Recent Operations every 10 seconds
               if (attempts % 10 === 0 && currentOutput) {
                 updateRecentOperationStatus(provisionId, '⏳ Provisioning running...', currentOutput);
@@ -808,12 +884,24 @@ const MinikubeDashboardContent = () => {
 
               if (jobData.status === 'completed') {
                 const output = currentOutput || 'Provisioning completed successfully';
+                setProvisionResults({
+                  success: true,
+                  timestamp: new Date().toISOString(),
+                  output: output,
+                });
                 updateRecentOperationStatus(provisionId, '✅ Provisioning completed successfully!', output);
+                setIsProvisioning(false);
                 await refreshAllStatus();
                 return;
               } else if (jobData.status === 'failed') {
                 const output = currentOutput || (jobData.error || jobData.message || 'Provisioning failed');
+                setProvisionResults({
+                  success: false,
+                  timestamp: new Date().toISOString(),
+                  output: output,
+                });
                 updateRecentOperationStatus(provisionId, '❌ Provisioning failed', output);
+                setIsProvisioning(false);
                 return;
               }
 
@@ -842,7 +930,13 @@ const MinikubeDashboardContent = () => {
     } catch (error) {
       console.error('Provisioning error:', error);
       const errorOutput = `Failed to start provisioning\n\nError: ${error.message}\n\nPlease check:\n- Backend server is running\n- Minikube cluster is accessible\n- AWS credentials are configured`;
+      setProvisionResults({
+        success: false,
+        timestamp: new Date().toISOString(),
+        output: errorOutput,
+      });
       updateRecentOperationStatus(provisionId, `❌ Provisioning failed: ${error.message}`, errorOutput);
+      setIsProvisioning(false);
     }
   };
 
@@ -978,6 +1072,9 @@ const MinikubeDashboardContent = () => {
         setCredentialMessage(`Environment set to ${credentials.clusterName}! You can now configure the environment.`);
         setCredentialMessageType('success');
 
+        // Force ActiveEnvironmentBanner to refresh
+        setBannerRefreshKey(prev => prev + 1);
+
         // Refresh API status to reflect the new credentials
         await refreshAllStatus();
 
@@ -1002,7 +1099,10 @@ const MinikubeDashboardContent = () => {
     onComponentsClick: () => setActiveSection('components'),
     onConfigureClick: () => setActiveSection('configure'),
     onReconfigureClick: () => setActiveSection('reconfigure'),
-    onProvisionClick: () => setActiveSection('provision'),
+    onProvisionClick: () => {
+      setProvisionResults(null); // Clear previous provision results
+      setActiveSection('provision');
+    },
     onRosaHcpClustersClick: () => setActiveSection('rosa-hcp-clusters'),
     onResourcesClick: () => setActiveSection('resources'),
     onEnvironmentsClick: () => setActiveSection('environments'),
@@ -1056,7 +1156,7 @@ const MinikubeDashboardContent = () => {
             </div>
 
             {/* Configuration Results or Loading */}
-            {isConfiguring && !configurationResults && (
+            {isConfiguring && (
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center gap-2 mb-4">
                   <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
@@ -1066,7 +1166,7 @@ const MinikubeDashboardContent = () => {
               </div>
             )}
 
-            {configurationResults && (
+            {!isConfiguring && configurationResults && (
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center gap-2 mb-4">
                   {configurationResults.success ? (
@@ -1233,22 +1333,99 @@ const MinikubeDashboardContent = () => {
         );
 
       case 'provision':
+        // Get active cluster name for display
+        const activeCluster = minikubeInfo?.name ||
+                             verifiedMinikubeClusterInfo?.name ||
+                             selectedMinikubeCluster ||
+                             'No cluster selected';
+
         return (
           <div className="space-y-6">
             {/* Title */}
             <h2 className="text-2xl font-bold text-purple-900">Provision ROSA HCP Cluster</h2>
 
-            {/* Provision Form - Inline (not modal) */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <RosaProvisionModal
-                isOpen={true}
-                inline={true}
-                onClose={() => {}} // No close action needed for inline form
-                onSubmit={handleProvisionSubmit}
-                mceInfo={{ version: 'N/A' }} // Minikube environment - enable all latest features
-                theme="minikube"
-              />
+            {/* Active Cluster Indicator */}
+            <div className="bg-gradient-to-r from-purple-50 to-violet-50 border-l-4 border-purple-500 p-4 rounded-r-lg shadow-sm">
+              <div className="flex items-center gap-3">
+                <span className="text-lg">🎯</span>
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">Target Environment</div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-sm text-gray-600">Minikube Cluster:</span>
+                    <span className="text-base font-bold text-purple-700">{activeCluster}</span>
+                  </div>
+                  {activeCluster === 'No cluster selected' && (
+                    <p className="text-xs text-orange-600 mt-1">
+                      ⚠️ Please select a cluster from the Environments section first
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
+
+            {/* Show provision results if available */}
+            {provisionResults ? (
+              /* Provision Results Display - Inline Playbook Output */
+              <div className={`rounded-lg border-2 p-6 ${provisionResults.success ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+                <div className="flex items-center gap-3 mb-4">
+                  {provisionResults.success ? (
+                    <span className="text-2xl">✅</span>
+                  ) : (
+                    <span className="text-xl">❌</span>
+                  )}
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    {isProvisioning ? 'Provisioning Running...' : (provisionResults.success ? 'Provisioning Completed' : 'Provisioning Failed')}
+                  </h3>
+                </div>
+
+                {/* Output Display */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-medium text-gray-700">Playbook Output:</h4>
+                    <button
+                      onClick={() => handleCopyOutput(provisionResults.output || 'No output available')}
+                      className="px-3 py-1 text-white rounded text-xs font-medium transition-colors"
+                      style={{ backgroundColor: '#8B5CF6' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#7C3AED')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#8B5CF6')}
+                    >
+                      {copySuccess || '📋 Copy'}
+                    </button>
+                  </div>
+                  <div className="bg-gray-900 text-gray-100 rounded p-4 max-h-96 overflow-y-auto font-mono text-sm">
+                    <pre className="whitespace-pre-wrap">
+                      {provisionResults.output || 'No output available'}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+            ) : yamlEditorData ? (
+              /* YAML Preview - Inline */
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <YamlEditorModal
+                  isOpen={true}
+                  inline={true}
+                  onClose={() => {
+                    setYamlEditorData(null);
+                  }}
+                  yamlData={yamlEditorData}
+                  readOnly={false}
+                  onProvision={handleActualProvision}
+                />
+              </div>
+            ) : (
+              /* Provision Form - Inline (not modal) */
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <RosaProvisionModal
+                  isOpen={true}
+                  inline={true}
+                  onClose={() => {}} // No close action needed for inline form
+                  onSubmit={handleProvisionSubmit}
+                  mceInfo={{ version: 'N/A' }} // Minikube environment - enable all latest features
+                  theme="minikube"
+                />
+              </div>
+            )}
           </div>
         );
 
@@ -1506,23 +1683,16 @@ const MinikubeDashboardContent = () => {
 
         <div className="p-6">
           {/* Active Environment Banner */}
-          <ActiveEnvironmentBanner environment="minikube" />
+          <ActiveEnvironmentBanner
+            key={`minikube-banner-${bannerRefreshKey}`}
+            environment="minikube"
+          />
 
           {/* Main Content */}
           {renderMainContent()}
         </div>
       </div>
 
-      {/* Modals */}
-      <YamlEditorModal
-        isOpen={showYamlEditorModal}
-        onClose={() => setShowYamlEditorModal(false)}
-        yamlData={yamlEditorData}
-        readOnly={true}
-        onProvision={async (editedYaml) => {
-          setShowYamlEditorModal(false);
-        }}
-      />
     </div>
   );
 };
