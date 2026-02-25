@@ -4,7 +4,6 @@ import { CheckCircleIcon, Cog6ToothIcon, ClockIcon, ExclamationCircleIcon } from
 
 import JenkinsSidebar from '../components/sidebar/JenkinsSidebar';
 import RosaHcpClustersSection from '../components/sections/RosaHcpClustersSection';
-import CredentialsModal from '../components/modals/CredentialsModal';
 import MCEEnvironmentSelector from '../components/MCEEnvironmentSelector';
 import ActiveEnvironmentBanner from '../components/ActiveEnvironmentBanner';
 import { YamlEditorModal } from '../components/YamlEditorModal';
