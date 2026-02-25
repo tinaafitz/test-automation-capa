@@ -5,7 +5,6 @@ import { CheckCircleIcon, Cog6ToothIcon, ClockIcon, ExclamationCircleIcon } from
 import JenkinsSidebar from '../components/sidebar/JenkinsSidebar';
 import TaskSummarySection from '../components/sections/TaskSummarySection';
 import RosaHcpClustersSection from '../components/sections/RosaHcpClustersSection';
-import NotificationSettingsModal from '../components/modals/NotificationSettingsModal';
 import CredentialsModal from '../components/modals/CredentialsModal';
 import MCEEnvironmentSelector from '../components/MCEEnvironmentSelector';
 import ActiveEnvironmentBanner from '../components/ActiveEnvironmentBanner';
@@ -382,7 +381,7 @@ const NotificationSettingsInline = () => {
                   type="text"
                   value={settings.smtp_username}
                   onChange={(e) => handleInputChange('smtp_username', e.target.value)}
-                  placeholder="tina.fitzgerald2@gmail.com"
+                  placeholder="user@example.com"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500"
                 />
               </div>
@@ -407,7 +406,7 @@ const NotificationSettingsInline = () => {
                   type="email"
                   value={settings.from_email}
                   onChange={(e) => handleInputChange('from_email', e.target.value)}
-                  placeholder="tina.fitzgerald2@gmail.com"
+                  placeholder="notifications@example.com"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500"
                 />
               </div>
@@ -494,8 +493,6 @@ const MinikubeDashboardContent = () => {
   const [activeSection, setActiveSection] = useState('environments');
   const [showYamlEditorModal, setShowYamlEditorModal] = useState(false);
   const [yamlEditorData, setYamlEditorData] = useState(null);
-  const [showNotificationSettings, setShowNotificationSettings] = useState(false);
-  const [showCredentialsModal, setShowCredentialsModal] = useState(false);
   const [showReconfigureForm, setShowReconfigureForm] = useState(false);
   const [useCustomImage, setUseCustomImage] = useState(false);
   const [customImageRepo, setCustomImageRepo] = useState('');
@@ -550,11 +547,6 @@ const MinikubeDashboardContent = () => {
   // ============================================================================
   // Handler Functions (from original MCEEnvironment.jsx)
   // ============================================================================
-
-  // Handle authentication/credentials
-  const handleCredentials = () => {
-    setShowCredentialsModal(true);
-  };
 
   // Handle reconfiguration submission
   const handleReconfigureSubmit = () => {
@@ -1532,21 +1524,6 @@ const MinikubeDashboardContent = () => {
         readOnly={true}
         onProvision={async (editedYaml) => {
           setShowYamlEditorModal(false);
-        }}
-      />
-
-      <NotificationSettingsModal
-        isOpen={showNotificationSettings}
-        onClose={() => setShowNotificationSettings(false)}
-      />
-
-      <CredentialsModal
-        isOpen={showCredentialsModal}
-        onClose={() => setShowCredentialsModal(false)}
-        theme="mce"
-        onSave={() => {
-          // Refresh status after saving credentials
-          refreshAllStatus();
         }}
       />
     </div>
