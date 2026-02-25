@@ -14,7 +14,6 @@ import TestSuiteSection from '../components/sections/TestSuiteSection';
 import HelmChartTestDashboard from '../components/sections/HelmChartTestDashboard';
 import ResourcesViewer from '../components/ResourcesViewer';
 import {
-  AppProvider,
   useMinikubeContext,
   useRecentOperationsContext,
   useApp,
@@ -1529,15 +1528,4 @@ const MinikubeDashboardContent = () => {
   );
 };
 
-/**
- * MinikubeDashboard - Wrapper component with AppProvider
- */
-const MinikubeDashboard = () => {
-  return (
-    <AppProvider>
-      <MinikubeDashboardContent />
-    </AppProvider>
-  );
-};
-
-export default MinikubeDashboard;
+export default MinikubeDashboardContent;

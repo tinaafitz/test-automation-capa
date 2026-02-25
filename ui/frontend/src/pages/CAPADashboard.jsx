@@ -14,7 +14,6 @@ import TestSuiteSection from '../components/sections/TestSuiteSection';
 import HelmChartTestDashboard from '../components/sections/HelmChartTestDashboard';
 import ResourcesViewer from '../components/ResourcesViewer';
 import {
-  AppProvider,
   useApiStatusContext,
   useRecentOperationsContext,
   useApp,
@@ -2307,15 +2306,4 @@ const CAPADashboardContent = () => {
   );
 };
 
-/**
- * CAPADashboard - Wrapper component with AppProvider
- */
-const CAPADashboard = () => {
-  return (
-    <AppProvider>
-      <CAPADashboardContent />
-    </AppProvider>
-  );
-};
-
-export default CAPADashboard;
+export default CAPADashboardContent;

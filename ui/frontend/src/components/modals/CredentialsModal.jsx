@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { XMarkIcon, EyeIcon, EyeSlashIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import { buildApiUrl } from '../../config/api';
 import PropTypes from 'prop-types';
+import { useAppDispatch, AppActionTypes } from '../../store/AppContext';
 
 const CredentialsModal = ({ isOpen, onClose, theme = 'mce', onSave, inline = false }) => {
+  const dispatch = useAppDispatch();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showPasswords, setShowPasswords] = useState({
@@ -59,7 +61,16 @@ const CredentialsModal = ({ isOpen, onClose, theme = 'mce', onSave, inline = fal
       });
 
       if (response.ok) {
-        alert('Credentials saved successfully!');
+        dispatch({
+          type: AppActionTypes.ADD_NOTIFICATION,
+          payload: {
+            id: Date.now(),
+            type: 'success',
+            title: 'Success',
+            message: 'Credentials saved successfully!',
+            duration: 5000,
+          },
+        });
 
         // Call onSave callback if provided
         if (onSave) {
@@ -69,10 +80,28 @@ const CredentialsModal = ({ isOpen, onClose, theme = 'mce', onSave, inline = fal
         onClose();
       } else {
         const error = await response.json();
-        alert(`Failed to save credentials: ${error.message || 'Unknown error'}`);
+        dispatch({
+          type: AppActionTypes.ADD_NOTIFICATION,
+          payload: {
+            id: Date.now(),
+            type: 'error',
+            title: 'Error',
+            message: `Failed to save credentials: ${error.message || 'Unknown error'}`,
+            duration: 7000,
+          },
+        });
       }
     } catch (error) {
-      alert(`Failed to save credentials: ${error.message}`);
+      dispatch({
+        type: AppActionTypes.ADD_NOTIFICATION,
+        payload: {
+          id: Date.now(),
+          type: 'error',
+          title: 'Error',
+          message: `Failed to save credentials: ${error.message}`,
+          duration: 7000,
+        },
+      });
     } finally {
       setSaving(false);
     }
