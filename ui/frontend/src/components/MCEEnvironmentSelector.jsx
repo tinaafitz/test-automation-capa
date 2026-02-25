@@ -37,6 +37,14 @@ const getStatusConfig = (theme = 'mce') => {
       borderColor: 'border-red-200',
       icon: XCircleIcon,
     },
+    creating: {
+      emoji: '🔄',
+      label: 'Creating...',
+      color: 'text-yellow-600',
+      bgColor: 'bg-yellow-50',
+      borderColor: 'border-yellow-200',
+      icon: ArrowPathIcon,
+    },
     in_progress: {
       emoji: '⏳',
       label: 'In Progress',
@@ -321,11 +329,48 @@ const MCEEnvironmentSelector = ({
         console.log('Creating Minikube cluster:', newEnv.clusterName);
         console.log('Installation method:', newEnv.installMethod);
 
+        // Immediately add cluster to UI with "Creating..." status (optimistic update)
+        const pendingCluster = {
+          clusterName: newEnv.clusterName,
+          name: newEnv.clusterName,
+          status: 'creating',
+          platform: 'Minikube',
+          notes: newEnv.notes || 'Creating cluster...',
+          lastAccessed: new Date().toISOString(),
+          jira: newEnv.jira,
+          polarion: newEnv.polarion,
+        };
+
+        setEnvironments(prev => [pendingCluster, ...prev]);
+
+        // Show inline message
+        setCreateMessage(`Creating cluster '${newEnv.clusterName}'...`);
+        setCreateMessageType('info');
+
+        // Close modal immediately
+        setShowAddModal(false);
+
+        // Reset form
+        const clusterName = newEnv.clusterName;
+        setNewEnv({
+          clusterName: '',
+          platform: '',
+          ocpVersion: '',
+          consoleUrl: '',
+          username: '',
+          password: '',
+          jira: '',
+          polarion: '',
+          notes: '',
+          installMethod: 'clusterctl',
+        });
+
+        // Start cluster creation in background
         const response = await fetch('http://localhost:8000/api/minikube/create-cluster', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            cluster_name: newEnv.clusterName,
+            cluster_name: clusterName,
             install_method: newEnv.installMethod,
           }),
         });
@@ -347,30 +392,11 @@ const MCEEnvironmentSelector = ({
         console.log('Response data:', data);
 
         if (data.success) {
-          // Show inline success message
-          setCreateMessage(`Cluster '${newEnv.clusterName}' created successfully! ${data.message || ''}`);
-          setCreateMessageType('success');
-
-          // Reset form
-          setNewEnv({
-            clusterName: '',
-            platform: '',
-            ocpVersion: '',
-            consoleUrl: '',
-            username: '',
-            password: '',
-            jira: '',
-            polarion: '',
-            notes: '',
-            installMethod: 'clusterctl',
-          });
-
-          // Refresh environments
+          // Refresh environments to get actual status
           await fetchEnvironments();
 
-          // Auto-hide modal after 3 seconds
+          // Clear message
           setTimeout(() => {
-            setShowAddModal(false);
             setCreateMessage('');
             setCreateMessageType('');
           }, 3000);
@@ -379,6 +405,13 @@ const MCEEnvironmentSelector = ({
           const errorMsg = data.message || data.error || 'Unknown error';
           const suggestion = data.suggestion ? `Suggestion: ${data.suggestion}` : '';
           console.error('Backend error:', errorMsg);
+
+          // Update cluster status to failed
+          setEnvironments(prev => prev.map(env =>
+            env.clusterName === clusterName
+              ? { ...env, status: 'fail', notes: `Failed: ${errorMsg}${suggestion ? '. ' + suggestion : ''}` }
+              : env
+          ));
 
           // Show inline error message
           setCreateMessage(`Failed to create cluster: ${errorMsg}${suggestion ? '. ' + suggestion : ''}`);
@@ -467,12 +500,13 @@ const MCEEnvironmentSelector = ({
     if (!config) return null;
 
     const Icon = config.icon;
+    const isAnimated = status === 'creating' || status === 'in_progress';
 
     return (
       <span
         className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${config.color} ${config.bgColor} border ${config.borderColor}`}
       >
-        <Icon className="w-4 h-4" />
+        <Icon className={`w-4 h-4 ${isAnimated ? 'animate-spin' : ''}`} />
         {config.label}
       </span>
     );
