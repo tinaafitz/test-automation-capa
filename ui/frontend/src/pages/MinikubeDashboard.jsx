@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CheckCircleIcon, Cog6ToothIcon, ClockIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline';
 
 import JenkinsSidebar from '../components/sidebar/JenkinsSidebar';
-import TaskSummarySection from '../components/sections/TaskSummarySection';
 import RosaHcpClustersSection from '../components/sections/RosaHcpClustersSection';
 import CredentialsModal from '../components/modals/CredentialsModal';
 import MCEEnvironmentSelector from '../components/MCEEnvironmentSelector';
