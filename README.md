@@ -360,3 +360,61 @@ Built with:
 - [Cluster API Provider AWS (CAPA)](https://cluster-api-aws.sigs.k8s.io/)
 - [Red Hat MCE](https://access.redhat.com/products/red-hat-advanced-cluster-management-for-kubernetes)
 - [ROSA](https://www.redhat.com/en/technologies/cloud-computing/openshift/aws)
+
+## Web UI
+
+The test automation suite includes a modern web interface for managing CAPI/ROSA test environments.
+
+### Quick Start
+
+**Using Docker (Recommended):**
+```bash
+cd ui
+docker-compose up
+```
+
+**Manual Setup:**
+
+1. **Frontend:**
+```bash
+cd ui/frontend
+npm install
+npm start  # Runs on http://localhost:3000
+```
+
+2. **Backend:**
+```bash
+cd ui/backend
+pip install -r requirements.txt
+uvicorn app:app --reload --port 8000
+```
+
+### Features
+
+- **MCE Environment** (`/mce`): Manage OpenShift hub clusters with Multicluster Engine
+  - Configure MCE environments
+  - Enable/disable CAPI components
+  - Run test suites
+  - View environment health
+
+- **Minikube Environment** (`/minikube`): Local development clusters
+  - Create/delete Minikube clusters
+  - Install CAPI/CAPA controllers
+  - Test cluster operations
+  - Monitor component status
+
+### Configuration
+
+Edit `ui/backend/.env`:
+```bash
+AUTOMATION_PATH=/Users/tinafitzgerald/acm_dev/test-automation-capa
+FRONTEND_URL=http://localhost:3000
+BACKEND_PORT=8000
+```
+
+### Technology Stack
+
+- **Frontend**: React 18, Tailwind CSS, Heroicons
+- **Backend**: FastAPI, Python 3.11+
+- **Communication**: REST API + WebSockets for real-time updates
+
