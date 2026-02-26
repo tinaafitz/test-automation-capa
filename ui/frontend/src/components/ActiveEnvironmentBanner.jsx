@@ -14,11 +14,24 @@ const ActiveEnvironmentBanner = ({ verificationTimestamp = null, environment = '
   const fetchData = async () => {
     try {
       if (environment === 'minikube') {
-        // Fetch active minikube cluster info
-        const response = await fetch('http://localhost:8000/api/minikube/active-profile');
-        const data = await response.json();
-        if (data.success && data.profile) {
-          setMinikubeInfo(data.profile);
+        // Fetch selected minikube cluster from credentials (not active profile)
+        const credResponse = await fetch('http://localhost:8000/api/credentials');
+        const credData = await credResponse.json();
+
+        if (credData.success && credData.credentials && credData.credentials.clusterName) {
+          // User has selected a minikube cluster
+          setMinikubeInfo({
+            name: credData.credentials.clusterName,
+            api_url: `https://127.0.0.1:${credData.credentials.apiPort || 8443}`,
+            status: 'Running',
+          });
+        } else {
+          // Fallback to active profile if no credentials saved
+          const response = await fetch('http://localhost:8000/api/minikube/active-profile');
+          const data = await response.json();
+          if (data.success && data.profile) {
+            setMinikubeInfo(data.profile);
+          }
         }
       } else {
         // Fetch MCE credentials

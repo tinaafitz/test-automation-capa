@@ -770,10 +770,11 @@ const MinikubeDashboardContent = () => {
       // Step 2: Show YAML preview inline (replaces form)
       console.log('✅ YAML generated, showing preview inline');
       setYamlEditorData({
-        yaml_content: previewResult.yaml,  // YamlEditorModal expects yaml_content
+        yaml_content: previewResult.yaml_content,  // Backend returns yaml_content field
         cluster_name: config.clusterName,
         feature_type: 'rosa-hcp',
         config: config,
+        file_paths: previewResult.file_paths,
       });
 
     } catch (error) {
@@ -821,17 +822,21 @@ const MinikubeDashboardContent = () => {
         color: 'bg-green-600',
         status: '🚀 Starting provisioning...',
         environment: 'minikube',
-        playbook: 'playbooks/create_rosa_hcp_cluster.yml',
-        output: `Initializing ROSA HCP cluster provisioning...\nCluster: ${config.clusterName}\nVersion: ${config.openShiftVersion}\nRegion: ${config.awsRegion}`,
+        playbook: 'kubectl apply (Minikube)',
+        output: `Applying YAML to Minikube cluster...\nCluster: ${config.clusterName}\nVersion: ${config.openShiftVersion}\nRegion: ${config.awsRegion}\nFIPS: ${config.fips ? 'Enabled' : 'Disabled'}`,
       });
 
-      const response = await fetch(buildApiUrl(API_ENDPOINTS.ANSIBLE_RUN_PLAYBOOK), {
+      // Get the active Minikube cluster context (prefer saved credentials)
+      const targetCluster = minikubeInfo?.name || verifiedMinikubeClusterInfo?.name || selectedMinikubeCluster || minikubeClusterInput;
+
+      const response = await fetch(buildApiUrl('/api/provisioning/apply-yaml'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          playbook: 'playbooks/create_rosa_hcp_cluster.yml',
-          description: `Provision ROSA HCP: ${yamlEditorData?.config?.clusterName || 'cluster'}`,
-          extra_vars: yamlEditorData?.config,
+          yaml_content: editedYaml,
+          cluster_name: config.clusterName,
+          description: `Provision ROSA HCP: ${config.clusterName} with FIPS`,
+          cluster_context: targetCluster,  // Pass Minikube cluster context for kubectl --context
         }),
       });
 
@@ -1017,12 +1022,26 @@ const MinikubeDashboardContent = () => {
   useEffect(() => {
     const fetchActiveProfile = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/minikube/active-profile');
-        const data = await response.json();
-        if (data.success && data.profile) {
-          setMinikubeInfo(data.profile);
+        // First check for user-selected cluster from credentials
+        const credResponse = await fetch('http://localhost:8000/api/credentials');
+        const credData = await credResponse.json();
+
+        if (credData.success && credData.credentials && credData.credentials.clusterName) {
+          // User has selected a minikube cluster - use it
+          setMinikubeInfo({
+            name: credData.credentials.clusterName,
+            api_url: `https://127.0.0.1:${credData.credentials.apiPort || 8443}`,
+            status: 'Running',
+          });
         } else {
-          setMinikubeInfo(null);
+          // Fallback to active profile if no credentials saved
+          const response = await fetch('http://localhost:8000/api/minikube/active-profile');
+          const data = await response.json();
+          if (data.success && data.profile) {
+            setMinikubeInfo(data.profile);
+          } else {
+            setMinikubeInfo(null);
+          }
         }
       } catch (error) {
         console.error('Error fetching active minikube profile:', error);
@@ -1316,19 +1335,75 @@ const MinikubeDashboardContent = () => {
               <div className="mt-6">
                 <button
                   onClick={handleReconfigureSubmit}
-                  disabled={installMethod !== 'clusterctl'}
+                  disabled={installMethod !== 'clusterctl' || isConfiguring}
                   className={`px-6 py-3 text-white rounded transition-colors font-medium flex items-center gap-2 ${
-                    installMethod !== 'clusterctl' ? 'opacity-50 cursor-not-allowed' : ''
+                    (installMethod !== 'clusterctl' || isConfiguring) ? 'opacity-50 cursor-not-allowed' : ''
                   }`}
-                  style={installMethod === 'clusterctl' ? { backgroundColor: '#8B5CF6' } : { backgroundColor: '#9CA3AF' }}
-                  onMouseEnter={(e) => installMethod === 'clusterctl' && (e.currentTarget.style.backgroundColor = '#7C3AED')}
-                  onMouseLeave={(e) => installMethod === 'clusterctl' && (e.currentTarget.style.backgroundColor = '#8B5CF6')}
+                  style={(installMethod === 'clusterctl' && !isConfiguring) ? { backgroundColor: '#8B5CF6' } : { backgroundColor: '#9CA3AF' }}
+                  onMouseEnter={(e) => (installMethod === 'clusterctl' && !isConfiguring) && (e.currentTarget.style.backgroundColor = '#7C3AED')}
+                  onMouseLeave={(e) => (installMethod === 'clusterctl' && !isConfiguring) && (e.currentTarget.style.backgroundColor = '#8B5CF6')}
                 >
-                  <Cog6ToothIcon className="h-5 w-5" />
-                  Apply Changes
+                  {isConfiguring ? (
+                    <>
+                      <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Configuring...
+                    </>
+                  ) : (
+                    <>
+                      <Cog6ToothIcon className="h-5 w-5" />
+                      Apply Changes
+                    </>
+                  )}
                 </button>
               </div>
             </div>
+
+            {/* Configuration Results or Loading */}
+            {isConfiguring && (
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
+                  <h3 className="text-lg font-semibold text-gray-900">Running Configuration...</h3>
+                </div>
+                <p className="text-gray-600">Please wait while the playbook executes. This may take a minute or two.</p>
+              </div>
+            )}
+
+            {!isConfiguring && configurationResults && (
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  {configurationResults.success ? (
+                    <CheckCircleIcon className="h-6 w-6 text-green-600" />
+                  ) : (
+                    <span className="text-2xl">❌</span>
+                  )}
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    {configurationResults.success ? 'Configuration Completed' : 'Configuration Failed'}
+                  </h3>
+                </div>
+
+                {/* Output Display */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-medium text-gray-700">Playbook Output:</h4>
+                    <button
+                      onClick={() => handleCopyOutput(configurationResults.output || 'No output available')}
+                      className="px-3 py-1 text-white rounded text-xs font-medium transition-colors"
+                      style={{ backgroundColor: '#8B5CF6' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#7C3AED')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#8B5CF6')}
+                    >
+                      {copySuccess || '📋 Copy'}
+                    </button>
+                  </div>
+                  <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto min-h-[100px]">
+                    <pre className="whitespace-pre-wrap">
+                      {configurationResults.output || 'No output available'}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
 
@@ -1367,15 +1442,26 @@ const MinikubeDashboardContent = () => {
             {provisionResults ? (
               /* Provision Results Display - Inline Playbook Output */
               <div className={`rounded-lg border-2 p-6 ${provisionResults.success ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
-                <div className="flex items-center gap-3 mb-4">
-                  {provisionResults.success ? (
-                    <span className="text-2xl">✅</span>
-                  ) : (
-                    <span className="text-xl">❌</span>
-                  )}
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    {isProvisioning ? 'Provisioning Running...' : (provisionResults.success ? 'Provisioning Completed' : 'Provisioning Failed')}
-                  </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    {provisionResults.success ? (
+                      <span className="text-2xl">✅</span>
+                    ) : (
+                      <span className="text-xl">❌</span>
+                    )}
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {isProvisioning ? 'Provisioning Running...' : (provisionResults.success ? 'Provisioning Completed' : 'Provisioning Failed')}
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setProvisionResults(null);
+                      setIsProvisioning(false);
+                    }}
+                    className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors text-sm font-medium"
+                  >
+                    Close
+                  </button>
                 </div>
 
                 {/* Output Display */}
@@ -1402,6 +1488,20 @@ const MinikubeDashboardContent = () => {
             ) : yamlEditorData ? (
               /* YAML Preview - Inline */
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-semibold text-gray-900">YAML Preview</h3>
+                  <button
+                    onClick={() => {
+                      setYamlEditorData(null);
+                    }}
+                    className="px-6 py-3 text-white rounded-lg transition-colors font-medium shadow-sm"
+                    style={{ backgroundColor: '#8B5CF6' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#7C3AED')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#8B5CF6')}
+                  >
+                    Cancel
+                  </button>
+                </div>
                 <YamlEditorModal
                   isOpen={true}
                   inline={true}
@@ -1416,10 +1516,27 @@ const MinikubeDashboardContent = () => {
             ) : (
               /* Provision Form - Inline (not modal) */
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-semibold text-gray-900">Configure ROSA HCP Cluster</h3>
+                  <button
+                    onClick={() => {
+                      // Clear the provision section and return to main view
+                      setProvisionResults(null);
+                      setYamlEditorData(null);
+                    }}
+                    className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors text-sm font-medium"
+                  >
+                    Cancel
+                  </button>
+                </div>
                 <RosaProvisionModal
                   isOpen={true}
                   inline={true}
-                  onClose={() => {}} // No close action needed for inline form
+                  onClose={() => {
+                    // Clear the provision section and return to main view
+                    setProvisionResults(null);
+                    setYamlEditorData(null);
+                  }}
                   onSubmit={handleProvisionSubmit}
                   mceInfo={{ version: 'N/A' }} // Minikube environment - enable all latest features
                   theme="minikube"

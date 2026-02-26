@@ -16,6 +16,7 @@ from datetime import datetime
 import os
 import yaml
 import sqlite3
+import time
 from slack_notification_service import SlackNotificationService
 from email_notification_service import EmailNotificationService
 from ai_assistant_service import AIAssistantService
@@ -48,6 +49,13 @@ app.add_middleware(
 
 # In-memory storage for demo (use Redis/DB in production)
 jobs: Dict[str, dict] = {}
+
+# Cache for expensive operations (TTL: 30 seconds)
+minikube_clusters_cache = {
+    "data": None,
+    "timestamp": 0,
+    "ttl": 30  # seconds
+}
 clusters: Dict[str, dict] = {}
 
 # Simple cache for ROSA status to avoid repeated subprocess calls
@@ -1566,6 +1574,9 @@ async def get_credentials():
             "AWS_SECRET_ACCESS_KEY": config.get("AWS_SECRET_ACCESS_KEY", ""),
             "OCM_CLIENT_ID": config.get("OCM_CLIENT_ID", ""),
             "OCM_CLIENT_SECRET": config.get("OCM_CLIENT_SECRET", ""),
+            # Minikube cluster selection fields
+            "clusterName": config.get("clusterName", ""),
+            "apiPort": config.get("apiPort", ""),
         }
 
         return {"success": True, "credentials": credentials}
@@ -4944,7 +4955,19 @@ async def get_capi_component_versions(cluster_name: str = None, environment: str
 
 @app.get("/api/minikube/list-clusters")
 async def list_minikube_clusters():
-    """List available Minikube profiles"""
+    """List available Minikube profiles (cached for 30 seconds)"""
+    global minikube_clusters_cache
+
+    # Check cache first
+    current_time = time.time()
+    cache_age = current_time - minikube_clusters_cache["timestamp"]
+
+    if minikube_clusters_cache["data"] is not None and cache_age < minikube_clusters_cache["ttl"]:
+        print(f"✅ [CACHE HIT] Returning cached Minikube clusters (age: {cache_age:.1f}s)")
+        return minikube_clusters_cache["data"]
+
+    print(f"⏳ [CACHE MISS] Fetching fresh Minikube clusters (cache age: {cache_age:.1f}s)")
+
     try:
         # Check if Minikube is installed
         minikube_check = subprocess.run(
@@ -4952,12 +4975,16 @@ async def list_minikube_clusters():
         )
 
         if minikube_check.returncode != 0:
-            return {
+            result = {
                 "clusters": [],
                 "minikube_installed": False,
                 "message": "Minikube is not installed",
                 "suggestion": "Install Minikube first: brew install minikube",
             }
+            # Cache the result
+            minikube_clusters_cache["data"] = result
+            minikube_clusters_cache["timestamp"] = current_time
+            return result
 
         # List Minikube profiles
         list_result = subprocess.run(
@@ -4969,12 +4996,16 @@ async def list_minikube_clusters():
 
         if list_result.returncode != 0:
             # No profiles exist yet
-            return {
+            result = {
                 "clusters": [],
                 "minikube_installed": True,
                 "message": "No Minikube clusters found",
                 "suggestion": "Create a cluster with: minikube start --profile <cluster-name>",
             }
+            # Cache the result
+            minikube_clusters_cache["data"] = result
+            minikube_clusters_cache["timestamp"] = current_time
+            return result
 
         # Parse JSON output
         import json
@@ -4987,7 +5018,7 @@ async def list_minikube_clusters():
                 for profile in profiles_data["valid"]:
                     clusters.append(profile["Name"])
 
-            return {
+            result = {
                 "clusters": clusters,
                 "minikube_installed": True,
                 "message": (
@@ -5001,21 +5032,34 @@ async def list_minikube_clusters():
                     else None
                 ),
             }
+            # Cache the result
+            minikube_clusters_cache["data"] = result
+            minikube_clusters_cache["timestamp"] = current_time
+            print(f"✅ [CACHE UPDATE] Cached {len(clusters)} Minikube clusters")
+            return result
         except json.JSONDecodeError:
-            return {
+            result = {
                 "clusters": [],
                 "minikube_installed": True,
                 "message": "Failed to parse minikube profile list",
                 "suggestion": "Check minikube installation",
             }
+            # Cache the result
+            minikube_clusters_cache["data"] = result
+            minikube_clusters_cache["timestamp"] = current_time
+            return result
 
     except Exception as e:
-        return {
+        result = {
             "clusters": [],
             "minikube_installed": False,
             "message": f"Error listing Minikube clusters: {str(e)}",
             "suggestion": "Check Minikube installation and permissions",
         }
+        # Cache even error results to prevent repeated failures
+        minikube_clusters_cache["data"] = result
+        minikube_clusters_cache["timestamp"] = current_time
+        return result
 
 
 @app.get("/api/minikube/current-context")
@@ -6910,6 +6954,10 @@ async def generate_provisioning_yaml(request: Request):
         log_forward_s3_bucket = config.get("logForwardS3Bucket", "")
         log_forward_s3_prefix = config.get("logForwardS3Prefix", "")
 
+        # Extract FIPS configuration (OpenShift 4.21+ only)
+        enable_fips = config.get("fips", False)
+        print(f"🔍 [FIPS] Extracted FIPS value: {enable_fips}")
+
         # Extract manual configuration (for environments without ROSANetwork/ROSARoleConfig CRDs)
         manual_public_subnet = config.get("manualPublicSubnet", "")
         manual_private_subnet = config.get("manualPrivateSubnet", "")
@@ -7029,6 +7077,8 @@ async def generate_provisioning_yaml(request: Request):
             "log_forward_cloudwatch_log_group": log_forward_cloudwatch_log_group,
             "log_forward_s3_bucket": log_forward_s3_bucket,
             "log_forward_s3_prefix": log_forward_s3_prefix,
+            # FIPS configuration (OpenShift 4.21+ only)
+            "fips": enable_fips,
             # Manual configuration (for environments without CRDs)
             "manual_subnets": (
                 [manual_public_subnet, manual_private_subnet]
@@ -7301,6 +7351,44 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                 jobs[job_id]["message"] = f"Found {len(yaml_documents)} resource(s) to apply"
                 jobs[job_id]["logs"].append(f"📄 Parsed {len(yaml_documents)} YAML document(s)")
 
+                # For Minikube, apply the full YAML file directly to avoid yaml.dump() formatting issues
+                if cluster_context:
+                    jobs[job_id]["logs"].append(f"\n🎯 Applying all resources to Minikube cluster: {cluster_context}")
+
+                    apply_cmd = [
+                        "kubectl",
+                        "--context",
+                        cluster_context,
+                        "apply",
+                        "-f",
+                        saved_yaml_path,
+                    ]
+
+                    result = subprocess.run(
+                        apply_cmd,
+                        cwd=project_root,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                    )
+
+                    jobs[job_id]["logs"].append(f"\n{result.stdout}")
+                    if result.stderr:
+                        jobs[job_id]["logs"].append(f"\n⚠️ Warnings/Errors:\n{result.stderr}")
+
+                    if result.returncode == 0 or "created" in result.stdout or "configured" in result.stdout:
+                        jobs[job_id]["status"] = "completed"
+                        jobs[job_id]["progress"] = 100
+                        jobs[job_id]["message"] = "✅ All resources applied successfully!"
+                        jobs[job_id]["logs"].append(f"\n✅ All resources applied successfully!")
+                        return
+                    else:
+                        jobs[job_id]["status"] = "failed"
+                        jobs[job_id]["progress"] = 100
+                        jobs[job_id]["message"] = f"❌ Failed to apply resources"
+                        jobs[job_id]["logs"].append(f"\n❌ ERROR: {result.stderr}")
+                        return
+
                 # Apply each resource using oc apply
                 progress_increment = 70 / max(len(yaml_documents), 1)
                 current_progress = 20
@@ -7311,6 +7399,13 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
 
                     kind = doc.get("kind", "Unknown")
                     name = doc.get("metadata", {}).get("name", "Unknown")
+
+                    # Skip ManagedCluster when applying to Minikube (no ACM/MCE CRDs)
+                    if cluster_context and kind == "ManagedCluster":
+                        jobs[job_id]["logs"].append(
+                            f"\n[{idx}/{len(yaml_documents)}] Skipping {kind}/{name} (ACM/MCE-only resource, not available on Minikube)"
+                        )
+                        continue
 
                     jobs[job_id]["logs"].append(
                         f"\n[{idx}/{len(yaml_documents)}] Applying {kind}/{name}..."
