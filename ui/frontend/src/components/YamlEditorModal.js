@@ -385,7 +385,7 @@ export function YamlEditorModal({ isOpen, onClose, onProvision, yamlData, readOn
                 <button
                   onClick={handleProvision}
                   disabled={!!validationError}
-                  className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-lg hover:from-cyan-700 hover:to-blue-700 font-medium transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-violet-600 text-white rounded-lg hover:from-purple-700 hover:to-violet-700 font-medium transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Provision Now
                 </button>
