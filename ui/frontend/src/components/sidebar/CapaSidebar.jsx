@@ -15,15 +15,15 @@ import {
 import { useRecentOperationsContext, useApiStatusContext } from '../../store/AppContext';
 
 /**
- * JenkinsSidebar - Jenkins-style navigation sidebar for MCE environment
+ * CapaSidebar - Navigation sidebar for CAPA automation
  *
  * Features:
  * - Navigation menu with icons
  * - Tasks section (expandable)
- * - Clean gray background matching Jenkins UI
+ * - Clean gray background
  * - Active state highlighting
  */
-const JenkinsSidebar = ({
+const CapaSidebar = ({
   onComponentsClick,
   onVerifyClick,
   onConfigureClick,
@@ -269,4 +269,4 @@ const JenkinsSidebar = ({
   );
 };
 
-export default JenkinsSidebar;
+export default CapaSidebar;

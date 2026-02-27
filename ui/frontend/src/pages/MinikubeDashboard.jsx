@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CheckCircleIcon, Cog6ToothIcon, ClockIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline';
 
-import JenkinsSidebar from '../components/sidebar/JenkinsSidebar';
+import CapaSidebar from '../components/sidebar/CapaSidebar';
 import RosaHcpClustersSection from '../components/sections/RosaHcpClustersSection';
 import MCEEnvironmentSelector from '../components/MCEEnvironmentSelector';
 import ActiveEnvironmentBanner from '../components/ActiveEnvironmentBanner';
@@ -1796,8 +1796,8 @@ const MinikubeDashboardContent = () => {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* Jenkins-style Sidebar */}
-      <JenkinsSidebar
+      {/* CAPA Sidebar */}
+      <CapaSidebar
         {...sidebarHandlers}
         activeSection={activeSection}
         environment="minikube"
