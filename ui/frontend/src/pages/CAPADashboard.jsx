@@ -13,6 +13,7 @@ import TestSuiteDashboard from '../components/sections/TestSuiteDashboard';
 import TestSuiteSection from '../components/sections/TestSuiteSection';
 import HelmChartTestDashboard from '../components/sections/HelmChartTestDashboard';
 import ResourcesViewer from '../components/ResourcesViewer';
+import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import {
   useApiStatusContext,
   useRecentOperationsContext,
@@ -1284,6 +1285,7 @@ const CAPADashboardContent = () => {
     onTestClick: () => setActiveSection('test'),
     onTestSuiteDashboardClick: () => setActiveSection('test-suite-dashboard'),
     onTestAutomationClick: () => setActiveSection('test-automation'),
+    onAIAssistantClick: () => setActiveSection('ai-assistant'),
     onHelmChartMatrixClick: () => setActiveSection('helm-chart-matrix'),
     onTerminalClick: () => setActiveSection('terminal'),
     onNotificationsClick: () => setActiveSection('notifications'),
@@ -1803,9 +1805,7 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Provision Resources</h2>
-
-            <p className="text-gray-600 mb-4">View and manage CAPI/CAPA Kubernetes resources.</p>
+            <h2 className="text-2xl font-bold text-blue-900">CAPA Resources</h2>
 
             <ResourcesViewer theme="mce" />
           </div>
@@ -1985,7 +1985,28 @@ const CAPADashboardContent = () => {
         );
 
       case 'test-automation':
-        return <TestSuiteSection />;
+        return (
+          <div className="space-y-6">
+            {/* Title */}
+            <h2 className="text-2xl font-bold text-blue-900">Playbooks</h2>
+
+            <TestSuiteSection />
+          </div>
+        );
+
+      case 'ai-assistant':
+        return (
+          <div className="space-y-6">
+            {/* Title */}
+            <h2 className="text-2xl font-bold text-blue-900">AI Assistant</h2>
+
+            <p className="text-gray-600">
+              Chat with the AI assistant to get help with CAPI/CAPA automation, troubleshooting, and best practices.
+            </p>
+
+            <AIAssistantChat inline={true} />
+          </div>
+        );
 
       case 'helm-chart-matrix':
         return <HelmChartTestDashboard theme="mce" />;

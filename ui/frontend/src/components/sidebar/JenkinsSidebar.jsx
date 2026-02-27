@@ -36,6 +36,7 @@ const JenkinsSidebar = ({
   onTestClick,
   onTestSuiteDashboardClick,
   onTestAutomationClick,
+  onAIAssistantClick,
   onHelmChartMatrixClick,
   onTerminalClick,
   onNotificationsClick,
@@ -110,17 +111,18 @@ const JenkinsSidebar = ({
       id: 'reconfigure',
       label: 'Set Custom CAPA Image',
       icon: <ArrowPathIcon className="h-5 w-5" />,
-      onClick: onReconfigureClick
+      onClick: onReconfigureClick,
+      showInEnvironments: ['minikube'] // Only show in Minikube, not MCE
     },
     {
       id: 'provision',
-      label: 'Start New Provision',
+      label: 'Provision',
       icon: <span className="text-lg">🚀</span>,
       onClick: onProvisionClick
     },
     {
       id: 'resources',
-      label: 'Provision Resources',
+      label: 'CAPA Resources',
       icon: <span className="text-lg">📄</span>,
       onClick: onResourcesClick
     },
@@ -159,6 +161,12 @@ const JenkinsSidebar = ({
       label: 'Task Summary',
       icon: <ClockIcon className="h-5 w-5" />,
       onClick: onRecentTasksClick
+    },
+    {
+      id: 'ai-assistant',
+      label: 'AI Assistant',
+      icon: <span className="text-lg">🤖</span>,
+      onClick: onAIAssistantClick
     },
   ];
 
