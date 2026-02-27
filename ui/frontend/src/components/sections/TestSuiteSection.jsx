@@ -8,7 +8,36 @@ import { useRecentOperationsContext } from '../../store/AppContext';
 import { useJobHistory } from '../../hooks/useJobHistory';
 import { RosaProvisionModal } from '../RosaProvisionModal';
 
-const TestSuiteSection = () => {
+const TestSuiteSection = ({ theme = 'mce' }) => {
+  // Get theme colors
+  const getThemeColors = () => {
+    switch (theme) {
+      case 'minikube':
+        return {
+          primaryHex: '#8B5CF6', // purple-600
+          primaryHover: '#7C3AED', // purple-700
+          bgPrimary: 'bg-violet-500',
+          bgPrimaryHover: 'hover:bg-violet-600',
+          textPrimary: 'text-violet-600',
+          borderPrimary: 'border-violet-500',
+          ringPrimary: 'focus:ring-violet-500',
+        };
+      case 'mce':
+      default:
+        return {
+          primaryHex: '#2684FF', // blue
+          primaryHover: '#0065FF', // darker blue
+          bgPrimary: 'bg-blue-500',
+          bgPrimaryHover: 'hover:bg-blue-600',
+          textPrimary: 'text-blue-600',
+          borderPrimary: 'border-blue-500',
+          ringPrimary: 'focus:ring-blue-500',
+        };
+    }
+  };
+
+  const colors = getThemeColors();
+
   const [suites, setSuites] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showProvisionModal, setShowProvisionModal] = useState(false);
@@ -333,13 +362,13 @@ const TestSuiteSection = () => {
               <input
                 type="text"
                 placeholder="Search playbooks..."
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={`w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${colors.ringPrimary}`}
               />
             </div>
             <button
               onClick={loadSuites}
               disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50"
+              className={`flex items-center gap-2 px-4 py-2 ${colors.bgPrimary} text-white rounded-md ${colors.bgPrimaryHover} transition-colors disabled:opacity-50`}
             >
               <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
@@ -388,7 +417,7 @@ const TestSuiteSection = () => {
                           <div className="flex-1">
                             {/* Playbook Name */}
                             <div className="flex items-center gap-2 mb-2">
-                              <h3 className="text-blue-600 font-medium hover:underline cursor-pointer">
+                              <h3 className={`${colors.textPrimary} font-medium hover:underline cursor-pointer`}>
                                 {suite.config.name}
                               </h3>
                               {running && (
@@ -428,7 +457,7 @@ const TestSuiteSection = () => {
                             className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                               running
                                 ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                                : 'bg-blue-500 text-white hover:bg-blue-600'
+                                : `${colors.bgPrimary} text-white ${colors.bgPrimaryHover}`
                             }`}
                           >
                             {running ? (
@@ -465,7 +494,7 @@ const TestSuiteSection = () => {
               {playbookResults.success && !isRunningPlaybook ? (
                 <span className="text-2xl">✅</span>
               ) : playbookResults.success ? (
-                <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                <div className={`w-6 h-6 border-2 ${colors.borderPrimary} border-t-transparent rounded-full animate-spin`}></div>
               ) : (
                 <span className="text-xl">❌</span>
               )}
@@ -502,9 +531,9 @@ const TestSuiteSection = () => {
               <button
                 onClick={() => handleCopyOutput(playbookResults.output || 'No output available')}
                 className="px-3 py-1 text-white rounded text-xs font-medium transition-colors"
-                style={{ backgroundColor: '#2684FF' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#0065FF')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#2684FF')}
+                style={{ backgroundColor: colors.primaryHex }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.primaryHover)}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = colors.primaryHex)}
               >
                 {copySuccess || '📋 Copy'}
               </button>

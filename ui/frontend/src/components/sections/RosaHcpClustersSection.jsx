@@ -39,6 +39,8 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
           border: 'border-purple-200',
           lightBg: 'from-purple-50 to-violet-50',
           lightBorder: 'border-purple-200',
+          buttonBg: '#8B5CF6', // purple-600
+          buttonBgHover: '#7C3AED', // purple-700
         };
       case 'mce':
       default:
@@ -48,6 +50,8 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
           border: 'border-cyan-200',
           lightBg: 'from-cyan-50 to-blue-50',
           lightBorder: 'border-cyan-200',
+          buttonBg: '#2684FF', // blue
+          buttonBgHover: '#0065FF', // darker blue
         };
     }
   };
@@ -289,9 +293,9 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
           onClick={fetchClusters}
           disabled={clustersLoading}
           className="px-4 py-2 text-white rounded transition-colors disabled:opacity-50 font-medium flex items-center gap-2"
-          style={!clustersLoading ? { backgroundColor: '#2684FF' } : {}}
-          onMouseEnter={(e) => !clustersLoading && (e.currentTarget.style.backgroundColor = '#0065FF')}
-          onMouseLeave={(e) => !clustersLoading && (e.currentTarget.style.backgroundColor = '#2684FF')}
+          style={!clustersLoading ? { backgroundColor: colors.buttonBg } : {}}
+          onMouseEnter={(e) => !clustersLoading && (e.currentTarget.style.backgroundColor = colors.buttonBgHover)}
+          onMouseLeave={(e) => !clustersLoading && (e.currentTarget.style.backgroundColor = colors.buttonBg)}
         >
           <ArrowPathIcon className={`h-4 w-4 ${clustersLoading ? 'animate-spin' : ''}`} />
           Refresh
@@ -442,9 +446,9 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
               <button
                 onClick={() => handleCopyOutput(deletionResults.output || 'No output available')}
                 className="px-3 py-1 text-white rounded text-xs font-medium transition-colors"
-                style={{ backgroundColor: '#2684FF' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#0065FF')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#2684FF')}
+                style={{ backgroundColor: colors.buttonBg }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.buttonBgHover)}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = colors.buttonBg)}
               >
                 {copySuccess || '📋 Copy'}
               </button>
