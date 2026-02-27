@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { XMarkIcon, PaperAirplaneIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
-export function AIAssistantChat({ inline = false }) {
+export function AIAssistantChat({ inline = false, theme = 'mce' }) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
     {
@@ -11,6 +11,39 @@ export function AIAssistantChat({ inline = false }) {
       timestamp: new Date(),
     },
   ]);
+
+  // Get theme colors
+  const getThemeColors = () => {
+    switch (theme) {
+      case 'minikube':
+        return {
+          gradient: 'from-purple-50 to-violet-50',
+          border: 'border-purple-200',
+          text: 'text-purple-900',
+          userBg: 'bg-purple-600',
+          userBgHover: 'hover:bg-purple-700',
+          buttonBg: 'bg-purple-600',
+          buttonBgHover: 'hover:bg-purple-700',
+          focusRing: 'focus:ring-purple-500 focus:border-purple-500',
+          headerGradient: 'from-purple-600 to-violet-600',
+        };
+      case 'mce':
+      default:
+        return {
+          gradient: 'from-blue-50 to-cyan-50',
+          border: 'border-blue-200',
+          text: 'text-blue-900',
+          userBg: 'bg-blue-600',
+          userBgHover: 'hover:bg-blue-700',
+          buttonBg: 'bg-blue-600',
+          buttonBgHover: 'hover:bg-blue-700',
+          focusRing: 'focus:ring-blue-500 focus:border-blue-500',
+          headerGradient: 'from-blue-600 to-cyan-600',
+        };
+    }
+  };
+
+  const colors = getThemeColors();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef(null);
@@ -102,18 +135,18 @@ export function AIAssistantChat({ inline = false }) {
               <div
                 className={`max-w-[80%] rounded-lg px-4 py-2 ${
                   message.role === 'user'
-                    ? 'bg-blue-600 text-white'
+                    ? `${colors.userBg} text-white`
                     : message.isError
                       ? 'bg-red-50 text-red-900 border border-red-200'
                       : index === 0
-                        ? 'bg-gradient-to-r from-blue-50 to-cyan-50 text-gray-900 shadow-md border-2 border-blue-200'
+                        ? `bg-gradient-to-r ${colors.gradient} text-gray-900 shadow-md border-2 ${colors.border}`
                         : 'bg-white text-gray-900 shadow-sm'
                 }`}
               >
                 {index === 0 && message.role === 'assistant' && (
-                  <div className="flex items-center gap-2 mb-2 pb-2 border-b border-blue-200">
+                  <div className={`flex items-center gap-2 mb-2 pb-2 border-b ${colors.border}`}>
                     <span className="text-2xl">🤖</span>
-                    <span className="font-semibold text-blue-900">Welcome!</span>
+                    <span className={`font-semibold ${colors.text}`}>Welcome!</span>
                   </div>
                 )}
                 <p className="text-sm whitespace-pre-wrap">{message.content}</p>
@@ -183,13 +216,13 @@ export function AIAssistantChat({ inline = false }) {
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="Ask me anything about your clusters..."
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+              className={`flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 ${colors.focusRing} resize-none`}
               rows="2"
             />
             <button
               onClick={sendMessage}
               disabled={!input.trim() || isLoading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className={`px-4 py-2 ${colors.buttonBg} text-white rounded-lg ${colors.buttonBgHover} disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
             >
               <PaperAirplaneIcon className="h-5 w-5" />
             </button>
@@ -206,7 +239,7 @@ export function AIAssistantChat({ inline = false }) {
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 bg-gradient-to-r from-blue-600 to-cyan-600 text-white p-4 rounded-full shadow-lg hover:shadow-xl transform hover:scale-110 transition-all duration-200"
+          className={`fixed bottom-6 right-6 bg-gradient-to-r ${colors.headerGradient} text-white p-4 rounded-full shadow-lg hover:shadow-xl transform hover:scale-110 transition-all duration-200`}
           style={{ zIndex: 9999 }}
         >
           <SparklesIcon className="h-6 w-6" />
@@ -220,7 +253,7 @@ export function AIAssistantChat({ inline = false }) {
           style={{ zIndex: 9999 }}
         >
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-4 py-3 rounded-t-lg flex items-center justify-between">
+          <div className={`bg-gradient-to-r ${colors.headerGradient} text-white px-4 py-3 rounded-t-lg flex items-center justify-between`}>
             <div className="flex items-center gap-2">
               <SparklesIcon className="h-5 w-5" />
               <h3 className="font-semibold">AI Assistant</h3>
@@ -243,18 +276,18 @@ export function AIAssistantChat({ inline = false }) {
                 <div
                   className={`max-w-[80%] rounded-lg px-4 py-2 ${
                     message.role === 'user'
-                      ? 'bg-blue-600 text-white'
+                      ? `${colors.userBg} text-white`
                       : message.isError
                         ? 'bg-red-50 text-red-900 border border-red-200'
                         : index === 0
-                          ? 'bg-gradient-to-r from-blue-50 to-cyan-50 text-gray-900 shadow-md border-2 border-blue-200'
+                          ? `bg-gradient-to-r ${colors.gradient} text-gray-900 shadow-md border-2 ${colors.border}`
                           : 'bg-gray-100 text-gray-900'
                   }`}
                 >
                   {index === 0 && message.role === 'assistant' && (
-                    <div className="flex items-center gap-2 mb-2 pb-2 border-b border-blue-200">
+                    <div className={`flex items-center gap-2 mb-2 pb-2 border-b ${colors.border}`}>
                       <span className="text-2xl">🤖</span>
-                      <span className="font-semibold text-blue-900">Welcome!</span>
+                      <span className={`font-semibold ${colors.text}`}>Welcome!</span>
                     </div>
                   )}
                   <p className="text-sm whitespace-pre-wrap">{message.content}</p>
@@ -324,13 +357,13 @@ export function AIAssistantChat({ inline = false }) {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Ask me anything about your clusters..."
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                className={`flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 ${colors.focusRing} resize-none`}
                 rows="2"
               />
               <button
                 onClick={sendMessage}
                 disabled={!input.trim() || isLoading}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className={`px-4 py-2 ${colors.buttonBg} text-white rounded-lg ${colors.buttonBgHover} disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
               >
                 <PaperAirplaneIcon className="h-5 w-5" />
               </button>

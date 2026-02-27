@@ -12,6 +12,7 @@ import TestSuiteDashboard from '../components/sections/TestSuiteDashboard';
 import TestSuiteSection from '../components/sections/TestSuiteSection';
 import HelmChartTestDashboard from '../components/sections/HelmChartTestDashboard';
 import ResourcesViewer from '../components/ResourcesViewer';
+import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import {
   useMinikubeContext,
   useRecentOperationsContext,
@@ -1128,6 +1129,7 @@ const MinikubeDashboardContent = () => {
     onTestClick: () => setActiveSection('test'),
     onTestSuiteDashboardClick: () => setActiveSection('test-suite-dashboard'),
     onTestAutomationClick: () => setActiveSection('test-automation'),
+    onAIAssistantClick: () => setActiveSection('ai-assistant'),
     onHelmChartMatrixClick: () => setActiveSection('helm-chart-matrix'),
     onTerminalClick: () => setActiveSection('terminal'),
     onNotificationsClick: () => setActiveSection('notifications'),
@@ -1553,9 +1555,7 @@ const MinikubeDashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-purple-900">Provision Resources</h2>
-
-            <p className="text-gray-600 mb-4">View and manage CAPI/CAPA Kubernetes resources.</p>
+            <h2 className="text-2xl font-bold text-purple-900">CAPA Resources</h2>
 
             <ResourcesViewer theme="minikube" />
           </div>
@@ -1635,6 +1635,20 @@ const MinikubeDashboardContent = () => {
             <h2 className="text-2xl font-bold text-purple-900">Playbooks</h2>
 
             <TestSuiteSection theme="minikube" />
+          </div>
+        );
+
+      case 'ai-assistant':
+        return (
+          <div className="space-y-6">
+            {/* Title */}
+            <h2 className="text-2xl font-bold text-purple-900">AI Assistant</h2>
+
+            <p className="text-gray-600">
+              Chat with the AI assistant to get help with CAPI/CAPA automation, troubleshooting, and best practices.
+            </p>
+
+            <AIAssistantChat inline={true} theme="minikube" />
           </div>
         );
 
