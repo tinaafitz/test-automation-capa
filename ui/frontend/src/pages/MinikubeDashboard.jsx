@@ -1088,6 +1088,12 @@ const MinikubeDashboardContent = () => {
       });
 
       if (response.ok) {
+        // If this is a Minikube cluster, also update the Minikube context
+        if (credentials.minikubeCluster) {
+          setSelectedMinikubeCluster(credentials.minikubeCluster);
+          setMinikubeClusterInput(credentials.minikubeCluster);
+        }
+
         // Show inline success message
         setCredentialMessage(`Environment set to ${credentials.clusterName}! You can now configure the environment.`);
         setCredentialMessageType('success');

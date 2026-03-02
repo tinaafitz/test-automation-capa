@@ -117,6 +117,7 @@ const MCEEnvironmentSelector = ({
   const [statusFilter, setStatusFilter] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
   const [stats, setStats] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
   const [copiedCommand, setCopiedCommand] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [createMessage, setCreateMessage] = useState('');
@@ -220,10 +221,14 @@ const MCEEnvironmentSelector = ({
 
   const selectEnvironment = async (clusterName) => {
     try {
+      // Clear any previous error messages
+      setErrorMessage('');
+
       let response;
 
       if (environmentType === 'minikube') {
         // For minikube, verify-cluster is a POST endpoint
+        console.log('🔍 Selecting Minikube cluster:', clusterName);
         response = await fetch('http://localhost:8000/api/minikube/verify-cluster', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -235,27 +240,34 @@ const MCEEnvironmentSelector = ({
       }
 
       const data = await response.json();
+      console.log('📡 Cluster selection response:', data);
 
       if (environmentType === 'minikube') {
         // For minikube, construct a selectedEnv object from the verify response
         if (data.exists && data.accessible) {
+          console.log('✅ Minikube cluster verified, showing details');
           setSelectedEnv({
             clusterName: clusterName,
             name: clusterName,
             platform: 'Minikube',
             status: 'pass',
-            clusterStatus: 'Running',
+            clusterStatus: data.status || 'Running',
+            ocpVersion: data.cluster_info?.kubernetesVersion || 'N/A',
             lastAccessed: new Date().toISOString(),
             loginCommand: `kubectl config use-context ${clusterName}`,
             // Add any additional info from the verification response
             ...data.cluster_info,
           });
+        } else {
+          console.warn('⚠️ Minikube cluster verification failed:', data);
+          setErrorMessage(`Failed to verify cluster "${clusterName}". The cluster may not be running or accessible.`);
         }
       } else if (data.success) {
         setSelectedEnv(data.environment || data.cluster);
       }
     } catch (error) {
-      console.error('Error fetching environment details:', error);
+      console.error('❌ Error fetching environment details:', error);
+      setErrorMessage(`Error selecting cluster: ${error.message}`);
     }
   };
 
@@ -842,6 +854,24 @@ const MCEEnvironmentSelector = ({
             </div>
           </div>
         )}
+        </div>
+      )}
+
+      {/* Error Message Display */}
+      {errorMessage && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+          <div className="flex items-start gap-3">
+            <ExclamationCircleIcon className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-800">{errorMessage}</p>
+            </div>
+            <button
+              onClick={() => setErrorMessage('')}
+              className="text-red-600 hover:text-red-800 text-sm font-medium"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
