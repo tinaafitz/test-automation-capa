@@ -225,6 +225,14 @@ const NotificationSettingsInline = () => {
     notify_on_start: false,
     notify_on_complete: true,
     notify_on_failure: true,
+    // Provision notification preferences
+    notify_provision_start: false,
+    notify_provision_success: true,
+    notify_provision_failure: true,
+    // Delete notification preferences
+    notify_delete_start: false,
+    notify_delete_success: true,
+    notify_delete_failure: true,
   });
 
   useEffect(() => {
@@ -460,6 +468,110 @@ const NotificationSettingsInline = () => {
             </div>
           )}
 
+          {/* Notification Preferences Section */}
+          <div className="border-t pt-6 mt-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Notification Preferences</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Choose when you want to receive notifications for cluster operations
+            </p>
+
+            <div className="space-y-4">
+              {/* Provisioning Notifications */}
+              <details className="bg-gray-50 rounded-lg border border-gray-200">
+                <summary className="cursor-pointer p-4 font-semibold text-gray-800 hover:bg-gray-100 rounded-lg">
+                  Cluster Provisioning
+                </summary>
+                <div className="space-y-2 p-4 pt-2">
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_provision_start}
+                      onChange={(e) => handleInputChange('notify_provision_start', e.target.checked)}
+                      className="h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Provisioning starts</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster provisioning begins</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_provision_success}
+                      onChange={(e) => handleInputChange('notify_provision_success', e.target.checked)}
+                      className="h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Provisioning completes</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster is provisioned successfully</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_provision_failure}
+                      onChange={(e) => handleInputChange('notify_provision_failure', e.target.checked)}
+                      className="h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Provisioning failures only</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster provisioning fails</p>
+                    </div>
+                  </label>
+                </div>
+              </details>
+
+              {/* Deletion Notifications */}
+              <details className="bg-gray-50 rounded-lg border border-gray-200">
+                <summary className="cursor-pointer p-4 font-semibold text-gray-800 hover:bg-gray-100 rounded-lg">
+                  Cluster Deletion
+                </summary>
+                <div className="space-y-2 p-4 pt-2">
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_delete_start}
+                      onChange={(e) => handleInputChange('notify_delete_start', e.target.checked)}
+                      className="h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Deletion starts</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster deletion begins</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_delete_success}
+                      onChange={(e) => handleInputChange('notify_delete_success', e.target.checked)}
+                      className="h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Deletion completes</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster is deleted successfully</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_delete_failure}
+                      onChange={(e) => handleInputChange('notify_delete_failure', e.target.checked)}
+                      className="h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Deletion failures only</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster deletion fails</p>
+                    </div>
+                  </label>
+                </div>
+              </details>
+            </div>
+          </div>
+
           {/* Save Button */}
           <div className="flex justify-end pt-4 border-t">
             <button
@@ -497,6 +609,7 @@ const CAPADashboardContent = () => {
   const [verificationResults, setVerificationResults] = useState(null);
   const [configurationResults, setConfigurationResults] = useState(null);
   const [provisionResults, setProvisionResults] = useState(null);
+  const [selectedTestSuite, setSelectedTestSuite] = useState(null); // For test suite provisioning
   const [mceLastConfigured, setMceLastConfigured] = useState(null);
   const [isConfiguring, setIsConfiguring] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -1214,6 +1327,7 @@ const CAPADashboardContent = () => {
         cluster_name: config.clusterName,
         feature_type: 'rosa-hcp-provision',
         config: config, // Store config for later provisioning
+        testSuite: selectedTestSuite, // Store test suite if provisioning from Feature Test Dashboard
       });
       setProvisionViewMode('yaml');
 
@@ -1276,6 +1390,7 @@ const CAPADashboardContent = () => {
     onConfigureClick: () => setActiveSection('configure'),
     onProvisionClick: () => {
       setProvisionResults(null); // Clear previous provision results
+      setSelectedTestSuite(null); // Clear any test suite selection
       setActiveSection('provision');
     },
     onRosaHcpClustersClick: () => setActiveSection('rosa-hcp-clusters'),
@@ -1575,7 +1690,7 @@ const CAPADashboardContent = () => {
               <h2 className="text-2xl font-bold text-blue-900">
                 {provisionViewMode === 'yaml' ? 'Review & Edit Provisioning YAML' : 'Provision ROSA HCP Cluster'}
               </h2>
-              {provisionViewMode === 'yaml' && (
+              {provisionViewMode === 'yaml' && !isProvisioning && (
                 <button
                   onClick={() => setProvisionViewMode('form')}
                   className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
@@ -1584,6 +1699,21 @@ const CAPADashboardContent = () => {
                 </button>
               )}
             </div>
+
+            {/* Provisioning in Progress Banner */}
+            {isProvisioning && !provisionResults && (
+              <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4">
+                <div className="flex items-center gap-3">
+                  <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                  <div>
+                    <h3 className="font-semibold text-blue-900">Provisioning in Progress</h3>
+                    <p className="text-sm text-blue-700 mt-1">
+                      A cluster provisioning operation is currently running. Please wait for it to complete before starting a new provision.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Loading indicator while checking for running jobs */}
             {isCheckingProvisionJob ? (
@@ -1594,8 +1724,8 @@ const CAPADashboardContent = () => {
                 </div>
               </div>
             ) : (
-              /* Toggle between Form and YAML Editor - Only show if no provision results */
-              !provisionResults && (
+              /* Toggle between Form and YAML Editor - Only show if no provision results and not provisioning */
+              !provisionResults && !isProvisioning && (
                 provisionViewMode === 'form' ? (
                   /* Provision Form - Inline */
                   <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -1605,6 +1735,7 @@ const CAPADashboardContent = () => {
                       onClose={() => {}} // No close action needed for inline form
                       onSubmit={handleProvisionSubmit}
                       mceInfo={mceInfo}
+                      testSuite={selectedTestSuite}
                     />
                   </div>
                 ) : (
@@ -1625,6 +1756,10 @@ const CAPADashboardContent = () => {
 
                   const provisionId = `provision-rosa-${Date.now()}`;
 
+                  // Check if this is from Feature Test Dashboard
+                  const testSuite = yamlEditorData?.testSuite;
+                  const titlePrefix = testSuite ? '🧪 Feature Test' : '🚀 Provision ROSA HCP';
+
                   try {
                     setIsProvisioning(true);
 
@@ -1637,7 +1772,7 @@ const CAPADashboardContent = () => {
 
                     addToRecent({
                       id: provisionId,
-                      title: `🚀 Provision ROSA HCP: ${config.clusterName}`,
+                      title: `${titlePrefix}: ${config.clusterName}`,
                       color: 'bg-green-600',
                       status: '🚀 Starting provisioning...',
                       environment: 'mce',
@@ -1859,10 +1994,11 @@ const CAPADashboardContent = () => {
         return (
           <TestSuiteDashboard
             theme="mce"
+            isProvisioning={isProvisioning}
             onSelectTestSuite={async (testSuite) => {
               console.log('Selected test suite:', testSuite);
 
-              // Map test suite to playbook
+              // Map test suite to playbook for direct execution (if playbook exists)
               const playbookMap = {
                 'ImageType Testing Suite': 'test_imagetype.yaml',
                 'Audit Log Forwarding': 'test-rosa-log-forwarding.yml',
@@ -1871,8 +2007,19 @@ const CAPADashboardContent = () => {
 
               const playbookFile = playbookMap[testSuite.name];
 
+              // If no playbook mapping exists, navigate to provision section with pre-filled config
               if (!playbookFile) {
-                alert(`Test suite "${testSuite.name}" execution not yet implemented.\n\nAvailable: ImageType Testing Suite, Audit Log Forwarding`);
+                console.log('📋 Opening provision modal with pre-filled test configuration:', testSuite.name);
+
+                // Set the selected test suite (this will pre-fill the provision form)
+                setSelectedTestSuite(testSuite);
+
+                // Reset provision state to show form
+                setProvisionResults(null);
+                setProvisionViewMode('form');
+
+                // Navigate to provision section
+                setActiveSection('provision');
                 return;
               }
 
@@ -2198,6 +2345,10 @@ const CAPADashboardContent = () => {
 
           const provisionId = `provision-rosa-${Date.now()}`;
 
+          // Check if this is from Feature Test Dashboard
+          const testSuite = yamlEditorData?.testSuite;
+          const titlePrefix = testSuite ? '🧪 Feature Test' : '🚀 Provision ROSA HCP';
+
           try {
             setIsProvisioning(true);
 
@@ -2210,7 +2361,7 @@ const CAPADashboardContent = () => {
 
             addToRecent({
               id: provisionId,
-              title: `🚀 Provision ROSA HCP: ${config.clusterName}`,
+              title: `${titlePrefix}: ${config.clusterName}`,
               color: 'bg-green-600',
               status: '🚀 Starting provisioning...',
               environment: 'mce',
