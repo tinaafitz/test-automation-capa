@@ -139,6 +139,12 @@ const CapaSidebar = ({
       onClick: onTestAutomationClick
     },
     {
+      id: 'test-suite-dashboard',
+      label: 'Feature Test Dashboard',
+      icon: <span className="text-lg">🧪</span>,
+      onClick: onTestSuiteDashboardClick
+    },
+    {
       id: 'helm-chart-matrix',
       label: 'Helm Chart Test Matrix',
       icon: <span className="text-lg">📊</span>,
