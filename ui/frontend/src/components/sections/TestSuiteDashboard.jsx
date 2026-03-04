@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import { BeakerIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
+import { BeakerIcon, ChevronDownIcon, ChevronUpIcon, DocumentDuplicateIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 
-const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite }) => {
+const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite, isProvisioning = false }) => {
   const [selectedVersion, setSelectedVersion] = useState('4.21');
   const [expandedItems, setExpandedItems] = useState({});
+  const [copySuccess, setCopySuccess] = useState(false);
   const [testItems, setTestItems] = useState([
     {
       id: 1,
@@ -240,6 +241,61 @@ const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite }) => {
     onSelectTestSuite && onSelectTestSuite(selectedTest);
   };
 
+  const handleCopyToClipboard = () => {
+    const testData = {
+      version: selectedVersion,
+      testSuites: testItems.map(item => ({
+        id: item.id,
+        name: item.name,
+        category: item.category,
+        priority: item.priority,
+        phase: item.phase,
+        description: item.description,
+        components: item.components,
+        jira: item.jira,
+        status: item.status,
+      }))
+    };
+
+    navigator.clipboard.writeText(JSON.stringify(testData, null, 2))
+      .then(() => {
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      })
+      .catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+      });
+  };
+
+  const handleDownloadJSON = () => {
+    const testData = {
+      version: selectedVersion,
+      generatedAt: new Date().toISOString(),
+      testSuites: testItems.map(item => ({
+        id: item.id,
+        name: item.name,
+        category: item.category,
+        priority: item.priority,
+        phase: item.phase,
+        description: item.description,
+        components: item.components,
+        jira: item.jira,
+        status: item.status,
+      }))
+    };
+
+    const blob = new Blob([JSON.stringify(testData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `rosa-hcp-feature-tests-${selectedVersion}-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const getStatusIcon = (status) => {
     switch (status) {
       case 'running':
@@ -285,9 +341,9 @@ const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite }) => {
     <div className="space-y-6">
       {/* Page Title */}
       <div>
-        <h2 className="text-2xl font-bold text-blue-900">Test Suite Dashboard</h2>
+        <h2 className="text-2xl font-bold text-blue-900">Feature Test Dashboard</h2>
         <p className="text-gray-600 mt-2">
-          🧪 Manage and execute comprehensive ROSA HCP test suites for cluster lifecycle testing.
+          🧪 Manage and execute comprehensive ROSA HCP feature tests for cluster lifecycle testing.
         </p>
       </div>
 
@@ -324,6 +380,28 @@ const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite }) => {
               >
                 {testItems.every((item) => item.selected) ? 'Deselect All' : 'Select All'}
               </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCopyToClipboard();
+                }}
+                className="px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition-colors text-xs font-medium flex items-center gap-1.5"
+                title="Copy test suite data to clipboard"
+              >
+                <DocumentDuplicateIcon className="h-4 w-4" />
+                {copySuccess ? 'Copied!' : 'Copy'}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDownloadJSON();
+                }}
+                className="px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition-colors text-xs font-medium flex items-center gap-1.5"
+                title="Download test suite data as JSON"
+              >
+                <ArrowDownTrayIcon className="h-4 w-4" />
+                Download
+              </button>
             </div>
 
             <button
@@ -331,13 +409,14 @@ const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite }) => {
                 e.stopPropagation();
                 handleProvisionSelected();
               }}
-              disabled={testItems.filter((item) => item.selected).length === 0}
+              disabled={testItems.filter((item) => item.selected).length === 0 || isProvisioning}
               className="px-4 py-1.5 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
-              style={testItems.filter((item) => item.selected).length > 0 ? { backgroundColor: '#2684FF' } : {}}
-              onMouseEnter={(e) => testItems.filter((item) => item.selected).length > 0 && (e.currentTarget.style.backgroundColor = '#0065FF')}
-              onMouseLeave={(e) => testItems.filter((item) => item.selected).length > 0 && (e.currentTarget.style.backgroundColor = '#2684FF')}
+              style={testItems.filter((item) => item.selected).length > 0 && !isProvisioning ? { backgroundColor: '#2684FF' } : {}}
+              onMouseEnter={(e) => testItems.filter((item) => item.selected).length > 0 && !isProvisioning && (e.currentTarget.style.backgroundColor = '#0065FF')}
+              onMouseLeave={(e) => testItems.filter((item) => item.selected).length > 0 && !isProvisioning && (e.currentTarget.style.backgroundColor = '#2684FF')}
+              title={isProvisioning ? 'Provisioning in progress - please wait' : 'Provision selected test suite'}
             >
-              🚀 Provision & Test Selected
+              {isProvisioning ? '⏳ Provisioning...' : '🚀 Provision & Test Selected'}
             </button>
           </div>
 
@@ -472,6 +551,7 @@ const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite }) => {
 TestSuiteDashboard.propTypes = {
   theme: PropTypes.string,
   onSelectTestSuite: PropTypes.func,
+  isProvisioning: PropTypes.bool,
 };
 
 export default TestSuiteDashboard;
