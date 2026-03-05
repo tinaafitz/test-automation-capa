@@ -25,26 +25,56 @@ const CredentialsModal = ({ isOpen, onClose, theme = 'mce', onSave, inline = fal
     OCM_CLIENT_SECRET: '',
   });
 
-  // Fetch current credentials when modal opens
+  // Fetch current credentials when modal opens or on mount
   useEffect(() => {
     if (isOpen) {
+      console.log('[CredentialsModal] useEffect triggered, isOpen=', isOpen, 'inline=', inline);
       fetchCredentials();
     }
-  }, [isOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, inline]); // fetchCredentials is stable, safe to omit from deps
 
   const fetchCredentials = async () => {
     setLoading(true);
     try {
+      console.log('[CredentialsModal] Fetching credentials from:', buildApiUrl('/api/credentials'));
+
       const response = await fetch(buildApiUrl('/api/credentials'));
+      console.log('[CredentialsModal] Response status:', response.status, response.ok);
+
       if (response.ok) {
         const data = await response.json();
+        console.log('[CredentialsModal] Credentials data:', data);
         if (data.credentials) {
           setCredentials(data.credentials);
+        } else {
+          console.warn('[CredentialsModal] No credentials in response');
+          // Set empty credentials if none exist
+          setCredentials({
+            OCP_HUB_API_URL: '',
+            OCP_HUB_CLUSTER_USER: '',
+            OCP_HUB_CLUSTER_PASSWORD: '',
+            AWS_REGION: '',
+            AWS_ACCESS_KEY_ID: '',
+            AWS_SECRET_ACCESS_KEY: '',
+            OCM_CLIENT_ID: '',
+            OCM_CLIENT_SECRET: '',
+          });
         }
+      } else {
+        console.error('[CredentialsModal] HTTP error:', response.status, response.statusText);
       }
     } catch (error) {
-      console.error('Failed to fetch credentials:', error);
+      // Ignore AbortError - this happens when component unmounts or React Strict Mode double-renders
+      if (error.name === 'AbortError') {
+        console.log('[CredentialsModal] Fetch aborted (component unmounted or React Strict Mode)');
+        return; // Don't set loading=false, component is unmounting
+      }
+      console.error('[CredentialsModal] Failed to fetch credentials:', error);
+      console.error('[CredentialsModal] Error name:', error.name);
+      console.error('[CredentialsModal] Error message:', error.message);
     } finally {
+      console.log('[CredentialsModal] Setting loading=false');
       setLoading(false);
     }
   };
