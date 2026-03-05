@@ -20,6 +20,7 @@ import {
   validateApiResponse,
   extractSafeErrorMessage,
 } from '../../config/api';
+import ProvisionFailureAgentPanel from '../agents/ProvisionFailureAgentPanel';
 
 const RosaHcpClustersSection = ({ theme = 'mce' }) => {
   const app = useApp();
@@ -184,7 +185,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
 
       // Poll for job completion
       const pollJobStatus = async () => {
-        const maxAttempts = 1800; // 30 minutes max (deletion can take a while)
+        const maxAttempts = 2100; // 35 minutes max (20 min RCP + 15 min Network)
         let attempts = 0;
 
         while (attempts < maxAttempts) {
@@ -252,7 +253,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         }
 
         // Timeout
-        throw new Error('Deletion timed out after 30 minutes');
+        throw new Error('Deletion timed out after 35 minutes');
       };
 
       await pollJobStatus();
@@ -427,38 +428,52 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
 
       {/* Deletion Results Display - Inline Playbook Output */}
       {deletionResults && (
-        <div className={`mt-6 rounded-lg border-2 p-6 ${deletionResults.success ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
-          <div className="flex items-center gap-3 mb-4">
-            {deletionResults.success ? (
-              <span className="text-2xl">✅</span>
-            ) : (
-              <span className="text-xl">❌</span>
-            )}
-            <h3 className="text-lg font-semibold text-gray-900">
-              {isDeleting ? `Deleting ${deletionResults.clusterName}...` : deletionResults.success ? 'Deletion Completed' : 'Deletion Failed'}
-            </h3>
+        <div className="mt-6 space-y-4">
+          <div className={`rounded-lg border-2 p-6 ${deletionResults.success ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+            <div className="flex items-center gap-3 mb-4">
+              {deletionResults.success ? (
+                <span className="text-2xl">✅</span>
+              ) : (
+                <span className="text-xl">❌</span>
+              )}
+              <h3 className="text-lg font-semibold text-gray-900">
+                {isDeleting ? `Deleting ${deletionResults.clusterName}...` : deletionResults.success ? 'Deletion Completed' : 'Deletion Failed'}
+              </h3>
+            </div>
+
+            {/* Output Display */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-medium text-gray-700">Playbook Output:</h4>
+                <button
+                  onClick={() => handleCopyOutput(deletionResults.output || 'No output available')}
+                  className="px-3 py-1 text-white rounded text-xs font-medium transition-colors"
+                  style={{ backgroundColor: colors.buttonBg }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.buttonBgHover)}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = colors.buttonBg)}
+                >
+                  {copySuccess || '📋 Copy'}
+                </button>
+              </div>
+              <div className="bg-gray-900 text-gray-100 rounded p-4 max-h-96 overflow-y-auto font-mono text-sm">
+                <pre className="whitespace-pre-wrap">
+                  {deletionResults.output || 'No output available'}
+                </pre>
+              </div>
+            </div>
           </div>
 
-          {/* Output Display */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-medium text-gray-700">Playbook Output:</h4>
-              <button
-                onClick={() => handleCopyOutput(deletionResults.output || 'No output available')}
-                className="px-3 py-1 text-white rounded text-xs font-medium transition-colors"
-                style={{ backgroundColor: colors.buttonBg }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.buttonBgHover)}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = colors.buttonBg)}
-              >
-                {copySuccess || '📋 Copy'}
-              </button>
-            </div>
-            <div className="bg-gray-900 text-gray-100 rounded p-4 max-h-96 overflow-y-auto font-mono text-sm">
-              <pre className="whitespace-pre-wrap">
-                {deletionResults.output || 'No output available'}
-              </pre>
-            </div>
-          </div>
+          {/* AI Agent Panel - Show when deletion fails */}
+          {!deletionResults.success && !isDeleting && (
+            <ProvisionFailureAgentPanel
+              clusterName={deletionResults.clusterName}
+              errorMessage="Cluster deletion failed"
+              errorLogs={deletionResults.output || ''}
+              onRetry={() => executeDeleteCluster(deletionResults.clusterName, 'ns-rosa-hcp')}
+              onClose={() => setDeletionResults(null)}
+              addToRecentOperations={addToRecent}
+            />
+          )}
         </div>
       )}
     </div>
