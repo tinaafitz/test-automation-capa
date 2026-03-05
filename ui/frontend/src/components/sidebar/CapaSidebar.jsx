@@ -239,6 +239,24 @@ const CapaSidebar = ({
                 <span className="text-lg">🤖</span>
                 <span className="text-sm font-medium text-gray-900">Jenkins Dashboard</span>
               </a>
+              <a
+                href="https://github.com/tinaafitz/test-automation-capa"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full px-4 py-2.5 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 block"
+              >
+                <span className="text-lg">📦</span>
+                <span className="text-sm font-medium text-gray-900">GitHub Repository</span>
+              </a>
+              <a
+                href="https://console.dev.redhat.com/openshift/clusters/list"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full px-4 py-2.5 text-left hover:bg-red-50 transition-colors flex items-center gap-3 block"
+              >
+                <span className="text-lg">🔴</span>
+                <span className="text-sm font-medium text-gray-900">OpenShift Staging Cluster List</span>
+              </a>
             </div>
           </div>
         )}
