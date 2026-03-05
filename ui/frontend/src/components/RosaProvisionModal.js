@@ -357,7 +357,7 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
               value={config.clusterName}
               onChange={(e) => handleChange('clusterName', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="test-418-rosa-hcp"
+              placeholder="test-421-rosa-hcp"
             />
             <p className="mt-1 text-xs text-gray-500">Name for your ROSA HCP cluster</p>
           </div>
@@ -1128,7 +1128,7 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
                 <span className="text-gray-700">
                   Cluster:{' '}
                   <span className="font-mono font-semibold">
-                    {config.clusterName || 'test-418-rosa-hcp'}
+                    {config.clusterName || 'test-421-rosa-hcp'}
                   </span>
                 </span>
               </div>

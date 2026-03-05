@@ -142,7 +142,8 @@ const CapaSidebar = ({
       id: 'test-suite-dashboard',
       label: 'Feature Test Dashboard',
       icon: <span className="text-lg">🧪</span>,
-      onClick: onTestSuiteDashboardClick
+      onClick: onTestSuiteDashboardClick,
+      showInEnvironments: ['mce'] // Only show in MCE, not minikube
     },
     {
       id: 'helm-chart-matrix',

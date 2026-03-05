@@ -1027,10 +1027,13 @@ const MinikubeDashboardContent = () => {
         const credResponse = await fetch('http://localhost:8000/api/credentials');
         const credData = await credResponse.json();
 
-        if (credData.success && credData.credentials && credData.credentials.clusterName) {
+        // Check for either minikubeCluster or clusterName field
+        const savedCluster = credData.credentials?.minikubeCluster || credData.credentials?.clusterName;
+
+        if (credData.success && savedCluster) {
           // User has selected a minikube cluster - use it
           setMinikubeInfo({
-            name: credData.credentials.clusterName,
+            name: savedCluster,
             api_url: `https://127.0.0.1:${credData.credentials.apiPort || 8443}`,
             status: 'Running',
           });
@@ -1159,6 +1162,78 @@ const MinikubeDashboardContent = () => {
               <p className="text-gray-600 mb-6">
                 Enable and configure CAPI/CAPA components on your Minikube environment.
               </p>
+
+              {/* Configuration Method Selector */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-900 mb-3">
+                  Configuration Method
+                </label>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Clusterctl Option */}
+                  <button
+                    onClick={() => setInstallMethod('clusterctl')}
+                    disabled={isConfiguring}
+                    className={`p-4 border-2 rounded-lg transition-all ${
+                      installMethod === 'clusterctl'
+                        ? 'border-purple-600 bg-purple-50'
+                        : 'border-gray-200 hover:border-purple-300'
+                    } ${isConfiguring ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                        installMethod === 'clusterctl'
+                          ? 'border-purple-600 bg-purple-600'
+                          : 'border-gray-300'
+                      }`}>
+                        {installMethod === 'clusterctl' && (
+                          <div className="w-2 h-2 bg-white rounded-full"></div>
+                        )}
+                      </div>
+                      <div className="text-left flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-lg">⚡</span>
+                          <span className="font-semibold text-gray-900">Cluster API (clusterctl)</span>
+                        </div>
+                        <p className="text-xs text-gray-600">
+                          Official Cluster API CLI tool - recommended for production use and custom CAPA images
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Helm Option */}
+                  <button
+                    onClick={() => setInstallMethod('helm')}
+                    disabled={isConfiguring}
+                    className={`p-4 border-2 rounded-lg transition-all ${
+                      installMethod === 'helm'
+                        ? 'border-purple-600 bg-purple-50'
+                        : 'border-gray-200 hover:border-purple-300'
+                    } ${isConfiguring ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                        installMethod === 'helm'
+                          ? 'border-purple-600 bg-purple-600'
+                          : 'border-gray-300'
+                      }`}>
+                        {installMethod === 'helm' && (
+                          <div className="w-2 h-2 bg-white rounded-full"></div>
+                        )}
+                      </div>
+                      <div className="text-left flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-lg">📦</span>
+                          <span className="font-semibold text-gray-900">Helm Charts</span>
+                        </div>
+                        <p className="text-xs text-gray-600">
+                          Helm-based installation - simpler setup, good for development and testing
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
 
               <button
                 onClick={() => handleConfigure()}

@@ -18,10 +18,13 @@ const ActiveEnvironmentBanner = ({ verificationTimestamp = null, environment = '
         const credResponse = await fetch('http://localhost:8000/api/credentials');
         const credData = await credResponse.json();
 
-        if (credData.success && credData.credentials && credData.credentials.clusterName) {
+        // Check for either minikubeCluster or clusterName field
+        const savedCluster = credData.credentials?.minikubeCluster || credData.credentials?.clusterName;
+
+        if (credData.success && savedCluster) {
           // User has selected a minikube cluster
           setMinikubeInfo({
-            name: credData.credentials.clusterName,
+            name: savedCluster,
             api_url: `https://127.0.0.1:${credData.credentials.apiPort || 8443}`,
             status: 'Running',
           });
