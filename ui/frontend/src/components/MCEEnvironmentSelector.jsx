@@ -56,8 +56,8 @@ const getStatusConfig = (theme = 'mce') => {
 
 const MCEEnvironmentSelector = ({
   onUseCredentials,
-  title = 'MCE Test Environments',
-  titleSingular = 'MCE Test Environment',
+  title = 'MCE Environments',
+  titleSingular = 'MCE Environment',
   theme = 'mce',
   environmentType = 'mce' // 'mce' or 'minikube'
 }) => {

@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars */
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ChartBarIcon,
   Cog6ToothIcon,
@@ -11,6 +12,7 @@ import {
   ClockIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  Bars3Icon,
 } from '@heroicons/react/24/outline';
 import { useRecentOperationsContext, useApiStatusContext } from '../../store/AppContext';
 
@@ -48,8 +50,10 @@ const CapaSidebar = ({
   const recentOps = useRecentOperationsContext();
   const apiStatus = useApiStatusContext();
 
-  // Get all recent operations for display in sidebar
-  const recentTests = recentOps.recentOperations || [];
+  // Get recent operations filtered by current environment
+  const recentTests = (recentOps.recentOperations || []).filter(
+    (op) => op.environment === environment
+  );
 
   // Format timestamp for display
   const formatTime = (timestamp) => {
@@ -185,11 +189,59 @@ const CapaSidebar = ({
     return item.showInEnvironments.includes(environment);
   });
 
+  const [showEnvMenu, setShowEnvMenu] = useState(false);
+  const navigate = useNavigate();
+
+  const handleEnvironmentSwitch = (url) => {
+    navigate(url);
+    setShowEnvMenu(false); // Close menu after navigation
+  };
+
   return (
-    <div className="w-64 bg-gray-100 border-r border-gray-300 flex flex-col h-full">
-      {/* Sidebar Title */}
-      <div className="flex-shrink-0 bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-4 border-b border-blue-400 flex items-center h-[72px]">
-        <h1 className="text-2xl font-bold text-white leading-tight">CAPA Automation</h1>
+    <div className="w-72 bg-gray-100 border-r border-gray-300 flex flex-col h-full">
+      {/* Sidebar Title - White background with black text */}
+      <div className="flex-shrink-0 bg-white px-4 py-4 border-b border-gray-300 h-[72px] relative">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold text-gray-900 leading-tight flex-1">CAPA Automation</h1>
+          <button
+            onClick={() => setShowEnvMenu(!showEnvMenu)}
+            className="p-2 hover:bg-gray-100 rounded transition-colors flex-shrink-0"
+            title="Environment Menu"
+          >
+            <Bars3Icon className="h-6 w-6 text-gray-600" />
+          </button>
+        </div>
+
+        {/* Environment Menu */}
+        {showEnvMenu && (
+          <div className="absolute top-[72px] left-0 right-0 bg-white border-b border-gray-300 shadow-lg z-50">
+            <div className="py-2">
+              <button
+                onClick={() => handleEnvironmentSwitch('/mce')}
+                className="w-full px-4 py-2.5 text-left hover:bg-blue-50 transition-colors flex items-center gap-3"
+              >
+                <span className="text-lg">🌐</span>
+                <span className="text-sm font-medium text-gray-900">MCE Environment</span>
+              </button>
+              <button
+                onClick={() => handleEnvironmentSwitch('/minikube')}
+                className="w-full px-4 py-2.5 text-left hover:bg-purple-50 transition-colors flex items-center gap-3"
+              >
+                <span className="text-lg">🔮</span>
+                <span className="text-sm font-medium text-gray-900">Minikube Environment</span>
+              </button>
+              <a
+                href="https://jenkins-csb-rhacm-tests.dno.corp.redhat.com/job/CI-Jobs/job/capi_tests/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full px-4 py-2.5 text-left hover:bg-green-50 transition-colors flex items-center gap-3 block"
+              >
+                <span className="text-lg">🤖</span>
+                <span className="text-sm font-medium text-gray-900">Jenkins Dashboard</span>
+              </a>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Navigation Menu */}
@@ -204,10 +256,10 @@ const CapaSidebar = ({
                 }}
                 className={`
                   w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm
-                  transition-colors
+                  transition-all duration-150 ease-in-out
                   ${activeSection === item.id
-                    ? 'bg-blue-100 text-blue-900 border-l-4 border-blue-600 font-medium'
-                    : 'text-gray-700 hover:bg-gray-200'
+                    ? 'bg-blue-100 text-blue-900 border-l-4 border-blue-600 font-medium shadow-sm'
+                    : 'text-gray-700 hover:bg-gray-200 hover:shadow-sm hover:translate-x-0.5'
                   }
                 `}
               >
@@ -262,14 +314,10 @@ const CapaSidebar = ({
       )}
 
       {/* Sidebar Footer */}
-      <div className={`flex-shrink-0 border-t px-4 py-3 text-sm font-semibold ${
-        environment === 'minikube'
-          ? 'bg-gradient-to-r from-purple-600 to-violet-500 border-purple-400 text-white'
-          : 'bg-gradient-to-r from-blue-600 to-cyan-500 border-blue-400 text-white'
-      }`}>
+      <div className="flex-shrink-0 border-t border-gray-300 px-4 py-3 text-sm font-semibold bg-gray-50">
         <div className="flex items-center gap-2">
           <span className="text-base">{environment === 'minikube' ? '🔮' : '🌐'}</span>
-          <span>{environment === 'minikube' ? 'Minikube Environment' : 'MCE Environment'}</span>
+          <span className="text-gray-700">{environment === 'minikube' ? 'Minikube Environment' : 'MCE Environment'}</span>
         </div>
       </div>
     </div>

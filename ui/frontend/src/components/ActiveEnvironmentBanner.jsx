@@ -94,9 +94,11 @@ const ActiveEnvironmentBanner = ({ verificationTimestamp = null, environment = '
     }
 
     return (
-      <div className="bg-gradient-to-r from-purple-50 to-violet-50 border-l-4 border-purple-500 p-3 mb-4 rounded-r-lg shadow-sm">
+      <div className="bg-gradient-to-r from-purple-50 to-violet-50 border-l-4 border-purple-500 p-3 mb-6 rounded-r-lg shadow-md hover:shadow-lg transition-shadow">
         <div className="flex items-center">
-          <GlobeAltIcon className="h-5 w-5 text-purple-600 mr-3 flex-shrink-0" />
+          <div className="flex items-center justify-center w-8 h-8 bg-purple-100 rounded-full mr-3 flex-shrink-0">
+            <GlobeAltIcon className="h-4 w-4 text-purple-600" />
+          </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-gray-900">Active Environment:</span>
@@ -154,9 +156,11 @@ const ActiveEnvironmentBanner = ({ verificationTimestamp = null, environment = '
   };
 
   return (
-    <div className="bg-gradient-to-r from-cyan-50 to-blue-50 border-l-4 border-cyan-500 p-3 mb-4 rounded-r-lg shadow-sm">
+    <div className="bg-gradient-to-r from-cyan-50 to-blue-50 border-l-4 border-cyan-500 p-3 mb-6 rounded-r-lg shadow-md hover:shadow-lg transition-shadow">
       <div className="flex items-center">
-        <GlobeAltIcon className="h-5 w-5 text-cyan-600 mr-3 flex-shrink-0" />
+        <div className="flex items-center justify-center w-8 h-8 bg-cyan-100 rounded-full mr-3 flex-shrink-0">
+          <GlobeAltIcon className="h-4 w-4 text-cyan-600" />
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-gray-900">Active Environment:</span>
