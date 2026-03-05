@@ -1685,20 +1685,8 @@ const CAPADashboardContent = () => {
       case 'provision':
         return (
           <div className="space-y-6">
-            {/* Title with Back Button */}
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-blue-900">
-                {provisionViewMode === 'yaml' ? 'Review & Edit Provisioning YAML' : 'Provision ROSA HCP Cluster'}
-              </h2>
-              {provisionViewMode === 'yaml' && !isProvisioning && (
-                <button
-                  onClick={() => setProvisionViewMode('form')}
-                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-                >
-                  ← Back to Form
-                </button>
-              )}
-            </div>
+            {/* Title */}
+            <h2 className="text-2xl font-bold text-blue-900">Provision ROSA HCP Cluster</h2>
 
             {/* Provisioning in Progress Banner */}
             {isProvisioning && !provisionResults && (
@@ -2189,14 +2177,14 @@ const CAPADashboardContent = () => {
             <h2 className="text-2xl font-bold text-blue-900">Task Summary</h2>
 
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              {recentOps.recentOperations.length === 0 ? (
+              {recentOps.recentOperations.filter((op) => op.environment === 'mce').length === 0 ? (
                 <div className="text-center py-12">
                   <ClockIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-600">No tasks</p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {recentOps.recentOperations.map((task, index) => (
+                  {recentOps.recentOperations.filter((op) => op.environment === 'mce').map((task, index) => (
                     <div key={task.id || index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
                       {/* Task Header */}
                       <div className="flex items-start justify-between mb-3">
@@ -2308,9 +2296,9 @@ const CAPADashboardContent = () => {
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto">
         {/* Page Header with Blue Gradient */}
-        <div className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-6 py-4 shadow-md flex items-center h-[72px]">
+        <div className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-6 py-4 shadow-lg flex items-center h-[72px]">
           <div>
-            <h1 className="text-2xl font-bold leading-tight">MCE Environment</h1>
+            <h1 className="text-2xl font-bold leading-tight tracking-tight">MCE Environment</h1>
           </div>
         </div>
 
