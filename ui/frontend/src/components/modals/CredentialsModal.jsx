@@ -31,7 +31,6 @@ const CredentialsModal = ({ isOpen, onClose, theme = 'mce', onSave, inline = fal
       console.log('[CredentialsModal] useEffect triggered, isOpen=', isOpen, 'inline=', inline);
       fetchCredentials();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, inline]); // fetchCredentials is stable, safe to omit from deps
 
   const fetchCredentials = async () => {
