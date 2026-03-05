@@ -44,6 +44,8 @@
     delete_roles: true
     wait_for_deletion: true
     deletion_timeout: 2400  # 40 minutes (AWS resource cleanup can be slow)
+    rosacontrolplane_timeout: 1200  # 20 minutes - Control plane deletion before AI assist
+    rosanetwork_timeout: 900  # 15 minutes - CloudFormation stack deletion before AI assist
 
   tasks:
     - name: Set cluster credentials
