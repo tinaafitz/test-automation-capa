@@ -649,26 +649,6 @@ const MCEEnvironmentSelector = ({
                 />
               </div>
 
-              {/* Installation Method - Only for Minikube */}
-              {environmentType === 'minikube' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Installation Method *
-                  </label>
-                  <select
-                    value={newEnv.installMethod}
-                    onChange={(e) => setNewEnv({ ...newEnv, installMethod: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                  >
-                    <option value="clusterctl">⚡ clusterctl (Official CLI)</option>
-                    <option value="helm">📦 Helm (GitOps Friendly)</option>
-                  </select>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Method used to configure CAPI/CAPA on this cluster
-                  </p>
-                </div>
-              )}
-
               {/* MCE-specific fields - Only show for MCE environment type */}
               {environmentType === 'mce' && (
                 <>
