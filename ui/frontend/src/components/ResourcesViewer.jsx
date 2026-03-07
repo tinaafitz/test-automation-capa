@@ -5,26 +5,54 @@ import { YamlEditorModal } from './YamlEditorModal.js';
 
 const ResourcesViewer = ({ theme = 'mce' }) => {
   const [resources, setResources] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Changed to false so it doesn't show loading spinner on mount
   const [expandedNamespaces, setExpandedNamespaces] = useState(new Set());
   const [totalCount, setTotalCount] = useState(0);
   const [selectedResource, setSelectedResource] = useState(null);
   const [showYamlModal, setShowYamlModal] = useState(false);
   const [loadingYaml, setLoadingYaml] = useState(false);
 
+  // Auto-fetch resources on mount
   useEffect(() => {
     fetchResources();
-  }, []);
+  }, [theme]); // Re-fetch when theme changes
 
   const fetchResources = async () => {
     setLoading(true);
     try {
-      const response = await fetch(buildApiUrl('/api/mce/resources'));
-      const data = await response.json();
+      let response, data;
 
-      if (data.success && data.resources) {
-        setResources(data.resources);
-        setTotalCount(data.total || data.resources.length || 0);
+      if (theme === 'minikube') {
+        // For Minikube, get active resources from saved Minikube cluster
+        const credResponse = await fetch(buildApiUrl('/api/credentials'));
+        const credData = await credResponse.json();
+        const clusterName = credData.credentials?.minikubeCluster || credData.credentials?.clusterName || 'sat-minikube-test';
+
+        response = await fetch(buildApiUrl('/api/minikube/get-active-resources'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cluster_name: clusterName,
+            namespace: 'default'  // Default namespace for scanning
+          }),
+        });
+
+        data = await response.json();
+
+        // Transform Minikube resources to the expected format
+        if (data.success && Array.isArray(data.resources)) {
+          setResources(data.resources);
+          setTotalCount(data.resources.length || 0);
+        }
+      } else {
+        // For MCE, use the regular endpoint
+        response = await fetch(buildApiUrl('/api/mce/resources'));
+        data = await response.json();
+
+        if (data.success && data.resources) {
+          setResources(data.resources);
+          setTotalCount(data.total || data.resources.length || 0);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch CAPI resources:', error);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import PropTypes from 'prop-types';
 import {
   useApp,
@@ -86,20 +86,64 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
     setClustersLoading(true);
     setClustersError(null);
     try {
-      const response = await fetch(buildApiUrl(API_ENDPOINTS.ROSA_CLUSTERS));
+      // Use different endpoints based on theme
+      let response;
+      let data;
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+      if (theme === 'minikube') {
+        // For Minikube, get active resources from saved Minikube cluster
+        const credResponse = await fetch(buildApiUrl('/api/credentials'));
+        const credData = await credResponse.json();
+        const clusterName = credData.credentials?.minikubeCluster || credData.credentials?.clusterName || 'sat-minikube-test';
 
-      const data = await response.json();
-      const validatedData = validateApiResponse(data, ['success']);
+        response = await fetch(buildApiUrl('/api/minikube/get-active-resources'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cluster_name: clusterName,
+            namespace: 'default'  // Default namespace for scanning
+          }),
+        });
 
-      if (validatedData.success) {
-        const clusterList = Array.isArray(validatedData.clusters) ? validatedData.clusters : [];
-        setClusters(clusterList);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        data = await response.json();
+
+        // Extract RosaControlPlane resources (actual ROSA HCP clusters)
+        if (data.success && Array.isArray(data.resources)) {
+          const rosaHcpClusters = data.resources
+            .filter(r => r.type === 'RosaControlPlane')
+            .map(r => ({
+              name: r.name,
+              namespace: r.namespace || 'ns-rosa-hcp',
+              status: r.status || 'Unknown',
+              version: r.version || 'N/A',
+              age: r.age || 'N/A',
+              region: 'us-west-2', // Minikube clusters are in us-west-2
+            }));
+          setClusters(rosaHcpClusters);
+        } else {
+          setClusters([]);
+        }
       } else {
-        throw new Error(validatedData.message || 'API returned failure status');
+        // For MCE, use the regular ROSA clusters endpoint
+        response = await fetch(buildApiUrl(API_ENDPOINTS.ROSA_CLUSTERS));
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        data = await response.json();
+        const validatedData = validateApiResponse(data, ['success']);
+
+        if (validatedData.success) {
+          const clusterList = Array.isArray(validatedData.clusters) ? validatedData.clusters : [];
+          setClusters(clusterList);
+        } else {
+          throw new Error(validatedData.message || 'API returned failure status');
+        }
       }
     } catch (error) {
       const safeErrorMessage = extractSafeErrorMessage(error);
@@ -107,6 +151,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
     } finally {
       setClustersLoading(false);
     }
+    // eslint-disable-next-line
   }, []);
 
   // Copy handler for playbook output
@@ -272,7 +317,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
     }
   };
 
-  // Load clusters on component mount
+  // Auto-fetch clusters on mount
   useEffect(() => {
     fetchClusters();
   }, [fetchClusters]);
