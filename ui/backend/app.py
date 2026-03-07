@@ -20,6 +20,7 @@ import time
 from slack_notification_service import SlackNotificationService
 from email_notification_service import EmailNotificationService
 from ai_assistant_service import AIAssistantService
+from quick_fix_service import QuickFixService
 
 app = FastAPI(title="ROSA Automation API", version="1.0.0")
 
@@ -37,6 +38,9 @@ email_service = EmailNotificationService()
 
 # Initialize AI assistant service
 ai_service = AIAssistantService()
+
+# Initialize quick fix service
+quick_fix_service = QuickFixService()
 
 # CORS middleware for frontend development
 app.add_middleware(
@@ -5785,6 +5789,54 @@ async def create_minikube_cluster(request: Request):
         }
 
 
+@app.post("/api/minikube/delete-cluster")
+async def delete_minikube_cluster(request: Request):
+    """Delete a Minikube cluster"""
+    try:
+        body = await request.json()
+        cluster_name = body.get("cluster_name", "").strip()
+
+        if not cluster_name:
+            return {
+                "success": False,
+                "message": "Cluster name is required",
+            }
+
+        # Delete the cluster (minikube delete will handle non-existent clusters)
+        delete_result = subprocess.run(
+            ["minikube", "delete", "--profile", cluster_name],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        if delete_result.returncode == 0:
+            # Clear cache to force refresh
+            minikube_clusters_cache["timestamp"] = 0
+
+            return {
+                "success": True,
+                "message": f"Cluster '{cluster_name}' deleted successfully",
+                "output": delete_result.stdout,
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Failed to delete cluster: {delete_result.stderr}",
+            }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "message": "Cluster deletion timed out",
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Error deleting Minikube cluster: {str(e)}",
+        }
+
+
 @app.post("/api/minikube/execute-command")
 async def execute_minikube_command(request: Request):
     """Execute a kubectl command in the context of a Minikube cluster"""
@@ -5975,7 +6027,11 @@ async def get_minikube_active_resources(request: Request):
 
 
 async def _get_active_resources_impl(cluster_name: str, namespace: str = "ns-rosa-hcp"):
-    """Shared implementation for getting active resources"""
+    """
+    Optimized implementation for getting active resources.
+    Uses a single kubectl command to fetch all CAPI/CAPA resources at once,
+    dramatically reducing API round trips from 17+ to 1.
+    """
     try:
         if not cluster_name:
             return {"success": False, "message": "Cluster name is required", "resources": []}
@@ -6004,6 +6060,75 @@ async def _get_active_resources_impl(cluster_name: str, namespace: str = "ns-ros
                     return f"{seconds}s"
             except Exception:
                 return "unknown"
+
+        # OPTIMIZED: Fetch all CAPI/CAPA resources in one command
+        # This replaces 17+ sequential kubectl calls with a single command
+        # Skips: secrets, awsmanagedmachinepool, machinedeployment, machine, awsmachine (low-level resources)
+        resource_types = [
+            "rosacontrolplane",
+            "rosanetwork",
+            "rosaroleconfig",
+            "rosamachinepool",
+            "clusters.cluster.x-k8s.io",
+            "machinepool",
+        ]
+
+        try:
+            result = subprocess.run(
+                ["kubectl", "get", ",".join(resource_types), "-n", namespace, "--context", cluster_name, "-o", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30,  # Increased timeout for bulk fetch
+            )
+
+            if result.returncode == 0:
+                import json as json_module
+                data = json_module.loads(result.stdout)
+
+                for item in data.get("items", []):
+                    metadata = item.get("metadata", {})
+                    spec = item.get("spec", {})
+                    status = item.get("status", {})
+                    kind = item.get("kind", "unknown")
+
+                    # Determine resource status based on kind
+                    resource_status = "Unknown"
+                    if kind == "ROSAControlPlane":
+                        # Check for ready status
+                        if status.get("ready") == True or status.get("ready") == "true":
+                            resource_status = "Ready"
+                        else:
+                            conditions = status.get("conditions", [])
+                            for condition in conditions:
+                                if condition.get("status") == "True" and condition.get("type") in ["Ready", "ROSAControlPlaneReady"]:
+                                    resource_status = "Ready"
+                                    break
+                            if resource_status != "Ready":
+                                resource_status = "Provisioning"
+                    elif kind in ["ROSANetwork", "RosaRoleConfig"]:
+                        if status.get("ready") == True or status.get("ready") == "true":
+                            resource_status = "Ready"
+                        else:
+                            resource_status = "Provisioning"
+                    elif kind == "Cluster":
+                        resource_status = "Ready" if status.get("phase") == "Provisioned" else status.get("phase", "Active")
+                    elif kind in ["MachinePool", "RosaMachinePool", "MachineDeployment", "Machine"]:
+                        resource_status = status.get("phase", "Active")
+                    else:
+                        resource_status = "Active"
+
+                    resources.append({
+                        "type": kind,
+                        "name": metadata.get("name", "unknown"),
+                        "namespace": namespace,
+                        "version": spec.get("version", ""),
+                        "status": resource_status,
+                        "age": calculate_age(metadata.get("creationTimestamp", "")),
+                    })
+        except subprocess.TimeoutExpired:
+            print(f"Timeout fetching resources for {cluster_name}")
+        except Exception as e:
+            print(f"Error fetching resources: {str(e)}")
 
         # Fetch ns-rosa-hcp namespace
         try:
@@ -7377,10 +7502,106 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                         jobs[job_id]["logs"].append(f"\n⚠️ Warnings/Errors:\n{result.stderr}")
 
                     if result.returncode == 0 or "created" in result.stdout or "configured" in result.stdout:
-                        jobs[job_id]["status"] = "completed"
-                        jobs[job_id]["progress"] = 100
-                        jobs[job_id]["message"] = "✅ All resources applied successfully!"
+                        jobs[job_id]["progress"] = 50
+                        jobs[job_id]["message"] = "✅ Resources applied, waiting for cluster to be ready..."
                         jobs[job_id]["logs"].append(f"\n✅ All resources applied successfully!")
+
+                        # Wait for cluster to be ready (for Minikube/ROSA provisioning)
+                        jobs[job_id]["logs"].append(f"\n⏳ Monitoring cluster provisioning status...")
+
+                        import time
+                        import json
+
+                        max_wait_time = 3600  # 60 minutes max wait
+                        poll_interval = 10  # Check every 10 seconds
+                        start_time = time.time()
+
+                        while (time.time() - start_time) < max_wait_time:
+                            # Get cluster name from YAML
+                            try:
+                                # Check for Cluster resource status
+                                check_cluster_cmd = [
+                                    "kubectl",
+                                    "--context",
+                                    cluster_context,
+                                    "get",
+                                    "cluster",
+                                    "-n", "ns-rosa-hcp",
+                                    "-o", "json"
+                                ]
+
+                                cluster_result = subprocess.run(
+                                    check_cluster_cmd,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=30
+                                )
+
+                                if cluster_result.returncode == 0:
+                                    clusters_data = json.loads(cluster_result.stdout)
+
+                                    if clusters_data.get("items"):
+                                        cluster = clusters_data["items"][0]  # Get first cluster
+                                        cluster_name = cluster["metadata"]["name"]
+                                        phase = cluster.get("status", {}).get("phase", "Unknown")
+
+                                        # Check RosaControlPlane ready status
+                                        check_rcp_cmd = [
+                                            "kubectl",
+                                            "--context",
+                                            cluster_context,
+                                            "get",
+                                            "rosacontrolplane",
+                                            cluster_name,
+                                            "-n", "ns-rosa-hcp",
+                                            "-o", "jsonpath={.status.ready}"
+                                        ]
+
+                                        rcp_result = subprocess.run(
+                                            check_rcp_cmd,
+                                            capture_output=True,
+                                            text=True,
+                                            timeout=30
+                                        )
+
+                                        rcp_ready = rcp_result.stdout.strip().lower() == "true"
+
+                                        # Update progress based on phase
+                                        if phase == "Provisioned" and rcp_ready:
+                                            jobs[job_id]["status"] = "completed"
+                                            jobs[job_id]["progress"] = 100
+                                            jobs[job_id]["message"] = f"✅ Cluster {cluster_name} is ready!"
+                                            jobs[job_id]["logs"].append(f"\n✅ Cluster {cluster_name} provisioned successfully!")
+                                            jobs[job_id]["logs"].append(f"   Phase: {phase}")
+                                            jobs[job_id]["logs"].append(f"   RosaControlPlane Ready: {rcp_ready}")
+                                            return
+                                        elif phase == "Failed":
+                                            jobs[job_id]["status"] = "failed"
+                                            jobs[job_id]["progress"] = 100
+                                            jobs[job_id]["message"] = f"❌ Cluster {cluster_name} provisioning failed"
+                                            jobs[job_id]["logs"].append(f"\n❌ Cluster {cluster_name} entered Failed state")
+                                            return
+                                        else:
+                                            # Update progress incrementally (50-90%)
+                                            elapsed = time.time() - start_time
+                                            progress = min(90, 50 + int((elapsed / max_wait_time) * 40))
+                                            jobs[job_id]["progress"] = progress
+                                            jobs[job_id]["message"] = f"⏳ Cluster {cluster_name} provisioning... (Phase: {phase}, RCP Ready: {rcp_ready})"
+
+                                            # Log status update every 60 seconds
+                                            if int(elapsed) % 60 == 0:
+                                                jobs[job_id]["logs"].append(f"   [{int(elapsed//60)}m] Phase: {phase}, RCP Ready: {rcp_ready}")
+
+                            except Exception as status_error:
+                                jobs[job_id]["logs"].append(f"⚠️  Error checking cluster status: {str(status_error)}")
+
+                            time.sleep(poll_interval)
+
+                        # Timeout reached
+                        jobs[job_id]["status"] = "failed"
+                        jobs[job_id]["progress"] = 100
+                        jobs[job_id]["message"] = "❌ Cluster provisioning timed out after 60 minutes"
+                        jobs[job_id]["logs"].append(f"\n❌ Timeout: Cluster did not reach ready state within 60 minutes")
                         return
                     else:
                         jobs[job_id]["status"] = "failed"
@@ -9707,6 +9928,22 @@ async def search_mce_environments(query: str):
             "results": [],
             "total": 0,
         }
+
+
+@app.post("/api/quick-fix/execute")
+async def execute_quick_fix(request: Request):
+    """Execute a quick fix command for common ROSA/CAPI issues"""
+    try:
+        body = await request.json()
+        command = body.get("command")
+        parameters = body.get("parameters", {})
+        context = body.get("context", {})
+
+        result = await quick_fix_service.execute_command(command, parameters, context)
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error executing quick fix: {str(e)}")
 
 
 if __name__ == "__main__":

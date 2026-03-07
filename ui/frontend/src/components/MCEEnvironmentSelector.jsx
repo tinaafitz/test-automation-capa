@@ -13,6 +13,7 @@ import {
   ArrowPathIcon,
   KeyIcon,
   PlusIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
 
 const getStatusConfig = (theme = 'mce') => {
@@ -122,6 +123,8 @@ const MCEEnvironmentSelector = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [createMessage, setCreateMessage] = useState('');
   const [createMessageType, setCreateMessageType] = useState(''); // 'success' or 'error'
+  const [deletingCluster, setDeletingCluster] = useState(null); // Track which cluster is being deleted
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null); // Track which cluster to confirm delete
   const [newEnv, setNewEnv] = useState({
     clusterName: '',
     platform: '',
@@ -156,14 +159,36 @@ const MCEEnvironmentSelector = ({
         // For Minikube, the response is { clusters: [...], minikube_installed: true }
         // Convert cluster names to environment objects
         const clusterNames = data.clusters || [];
-        const clusterEnvs = clusterNames.map(name => ({
-          clusterName: name,
-          name: name,
-          status: 'pass', // Assume running clusters are passing
-          platform: 'Minikube',
-          notes: 'Detected from minikube profile list',
-          lastAccessed: new Date().toISOString(),
-        }));
+
+        // Check configuration status for each cluster
+        const clusterEnvsPromises = clusterNames.map(async (name) => {
+          // Preserve existing status and notes if cluster is already tracked
+          const existingEnv = environments.find(env => env.clusterName === name);
+
+          // Check if cluster has CAPI/CAPA configured
+          let configured = false;
+          try {
+            const componentResponse = await fetch(`http://localhost:8000/api/capi/component-versions?environment=minikube&cluster_name=${name}`);
+            const componentData = await componentResponse.json();
+            configured = componentData.components && componentData.components.length > 0;
+          } catch (err) {
+            console.log(`Could not check configuration for ${name}:`, err);
+          }
+
+          return {
+            clusterName: name,
+            name: name,
+            status: existingEnv?.status || 'pass', // Preserve existing status or default to pass
+            platform: 'Minikube',
+            notes: existingEnv?.notes || (configured ? 'Configured with CAPI/CAPA' : 'Not configured'),
+            configured: configured, // Add configured flag
+            lastAccessed: existingEnv?.lastAccessed || new Date().toISOString(),
+            jira: existingEnv?.jira,
+            polarion: existingEnv?.polarion,
+          };
+        });
+
+        const clusterEnvs = await Promise.all(clusterEnvsPromises);
         setEnvironments(clusterEnvs);
       } else if (data.success) {
         setEnvironments(data.environments || data.clusters || []);
@@ -404,8 +429,19 @@ const MCEEnvironmentSelector = ({
         console.log('Response data:', data);
 
         if (data.success) {
-          // Refresh environments to get actual status
+          // Update cluster status to success
+          setEnvironments(prev => prev.map(env =>
+            env.clusterName === clusterName
+              ? { ...env, status: 'pass', notes: `Cluster created successfully` }
+              : env
+          ));
+
+          // Refresh environments to sync with backend
           await fetchEnvironments();
+
+          // Show success message
+          setCreateMessage(`Cluster '${clusterName}' created successfully!`);
+          setCreateMessageType('success');
 
           // Clear message
           setTimeout(() => {
@@ -487,6 +523,68 @@ const MCEEnvironmentSelector = ({
       // Show inline error message
       setCreateMessage(`Error: ${errorMsg}`);
       setCreateMessageType('error');
+    }
+  };
+
+  const handleDeleteCluster = async (clusterName) => {
+    if (environmentType !== 'minikube') {
+      console.warn('Delete is only supported for Minikube clusters');
+      return;
+    }
+
+    try {
+      setDeletingCluster(clusterName);
+      setShowDeleteConfirm(null);
+
+      console.log('Deleting Minikube cluster:', clusterName);
+
+      const response = await fetch('http://localhost:8000/api/minikube/delete-cluster', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cluster_name: clusterName }),
+      });
+
+      const data = await response.json();
+      console.log('Delete response:', data);
+
+      if (data.success) {
+        // Remove cluster from UI
+        setEnvironments(prev => prev.filter(env => env.clusterName !== clusterName));
+
+        // Show success message
+        setCreateMessage(`Cluster '${clusterName}' deleted successfully`);
+        setCreateMessageType('success');
+
+        // Refresh environments to sync with backend
+        await fetchEnvironments();
+
+        // Clear message after 3 seconds
+        setTimeout(() => {
+          setCreateMessage('');
+          setCreateMessageType('');
+        }, 3000);
+      } else {
+        // Show error message
+        setCreateMessage(`Failed to delete cluster: ${data.message || 'Unknown error'}`);
+        setCreateMessageType('error');
+
+        // Clear message after 5 seconds
+        setTimeout(() => {
+          setCreateMessage('');
+          setCreateMessageType('');
+        }, 5000);
+      }
+    } catch (error) {
+      console.error('Error deleting cluster:', error);
+      setCreateMessage(`Error deleting cluster: ${error.message}`);
+      setCreateMessageType('error');
+
+      setTimeout(() => {
+        setCreateMessage('');
+        setCreateMessageType('');
+      }, 5000);
+    } finally {
+      setDeletingCluster(null);
     }
   };
 
@@ -855,6 +953,43 @@ const MCEEnvironmentSelector = ({
         </div>
       )}
 
+      {/* Success/Error Message for Create/Delete Operations */}
+      {!selectedEnv && createMessage && (
+        <div className={`rounded-lg p-4 mb-4 border ${
+          createMessageType === 'success'
+            ? 'bg-green-50 border-green-200'
+            : 'bg-red-50 border-red-200'
+        }`}>
+          <div className="flex items-start gap-3">
+            {createMessageType === 'success' ? (
+              <CheckCircleIcon className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+            ) : (
+              <XCircleIcon className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1">
+              <p className={`text-sm font-medium ${
+                createMessageType === 'success' ? 'text-green-800' : 'text-red-800'
+              }`}>
+                {createMessage}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setCreateMessage('');
+                setCreateMessageType('');
+              }}
+              className={`text-sm font-medium ${
+                createMessageType === 'success'
+                  ? 'text-green-600 hover:text-green-800'
+                  : 'text-red-600 hover:text-red-800'
+              }`}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Environments List or Selected Environment */}
       {!selectedEnv ? (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
@@ -885,6 +1020,53 @@ const MCEEnvironmentSelector = ({
                       {env.clusterName}
                     </button>
                     <StatusBadge status={env.status} />
+
+                    {/* Delete button for Minikube clusters */}
+                    {environmentType === 'minikube' && (
+                      <div className="ml-auto flex items-center gap-2">
+                        {showDeleteConfirm === env.clusterName ? (
+                          <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
+                            <span className="text-sm font-medium text-red-800">Delete this cluster?</span>
+                            <button
+                              onClick={() => handleDeleteCluster(env.clusterName)}
+                              disabled={deletingCluster === env.clusterName}
+                              className="px-3 py-1.5 text-sm font-medium bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {deletingCluster === env.clusterName ? (
+                                <span className="flex items-center gap-2">
+                                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                                  Deleting...
+                                </span>
+                              ) : (
+                                'Yes, Delete'
+                              )}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowDeleteConfirm(null);
+                              }}
+                              disabled={deletingCluster === env.clusterName}
+                              className="px-3 py-1.5 text-sm font-medium bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowDeleteConfirm(env.clusterName);
+                            }}
+                            disabled={deletingCluster !== null}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Delete cluster"
+                          >
+                            <TrashIcon className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Metadata as simple bullet list - Jenkins style */}
@@ -894,6 +1076,15 @@ const MCEEnvironmentSelector = ({
                       <span>
                         <span className="text-gray-600">Platform:</span>{' '}
                         <span className="text-gray-900">{env.platform || 'unknown'}</span>
+                        {environmentType === 'minikube' && env.configured !== undefined && (
+                          <>
+                            <span className="text-gray-400 mx-2">|</span>
+                            <span className="text-gray-600">CAPI/CAPA:</span>{' '}
+                            <span className={env.configured ? 'text-green-600 font-medium' : 'text-gray-500'}>
+                              {env.configured ? '✓ Configured' : 'Not Configured'}
+                            </span>
+                          </>
+                        )}
                         {env.ocpVersion && (
                           <>
                             <span className="text-gray-400 mx-2">|</span>
