@@ -13,6 +13,7 @@ import {
   ChevronUpIcon,
   ArrowPathIcon,
   TrashIcon,
+  ChevronUpDownIcon,
 } from '@heroicons/react/24/outline';
 import {
   buildApiUrl,
@@ -63,6 +64,10 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
   const [clusters, setClusters] = useState([]);
   const [clustersLoading, setClustersLoading] = useState(false);
   const [clustersError, setClustersError] = useState(null);
+
+  // Sort state
+  const [sortField, setSortField] = useState('created');
+  const [sortDirection, setSortDirection] = useState('desc');
 
   // Deletion state
   const [deletionResults, setDeletionResults] = useState(null);
@@ -330,6 +335,58 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
     }
   }, [ocpStatus?.connected]);
 
+  // Format date for display
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  // Handle sort
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Sort clusters
+  const sortedClusters = [...clusters].sort((a, b) => {
+    let aVal = a[sortField];
+    let bVal = b[sortField];
+
+    if (sortField === 'created') {
+      aVal = new Date(aVal || 0).getTime();
+      bVal = new Date(bVal || 0).getTime();
+    } else if (sortField === 'region') {
+      aVal = aVal || '';
+      bVal = bVal || '';
+    } else {
+      aVal = String(aVal || '').toLowerCase();
+      bVal = String(bVal || '').toLowerCase();
+    }
+
+    if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+    if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  // Render sort header
+  const SortHeader = ({ field, children }) => (
+    <th
+      scope="col"
+      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+      onClick={() => handleSort(field)}
+    >
+      <div className="flex items-center gap-1">
+        {children}
+        <ChevronUpDownIcon className={`h-4 w-4 ${sortField === field ? 'text-blue-600' : 'text-gray-400'}`} />
+      </div>
+    </th>
+  );
+
   return (
     <div className="space-y-6">
       {/* Title and Refresh Button */}
@@ -348,128 +405,119 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         </button>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        {/* Cluster List */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        {/* Cluster Table */}
         {clustersError ? (
-          <div className="text-center py-8 text-red-600">
+          <div className="text-center py-8 text-red-600 p-6">
             <p className="text-sm">Failed to load clusters</p>
             <p className="text-xs mt-2">{clustersError}</p>
           </div>
         ) : clustersLoading ? (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-gray-500 p-6">
             <ArrowPathIcon className="h-8 w-8 animate-spin mx-auto mb-2" />
             <p className="text-sm">Loading clusters...</p>
           </div>
         ) : clusters.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-gray-500 p-6">
             <p className="text-sm">No ROSA HCP clusters found</p>
             <p className="text-xs mt-2">Clusters will appear here when provisioned</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
-            {clusters.map((cluster, idx) => (
-              <div
-                key={cluster.name || idx}
-                className="py-2 px-6 hover:bg-blue-50 transition-colors"
-              >
-                {/* Cluster Name and Status - Jenkins style */}
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-3">
-                    <div className="text-blue-600 font-medium text-base">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <SortHeader field="name">Name</SortHeader>
+                <SortHeader field="status">Status</SortHeader>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Type
+                </th>
+                <SortHeader field="created">Created</SortHeader>
+                <SortHeader field="version">Version</SortHeader>
+                <SortHeader field="region">Provider (Region)</SortHeader>
+                <th scope="col" className="relative px-6 py-3">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {sortedClusters.map((cluster, idx) => (
+                <tr key={cluster.name || idx} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <a href="#" className="text-sm font-medium text-blue-600 hover:text-blue-800">
                       {cluster.name}
+                    </a>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`inline-block w-2 h-2 rounded-full ${
+                        cluster.status === 'ready' ? 'bg-green-500' :
+                        cluster.status === 'provisioning' ? 'bg-yellow-500 animate-pulse' :
+                        'bg-red-500'
+                      }`}></span>
+                      <span className="text-sm text-gray-900 capitalize">{cluster.status}</span>
                     </div>
-                    <div
-                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-                        cluster.status === 'ready'
-                          ? 'bg-green-100 text-green-700'
-                          : cluster.status === 'provisioning'
-                            ? 'bg-yellow-100 text-yellow-700'
-                            : 'bg-red-100 text-red-700'
-                      }`}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    ROSA
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {formatDate(cluster.created)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {cluster.version || 'N/A'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    AWS ({cluster.region})
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <button
+                      onClick={() => handleDeleteCluster(cluster.name, cluster.namespace)}
+                      className="text-gray-400 hover:text-red-600"
+                      title={`Delete cluster ${cluster.name}`}
                     >
-                      <div
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          cluster.status === 'ready'
-                            ? 'bg-green-500'
-                            : cluster.status === 'provisioning'
-                              ? 'bg-yellow-500 animate-pulse'
-                              : 'bg-red-500'
-                        }`}
-                      ></div>
-                      {cluster.status || 'Unknown'}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleDeleteCluster(cluster.name, cluster.namespace)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:bg-red-50 hover:border-red-500 text-gray-700 hover:text-red-700 text-xs rounded-md transition-all"
-                    title={`Delete cluster ${cluster.name}`}
-                  >
-                    <TrashIcon className="h-3.5 w-3.5" />
-                    Delete
-                  </button>
-                </div>
-
-                {/* Metadata as simple bullet list - Jenkins style */}
-                <div className="ml-1">
-                  <div className="flex items-start gap-2 text-sm text-gray-700">
-                    <span className="text-gray-400 mt-1">•</span>
-                    <span>
-                      <span className="text-gray-600">Region:</span>{' '}
-                      <span className="text-gray-900">{cluster.region || 'N/A'}</span>
-                      {cluster.version && (
-                        <>
-                          <span className="text-gray-400 mx-2">|</span>
-                          <span className="text-gray-600">Version:</span>{' '}
-                          <span className="text-gray-900">{cluster.version}</span>
-                        </>
-                      )}
-                      {cluster.namespace && (
-                        <>
-                          <span className="text-gray-400 mx-2">|</span>
-                          <span className="text-gray-600">Namespace:</span>{' '}
-                          <span className="text-gray-900">{cluster.namespace}</span>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Inline Delete Confirmation */}
-                {clusterPendingDeletion && clusterPendingDeletion.name === cluster.name && (
-                  <div className="mt-3 bg-red-50 border border-red-300 rounded-lg p-4">
-                    <div className="flex items-start gap-3">
-                      <span className="text-2xl">⚠️</span>
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-red-900 mb-2">
-                          Confirm Deletion
-                        </h4>
-                        <p className="text-sm text-red-800 mb-4">
-                          Are you sure you want to delete cluster <strong>{cluster.name}</strong>?
-                          This action cannot be undone and will remove all associated resources.
-                        </p>
-                        <div className="flex gap-3">
-                          <button
-                            onClick={() => executeDeleteCluster(clusterPendingDeletion.name, clusterPendingDeletion.namespace)}
-                            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors font-medium text-sm"
-                          >
-                            Yes, Delete Cluster
-                          </button>
-                          <button
-                            onClick={() => setClusterPendingDeletion(null)}
-                            className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md transition-colors font-medium text-sm"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+                      <TrashIcon className="h-5 w-5" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
+
+      {/* Delete Confirmation Modal/Panel - Outside table */}
+      {clusterPendingDeletion && (
+        <div className="mt-4">
+          <div className="bg-red-50 border border-red-300 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">⚠️</span>
+              <div className="flex-1">
+                <h4 className="font-semibold text-red-900 mb-2">
+                  Confirm Deletion
+                </h4>
+                <p className="text-sm text-red-800 mb-4">
+                  Are you sure you want to delete cluster <strong>{clusterPendingDeletion.name}</strong>?
+                  This action cannot be undone and will remove all associated resources.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => executeDeleteCluster(clusterPendingDeletion.name, clusterPendingDeletion.namespace)}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors font-medium text-sm"
+                  >
+                    Yes, Delete Cluster
+                  </button>
+                  <button
+                    onClick={() => setClusterPendingDeletion(null)}
+                    className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md transition-colors font-medium text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Deletion Results Display - Inline Playbook Output */}
       {deletionResults && (

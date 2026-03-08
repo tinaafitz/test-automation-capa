@@ -1,26 +1,27 @@
 import { useState, useCallback, useEffect } from 'react';
 
+// Helper function to load operations from localStorage
+const loadOperationsFromStorage = () => {
+  try {
+    const saved = localStorage.getItem('recentOperations');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load recent operations from localStorage:', error);
+  }
+  return [];
+};
+
 // Custom hook for managing recent operations
 export const useRecentOperations = () => {
-  const [recentOperations, setRecentOperations] = useState([]);
+  const [recentOperations, setRecentOperations] = useState(loadOperationsFromStorage);
   const [recentOperationsCollapsed, setRecentOperationsCollapsed] = useState(false);
   const [recentOperationsOutputCollapsed, setRecentOperationsOutputCollapsed] = useState(false);
   const [loadingStates, setLoadingStates] = useState(new Set());
-
-  // Load recent operations from localStorage on mount
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('recentOperations');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          setRecentOperations(parsed);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load recent operations from localStorage:', error);
-    }
-  }, []);
 
   // Save to localStorage whenever operations change
   useEffect(() => {
@@ -33,7 +34,6 @@ export const useRecentOperations = () => {
 
   // Add operation to recent list
   const addToRecent = useCallback((operation) => {
-    console.log('📝 Adding to recent operations:', operation);
 
     const newOperation = {
       ...operation,
@@ -54,8 +54,6 @@ export const useRecentOperations = () => {
 
   // Update operation status
   const updateRecentOperationStatus = useCallback((operationId, newStatus, newOutput) => {
-    console.log(`📝 Updating operation ${operationId} status:`, newStatus);
-
     setRecentOperations((prev) =>
       prev.map((op) =>
         op.id === operationId
@@ -72,13 +70,11 @@ export const useRecentOperations = () => {
 
   // Remove operation
   const removeRecentOperation = useCallback((operationId) => {
-    console.log(`🗑️ Removing operation:`, operationId);
     setRecentOperations((prev) => prev.filter((op) => op.id !== operationId));
   }, []);
 
   // Clear all operations
   const clearRecentOperations = useCallback(() => {
-    console.log('🗑️ Clearing all recent operations');
     setRecentOperations([]);
     localStorage.removeItem('recentOperations');
   }, []);

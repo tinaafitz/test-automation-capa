@@ -27,6 +27,18 @@ export function AIAssistantChat({ inline = false, theme = 'mce' }) {
           focusRing: 'focus:ring-purple-500 focus:border-purple-500',
           headerGradient: 'from-purple-600 to-violet-600',
         };
+      case 'main':
+        return {
+          gradient: 'from-gray-50 to-gray-100',
+          border: 'border-gray-200',
+          text: 'text-gray-900',
+          userBg: 'bg-gray-600',
+          userBgHover: 'hover:bg-gray-700',
+          buttonBg: 'bg-gray-600',
+          buttonBgHover: 'hover:bg-gray-700',
+          focusRing: 'focus:ring-gray-500 focus:border-gray-500',
+          headerGradient: 'from-gray-600 to-gray-700',
+        };
       case 'mce':
       default:
         return {
