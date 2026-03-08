@@ -53,6 +53,9 @@ export const API_ENDPOINTS = {
 
   // Version endpoints
   VERSIONS: '/api/versions',
+
+  // Jenkins endpoints
+  JENKINS_TEST_RESULTS_TREND: '/api/jenkins/test-results-trend',
 };
 
 // Helper function to build full URL
