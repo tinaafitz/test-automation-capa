@@ -1,5 +1,6 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import MainDashboard from './pages/MainDashboard';
 import CAPADashboard from './pages/CAPADashboard';
 import MinikubeDashboard from './pages/MinikubeDashboard';
 import { AppProvider } from './store/AppContext';
@@ -12,7 +13,7 @@ function App() {
         <div className="min-h-screen bg-gray-50">
           <ToastNotifications />
           <Routes>
-            <Route path="/" element={<Navigate to="/mce" replace />} />
+            <Route path="/" element={<MainDashboard />} />
             <Route path="/mce" element={<CAPADashboard />} />
             <Route path="/minikube" element={<MinikubeDashboard />} />
           </Routes>
