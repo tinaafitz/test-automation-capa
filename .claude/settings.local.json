@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(podman system connection list:*)",
+      "Bash(minikube:*)",
+      "Bash(podman machine start:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(timeout 5 minikube profile:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh pr view:*)",
+      "Bash(git push:*)",
+      "Bash(for i in {1..10})",
+      "Bash(do echo \"Build $i:\" curl -s \"https://jenkins-csb-rhacm-tests.dno.corp.redhat.com/job/CI-Jobs/job/capi_tests/$i/testReport/api/json\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

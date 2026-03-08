@@ -3813,9 +3813,50 @@ async def get_mce_yaml():
 
 @app.get("/api/rosa/clusters")
 async def get_rosa_clusters():
-    """Get ROSA HCP clusters from the MCE environment"""
+    """Get actual ROSA HCP clusters using rosa CLI"""
+    import json
+
     try:
-        # Fetch ROSAControlPlane resources from all namespaces (contains detailed cluster info)
+        # Try to get actual ROSA clusters using rosa CLI
+        result = subprocess.run(
+            ["rosa", "list", "clusters", "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        if result.returncode == 0:
+            # Successfully got clusters from rosa CLI
+            try:
+                rosa_clusters = json.loads(result.stdout)
+                clusters = []
+
+                for cluster in rosa_clusters:
+                    # Extract cluster information from rosa CLI output
+                    cluster_info = {
+                        "name": cluster.get("name", "unknown"),
+                        "status": "ready" if cluster.get("state") == "ready" else cluster.get("state", "unknown"),
+                        "region": cluster.get("region", {}).get("id", "N/A") if isinstance(cluster.get("region"), dict) else cluster.get("region", "N/A"),
+                        "created": cluster.get("creation_timestamp"),
+                        "version": cluster.get("openshift_version", "N/A"),
+                        "namespace": "N/A",  # rosa CLI doesn't provide namespace
+                        "progress": 100 if cluster.get("state") == "ready" else 0,
+                    }
+
+                    # Only include ready clusters
+                    if cluster.get("state") == "ready":
+                        clusters.append(cluster_info)
+
+                return {
+                    "success": True,
+                    "clusters": clusters,
+                    "count": len(clusters),
+                }
+            except json.JSONDecodeError:
+                # Fall through to RosaControlPlane method
+                pass
+
+        # Fallback: Fetch ROSAControlPlane resources from all namespaces
         result = subprocess.run(
             ["oc", "get", "rosacontrolplane", "--all-namespaces", "-o", "json"],
             capture_output=True,
@@ -3829,8 +3870,6 @@ async def get_rosa_clusters():
                 "clusters": [],
                 "message": f"Error fetching ROSA clusters: {result.stderr}",
             }
-
-        import json
 
         data = json.loads(result.stdout)
         clusters = []
@@ -3955,7 +3994,9 @@ async def get_rosa_clusters():
                 "error_reason": error_reason,
             }
 
-            clusters.append(cluster_info)
+            # Only include clusters that are in 'ready' state (fully provisioned ROSA HCP clusters)
+            if cluster_status == "ready":
+                clusters.append(cluster_info)
 
         # Sort by creation time (newest first)
         clusters.sort(key=lambda x: normalize_timestamp(x.get("created")), reverse=True)
@@ -9944,6 +9985,196 @@ async def execute_quick_fix(request: Request):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error executing quick fix: {str(e)}")
+
+
+@app.get("/api/jenkins/test-results-trend")
+async def get_jenkins_test_results_trend():
+    """Get Jenkins test results trend data from CAPI tests job"""
+    import requests
+    from datetime import datetime
+    import urllib3
+
+    # Suppress SSL warnings for self-signed cert
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    try:
+        jenkins_base_url = "https://jenkins-csb-rhacm-tests.dno.corp.redhat.com/job/CI-Jobs/job/capi_tests"
+
+        # Fetch recent builds (last 20)
+        builds_url = f"{jenkins_base_url}/api/json?tree=builds[number,result,timestamp,duration]{{0,20}}"
+
+        print(f"📊 [JENKINS] Fetching test trend data from: {builds_url}")
+
+        # Disable SSL verification for internal Jenkins (self-signed cert)
+        response = requests.get(builds_url, timeout=10, verify=False)
+        response.raise_for_status()
+        data = response.json()
+
+        trend_data = []
+
+        # For each build, fetch test results
+        for build in data.get("builds", [])[:20]:
+            build_number = build.get("number")
+            result = build.get("result")
+            timestamp = build.get("timestamp")
+
+            # Skip builds without results (still running)
+            if not result:
+                continue
+
+            try:
+                # Fetch test report for this build
+                test_url = f"{jenkins_base_url}/{build_number}/testReport/api/json"
+                test_response = requests.get(test_url, timeout=5, verify=False)
+
+                if test_response.status_code == 200:
+                    test_data = test_response.json()
+
+                    pass_count = test_data.get("passCount", 0)
+                    fail_count = test_data.get("failCount", 0)
+                    skip_count = test_data.get("skipCount", 0)
+                    total_count = pass_count + fail_count + skip_count
+
+                    trend_data.append({
+                        "build": build_number,
+                        "result": result,
+                        "timestamp": datetime.fromtimestamp(timestamp / 1000).isoformat() if timestamp else None,
+                        "passCount": pass_count,
+                        "failCount": fail_count,
+                        "skipCount": skip_count,
+                        "totalCount": total_count,
+                        "passRate": round((pass_count / total_count * 100), 1) if total_count > 0 else 0,
+                    })
+                else:
+                    # Build might not have test results
+                    print(f"⚠️  [JENKINS] Build #{build_number} has no test results (status {test_response.status_code})")
+            except Exception as e:
+                print(f"⚠️  [JENKINS] Failed to fetch test results for build #{build_number}: {str(e)}")
+                continue
+
+        # Sort by build number descending (newest first)
+        trend_data.sort(key=lambda x: x["build"], reverse=True)
+
+        print(f"✅ [JENKINS] Successfully fetched trend data for {len(trend_data)} builds")
+
+        return {
+            "success": True,
+            "trend": trend_data,
+            "count": len(trend_data),
+        }
+
+    except Exception as e:
+        print(f"❌ [JENKINS] Error fetching test results trend: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+        return {
+            "success": False,
+            "trend": [],
+            "count": 0,
+            "message": f"Error fetching Jenkins test results: {str(e)}",
+        }
+
+
+@app.get("/api/github/repo-activity")
+async def get_github_repo_activity():
+    """Get GitHub repository activity stats"""
+    import requests
+    from datetime import datetime, timedelta
+
+    try:
+        # Repositories to monitor
+        repos = [
+            "kubernetes-sigs/cluster-api-provider-aws",
+            "stolostron/cluster-api-provider-aws",
+            "tinaafitz/test-automation-capa"
+        ]
+
+        activity_data = []
+
+        for repo in repos:
+            # GitHub API endpoint for repo stats
+            api_base = f"https://api.github.com/repos/{repo}"
+
+            # Get repo info
+            repo_response = requests.get(api_base, timeout=10)
+            if repo_response.status_code != 200:
+                print(f"⚠️  [GITHUB] Failed to fetch {repo}: {repo_response.status_code}")
+                # Add repo with placeholder data if rate limited
+                activity_data.append({
+                    "repo": repo,
+                    "name": repo.split("/")[1],
+                    "stars": 0,
+                    "forks": 0,
+                    "open_issues": 0,
+                    "open_prs": 0,
+                    "merged_prs_7d": "?",
+                    "commits_7d": 0,
+                    "updated_at": None,
+                    "error": "Rate limited" if repo_response.status_code == 403 else f"Error {repo_response.status_code}"
+                })
+                continue
+
+            repo_data = repo_response.json()
+
+            # Get recent commits (last 7 days)
+            since_date = (datetime.now() - timedelta(days=7)).isoformat()
+            commits_url = f"{api_base}/commits?since={since_date}&per_page=100"
+            commits_response = requests.get(commits_url, timeout=10)
+            commits_count = len(commits_response.json()) if commits_response.status_code == 200 else 0
+
+            # Get open PRs
+            prs_url = f"{api_base}/pulls?state=open&per_page=100"
+            prs_response = requests.get(prs_url, timeout=10)
+            open_prs = len(prs_response.json()) if prs_response.status_code == 200 else 0
+
+            # Get merged PRs (last 7 days)
+            merged_prs_url = f"{api_base}/pulls?state=closed&per_page=100"
+            merged_prs_response = requests.get(merged_prs_url, timeout=10)
+            merged_prs_count = 0
+            if merged_prs_response.status_code == 200:
+                closed_prs = merged_prs_response.json()
+                # Filter for merged PRs in last 7 days
+                seven_days_ago = datetime.now() - timedelta(days=7)
+                for pr in closed_prs:
+                    if pr.get("merged_at"):
+                        merged_at = datetime.fromisoformat(pr["merged_at"].replace("Z", "+00:00"))
+                        if merged_at.replace(tzinfo=None) >= seven_days_ago:
+                            merged_prs_count += 1
+
+            # Get open issues (excluding PRs)
+            issues_url = f"{api_base}/issues?state=open&per_page=100"
+            issues_response = requests.get(issues_url, timeout=10)
+            all_open = len(issues_response.json()) if issues_response.status_code == 200 else 0
+            open_issues = all_open - open_prs  # Issues includes PRs, so subtract
+
+            activity_data.append({
+                "repo": repo,
+                "name": repo.split("/")[1],
+                "stars": repo_data.get("stargazers_count", 0),
+                "forks": repo_data.get("forks_count", 0),
+                "open_issues": open_issues,
+                "open_prs": open_prs,
+                "merged_prs_7d": merged_prs_count,
+                "commits_7d": commits_count,
+                "updated_at": repo_data.get("updated_at"),
+            })
+
+        print(f"✅ [GITHUB] Successfully fetched activity for {len(activity_data)} repos")
+
+        return {
+            "success": True,
+            "repos": activity_data,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        print(f"❌ [GITHUB] Error fetching repo activity: {str(e)}")
+        return {
+            "success": False,
+            "repos": [],
+            "message": f"Error fetching GitHub repo activity: {str(e)}",
+        }
 
 
 if __name__ == "__main__":
