@@ -520,7 +520,7 @@ const MinikubeDashboardContent = () => {
     setMinikubeClusterInput,
   } = minikube;
 
-  const { addToRecent, updateRecentOperationStatus } = recentOps;
+  const { addToRecent, updateRecentOperationStatus, removeRecentOperation } = recentOps;
 
   // Minikube-specific state
   const [installMethod, setInstallMethod] = useState(() => {
@@ -1496,6 +1496,67 @@ const MinikubeDashboardContent = () => {
                              verifiedMinikubeClusterInfo?.name ||
                              selectedMinikubeCluster ||
                              'No cluster selected';
+
+        // Check if there's an active provisioning job running
+        const activeProvisioningJob = recentOps.recentOperations.find(op =>
+          op.title && op.title.toLowerCase().includes('provision') &&
+          op.status && (op.status.includes('⏳') || op.status.toLowerCase().includes('running') || op.status.toLowerCase().includes('starting'))
+        );
+
+        // If there's an active provisioning, show the warning AND the provisioning output
+        if (activeProvisioningJob && !provisionResults && !isProvisioning) {
+          return (
+            <div className="space-y-6">
+              {/* Title */}
+              <h2 className="text-2xl font-bold text-purple-900">Provision ROSA HCP Cluster</h2>
+
+              {/* Provisioning Started Message */}
+              <div className="bg-green-50 border-2 border-green-300 rounded-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">✅</span>
+                    <h3 className="text-lg font-semibold text-gray-900">Provisioning Started</h3>
+                  </div>
+                  <button
+                    onClick={() => {
+                      // Remove the stuck operation from recent operations
+                      if (activeProvisioningJob?.id) {
+                        removeRecentOperation(activeProvisioningJob.id);
+                      }
+                      // Clear local state
+                      setProvisionResults(null);
+                      setIsProvisioning(false);
+                    }}
+                    className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors text-sm font-medium"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {/* Playbook Output */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-medium text-gray-700">Playbook Output:</h4>
+                    <button
+                      onClick={() => handleCopyOutput(activeProvisioningJob.output || 'No output available')}
+                      className="px-3 py-1 text-white rounded text-xs font-medium transition-colors"
+                      style={{ backgroundColor: '#8B5CF6' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#7C3AED')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#8B5CF6')}
+                    >
+                      📋 Copy
+                    </button>
+                  </div>
+                  <div className="bg-gray-900 text-green-400 p-4 rounded font-mono text-xs overflow-auto max-h-96">
+                    <pre className="whitespace-pre-wrap">
+                      {activeProvisioningJob.output || 'Loading output...'}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
 
         return (
           <div className="space-y-6">

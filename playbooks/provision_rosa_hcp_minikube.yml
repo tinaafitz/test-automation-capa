@@ -1,0 +1,139 @@
+---
+# ================================================================
+# Provision ROSA HCP Cluster on Minikube
+# ================================================================
+# This playbook provisions a ROSA HCP cluster to a Minikube cluster
+# by applying the generated YAML manifests.
+#
+# Usage:
+#   ansible-playbook provision_rosa_hcp_minikube.yml \
+#     -e cluster_name=my-cluster \
+#     -e minikube_context=sat-minikube-test \
+#     -e yaml_file=/path/to/cluster.yaml
+# ================================================================
+
+- name: Provision ROSA HCP cluster on Minikube
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # Default values - will be overridden by API call
+    minikube_context: "sat-minikube-test"
+    namespace: "ns-rosa-hcp"
+
+  tasks:
+    - name: Validate required variables
+      assert:
+        that:
+          - cluster_name is defined
+          - yaml_file is defined
+          - minikube_context is defined
+        fail_msg: "Required variables: cluster_name, yaml_file, minikube_context"
+
+    - name: Check if YAML file exists
+      stat:
+        path: "{{ yaml_file }}"
+      register: yaml_stat
+
+    - name: Fail if YAML file not found
+      fail:
+        msg: "YAML file not found: {{ yaml_file }}"
+      when: not yaml_stat.stat.exists
+
+    - name: Display provisioning info
+      debug:
+        msg: |
+          ╔═══════════════════════════════════════════════════════════════╗
+          ║                                                               ║
+          ║       🚀 ROSA HCP Cluster Provisioning (Minikube)             ║
+          ║                                                               ║
+          ╚═══════════════════════════════════════════════════════════════╝
+
+          Cluster: {{ cluster_name }}
+          Minikube Context: {{ minikube_context }}
+          Namespace: {{ namespace }}
+          YAML File: {{ yaml_file }}
+
+    - name: Switch to Minikube context
+      shell: |
+        kubectl config use-context {{ minikube_context }}
+      register: context_result
+      changed_when: false
+
+    - name: Display context switch result
+      debug:
+        msg: "✓ Switched to context: {{ minikube_context }}"
+
+    - name: Create namespace if it doesn't exist
+      shell: |
+        kubectl --context {{ minikube_context }} create namespace {{ namespace }} --dry-run=client -o yaml | \
+        kubectl --context {{ minikube_context }} apply -f -
+      register: ns_result
+      changed_when: "'created' in ns_result.stdout or 'configured' in ns_result.stdout"
+
+    - name: Display namespace result
+      debug:
+        msg: "✓ Namespace: {{ ns_result.stdout }}"
+
+    - name: Apply ROSA HCP cluster YAML
+      shell: |
+        kubectl --context {{ minikube_context }} apply -f {{ yaml_file }}
+      register: apply_result
+      changed_when: "'created' in apply_result.stdout or 'configured' in apply_result.stdout"
+
+    - name: Display apply results
+      debug:
+        msg: |
+
+          ╔═══════════════════════════════════════════════════════════════╗
+          ║                                                               ║
+          ║           ✅  RESOURCES APPLIED SUCCESSFULLY!                 ║
+          ║                                                               ║
+          ╚═══════════════════════════════════════════════════════════════╝
+
+          {{ apply_result.stdout }}
+
+          Monitor cluster provisioning:
+          kubectl --context {{ minikube_context }} get rosacontrolplane {{ cluster_name }} -n {{ namespace }} -w
+
+          View cluster details:
+          kubectl --context {{ minikube_context }} describe rosacontrolplane {{ cluster_name }} -n {{ namespace }}
+
+          Check all resources:
+          kubectl --context {{ minikube_context }} get cluster,rosacontrolplane,rosamachinepool,rosanetwork,rosaroleconfig -n {{ namespace }}
+
+    - name: Wait for RosaControlPlane to be created
+      shell: |
+        kubectl --context {{ minikube_context }} get rosacontrolplane {{ cluster_name }} -n {{ namespace }} -o json
+      register: rcp_check
+      retries: 10
+      delay: 2
+      until: rcp_check.rc == 0
+      ignore_errors: true
+
+    - name: Display initial cluster status
+      block:
+        - name: Get RosaControlPlane status
+          shell: |
+            kubectl --context {{ minikube_context }} get rosacontrolplane {{ cluster_name }} -n {{ namespace }} \
+              -o jsonpath='{.status.conditions[?(@.type=="ROSAControlPlaneReady")].reason}'
+          register: rcp_status
+          failed_when: false
+
+        - name: Show status
+          debug:
+            msg: |
+
+              Current Status: {{ rcp_status.stdout if rcp_status.stdout else 'Initializing...' }}
+
+              The cluster is now provisioning in AWS. This typically takes 15-20 minutes.
+
+              Next stages:
+              1. IAM roles creation (RosaRoleConfig)
+              2. Network resources (ROSANetwork)
+              3. Control plane provisioning
+              4. Worker nodes provisioning
+
+              💡 Tip: The UI will continue to update with real-time progress!
+      when: rcp_check.rc == 0

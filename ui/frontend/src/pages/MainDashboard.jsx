@@ -33,7 +33,7 @@ const CombinedRosaHcpClusters = ({ onRefresh }) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             cluster_name: minikubeClusterName,
-            namespace: 'default'
+            namespace: 'ns-rosa-hcp'
           }),
         })
       ]);
@@ -491,10 +491,10 @@ const MainDashboard = () => {
       <div className="flex-1 flex overflow-hidden">
         {/* Left Side - Main Content */}
         <div className="flex-1 overflow-y-auto">
-          {/* Page Header - Subtle Gray */}
-          <div className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 px-6 py-4 flex items-center h-[72px]">
+          {/* Page Header - Gray Bar with White Text */}
+          <div className="bg-gradient-to-r from-gray-600 to-gray-500 text-white px-6 py-4 shadow-lg flex items-center h-[72px]">
             <div>
-              <h1 className="text-2xl font-bold leading-tight tracking-tight text-gray-800">At a Glance</h1>
+              <h1 className="text-2xl font-bold leading-tight tracking-tight">At a Glance</h1>
             </div>
           </div>
 

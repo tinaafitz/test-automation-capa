@@ -28,22 +28,40 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
         const credData = await credResponse.json();
         const clusterName = credData.credentials?.minikubeCluster || credData.credentials?.clusterName || 'sat-minikube-test';
 
-        response = await fetch(buildApiUrl('/api/minikube/get-active-resources'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            cluster_name: clusterName,
-            namespace: 'default'  // Default namespace for scanning
-          }),
-        });
+        // Fetch resources from multiple namespaces in parallel with timeout
+        const namespaces = ['ns-rosa-hcp', 'capa-system', 'default'];
 
-        data = await response.json();
+        const fetchWithTimeout = (namespace, timeoutMs = 8000) => {
+          return Promise.race([
+            fetch(buildApiUrl('/api/minikube/get-active-resources'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                cluster_name: clusterName,
+                namespace: namespace
+              }),
+            }).then(r => r.json()),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`Timeout fetching ${namespace}`)), timeoutMs)
+            )
+          ]).catch(err => {
+            console.warn(`Failed to fetch resources from namespace ${namespace}:`, err.message);
+            return { success: false, resources: [] };
+          });
+        };
 
-        // Transform Minikube resources to the expected format
-        if (data.success && Array.isArray(data.resources)) {
-          setResources(data.resources);
-          setTotalCount(data.resources.length || 0);
-        }
+        // Fetch all namespaces in parallel
+        const results = await Promise.all(
+          namespaces.map(ns => fetchWithTimeout(ns))
+        );
+
+        // Combine all successful results
+        const allResources = results.flatMap(result =>
+          result.success && Array.isArray(result.resources) ? result.resources : []
+        );
+
+        setResources(allResources);
+        setTotalCount(allResources.length);
       } else {
         // For MCE, use the regular endpoint
         response = await fetch(buildApiUrl('/api/mce/resources'));
@@ -116,6 +134,9 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
     acc[ns].push(resource);
     return acc;
   }, {});
+
+  // Sort namespaces alphabetically
+  const sortedNamespaces = Object.keys(groupedResources).sort();
 
   const themeColors = theme === 'mce'
     ? { primary: '#2684FF', hover: '#0065FF', border: 'border-cyan-200' }
@@ -194,7 +215,9 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
           </div>
         ) : (
           <div className="space-y-2">
-            {Object.entries(groupedResources).map(([namespace, nsResources]) => (
+            {sortedNamespaces.map((namespace) => {
+              const nsResources = groupedResources[namespace];
+              return (
               <div key={namespace} className="border border-gray-200 rounded-lg overflow-hidden">
                 {/* Namespace Header */}
                 <button
@@ -259,7 +282,8 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
