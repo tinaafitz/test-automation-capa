@@ -491,10 +491,10 @@ const MainDashboard = () => {
       <div className="flex-1 flex overflow-hidden">
         {/* Left Side - Main Content */}
         <div className="flex-1 overflow-y-auto">
-          {/* Page Header - Gray Bar with White Text */}
-          <div className="bg-gradient-to-r from-gray-600 to-gray-500 text-white px-6 py-4 shadow-lg flex items-center h-[72px]">
+          {/* Page Header - Lighter Bar */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4 shadow-md flex items-center h-[72px] border-b border-blue-100">
             <div>
-              <h1 className="text-2xl font-bold leading-tight tracking-tight">At a Glance</h1>
+              <h1 className="text-2xl font-bold leading-tight tracking-tight text-gray-800">At a Glance</h1>
             </div>
           </div>
 
@@ -505,7 +505,7 @@ const MainDashboard = () => {
                 <h2 className="text-2xl font-bold text-gray-900">ROSA HCP Clusters</h2>
                 <button
                   onClick={() => clustersRefreshRef.current?.()}
-                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded transition-colors font-medium flex items-center gap-2"
+                  className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded transition-colors font-medium flex items-center gap-2 border border-blue-200"
                 >
                   <ArrowPathIcon className="h-4 w-4" />
                   Refresh
@@ -520,7 +520,7 @@ const MainDashboard = () => {
               <h2 className="text-2xl font-bold text-gray-900">Task Summary</h2>
               <button
                 onClick={handleRefreshTasks}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded transition-colors font-medium flex items-center gap-2"
+                className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded transition-colors font-medium flex items-center gap-2 border border-blue-200"
               >
                 <ArrowPathIcon className="h-4 w-4" />
                 Refresh

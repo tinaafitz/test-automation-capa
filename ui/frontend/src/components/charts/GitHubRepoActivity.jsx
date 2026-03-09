@@ -38,7 +38,7 @@ const GitHubRepoActivity = () => {
           <button
             onClick={fetchRepoActivity}
             disabled={loading}
-            className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2"
+            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2 border border-blue-200"
           >
             <ArrowPathIcon className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -62,7 +62,7 @@ const GitHubRepoActivity = () => {
             <p className="text-xs text-gray-500 mb-2">Click Refresh to load GitHub activity</p>
             <button
               onClick={fetchRepoActivity}
-              className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-xs transition-colors font-medium"
+              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-xs transition-colors font-medium border border-blue-200"
             >
               Load Data
             </button>
