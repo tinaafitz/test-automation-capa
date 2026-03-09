@@ -221,7 +221,7 @@ const CapaSidebar = ({
                 className="w-full px-4 py-2.5 text-left hover:bg-green-50 transition-colors flex items-center gap-3"
               >
                 <span className="text-lg">🏠</span>
-                <span className="text-sm font-medium text-gray-900">Main Dashboard</span>
+                <span className="text-sm font-medium text-gray-900">At a Glance</span>
               </button>
               <button
                 onClick={() => handleEnvironmentSwitch('/mce')}

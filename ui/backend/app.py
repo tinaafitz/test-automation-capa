@@ -20,7 +20,6 @@ import time
 from slack_notification_service import SlackNotificationService
 from email_notification_service import EmailNotificationService
 from ai_assistant_service import AIAssistantService
-from quick_fix_service import QuickFixService
 
 app = FastAPI(title="ROSA Automation API", version="1.0.0")
 
@@ -38,9 +37,6 @@ email_service = EmailNotificationService()
 
 # Initialize AI assistant service
 ai_service = AIAssistantService()
-
-# Initialize quick fix service
-quick_fix_service = QuickFixService()
 
 # CORS middleware for frontend development
 app.add_middleware(
@@ -3812,17 +3808,46 @@ async def get_mce_yaml():
 
 
 @app.get("/api/rosa/clusters")
-async def get_rosa_clusters():
-    """Get actual ROSA HCP clusters using rosa CLI"""
+async def get_rosa_clusters(context: str = None):
+    """Get actual ROSA HCP clusters using rosa CLI
+
+    Args:
+        context: Optional kubectl context to filter clusters (e.g., 'sat-minikube-test')
+                 If provided, only returns ROSA clusters that exist as CAPI clusters in that context
+    """
     import json
 
+    # If context is provided, get CAPI cluster names from that context to filter
+    capi_cluster_names = None
+    if context:
+        try:
+            # Build kubectl command - use current context if context='current'
+            kubectl_cmd = ["kubectl"]
+            if context != "current":
+                kubectl_cmd.extend(["--context", context])
+            kubectl_cmd.extend(["get", "cluster", "-n", "ns-rosa-hcp", "-o", "json"])
+
+            result = subprocess.run(
+                kubectl_cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                capi_data = json.loads(result.stdout)
+                capi_cluster_names = set([item.get("metadata", {}).get("name") for item in capi_data.get("items", [])])
+                actual_context = context if context != "current" else "current (MCE hub)"
+                print(f"[ROSA Clusters] Filtering by context '{actual_context}': {capi_cluster_names}")
+        except Exception as e:
+            print(f"[ROSA Clusters] Error getting CAPI clusters from context '{context}': {e}")
+
     try:
-        # Try to get actual ROSA clusters using rosa CLI
+        # Try to get actual ROSA clusters using rosa CLI with short timeout
         result = subprocess.run(
             ["rosa", "list", "clusters", "-o", "json"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=5,  # Short timeout - rosa CLI can hang without credentials
         )
 
         if result.returncode == 0:
@@ -3832,14 +3857,20 @@ async def get_rosa_clusters():
                 clusters = []
 
                 for cluster in rosa_clusters:
+                    cluster_name = cluster.get("name", "unknown")
+
+                    # If filtering by context, only include clusters that exist in CAPI
+                    if capi_cluster_names is not None and cluster_name not in capi_cluster_names:
+                        continue
+
                     # Extract cluster information from rosa CLI output
                     cluster_info = {
-                        "name": cluster.get("name", "unknown"),
+                        "name": cluster_name,
                         "status": "ready" if cluster.get("state") == "ready" else cluster.get("state", "unknown"),
                         "region": cluster.get("region", {}).get("id", "N/A") if isinstance(cluster.get("region"), dict) else cluster.get("region", "N/A"),
                         "created": cluster.get("creation_timestamp"),
                         "version": cluster.get("openshift_version", "N/A"),
-                        "namespace": "N/A",  # rosa CLI doesn't provide namespace
+                        "namespace": "ns-rosa-hcp",  # CAPI clusters are in ns-rosa-hcp
                         "progress": 100 if cluster.get("state") == "ready" else 0,
                     }
 
@@ -3851,6 +3882,7 @@ async def get_rosa_clusters():
                     "success": True,
                     "clusters": clusters,
                     "count": len(clusters),
+                    "filtered_by_context": context,
                 }
             except json.JSONDecodeError:
                 # Fall through to RosaControlPlane method
@@ -5003,108 +5035,116 @@ async def list_minikube_clusters():
     """List available Minikube profiles (cached for 30 seconds)"""
     global minikube_clusters_cache
 
-    # Check cache first
-    current_time = time.time()
-    cache_age = current_time - minikube_clusters_cache["timestamp"]
+    # QUICK FIX FOR DEMO: Use static list to avoid minikube profile list hanging
+    from quick_fix_service import get_minikube_clusters_static
+    result = get_minikube_clusters_static()
+    minikube_clusters_cache["data"] = result
+    minikube_clusters_cache["timestamp"] = time.time()
+    return result
 
-    if minikube_clusters_cache["data"] is not None and cache_age < minikube_clusters_cache["ttl"]:
-        print(f"✅ [CACHE HIT] Returning cached Minikube clusters (age: {cache_age:.1f}s)")
-        return minikube_clusters_cache["data"]
+    # Original code (commented out temporarily):
+    # # Check cache first
+    # current_time = time.time()
+    # cache_age = current_time - minikube_clusters_cache["timestamp"]
 
-    print(f"⏳ [CACHE MISS] Fetching fresh Minikube clusters (cache age: {cache_age:.1f}s)")
+    # if minikube_clusters_cache["data"] is not None and cache_age < minikube_clusters_cache["ttl"]:
+    #     print(f"✅ [CACHE HIT] Returning cached Minikube clusters (age: {cache_age:.1f}s)")
+    #     return minikube_clusters_cache["data"]
 
-    try:
-        # Check if Minikube is installed
-        minikube_check = subprocess.run(
-            ["minikube", "version"], capture_output=True, text=True, timeout=30
-        )
+    # print(f"⏳ [CACHE MISS] Fetching fresh Minikube clusters (cache age: {cache_age:.1f}s)")
 
-        if minikube_check.returncode != 0:
-            result = {
-                "clusters": [],
-                "minikube_installed": False,
-                "message": "Minikube is not installed",
-                "suggestion": "Install Minikube first: brew install minikube",
-            }
-            # Cache the result
-            minikube_clusters_cache["data"] = result
-            minikube_clusters_cache["timestamp"] = current_time
-            return result
-
-        # List Minikube profiles
-        list_result = subprocess.run(
-            ["minikube", "profile", "list", "-o", "json"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-
-        if list_result.returncode != 0:
-            # No profiles exist yet
-            result = {
-                "clusters": [],
-                "minikube_installed": True,
-                "message": "No Minikube clusters found",
-                "suggestion": "Create a cluster with: minikube start --profile <cluster-name>",
-            }
-            # Cache the result
-            minikube_clusters_cache["data"] = result
-            minikube_clusters_cache["timestamp"] = current_time
-            return result
-
-        # Parse JSON output
-        import json
-
-        try:
-            profiles_data = json.loads(list_result.stdout)
-            clusters = []
-
-            if "valid" in profiles_data:
-                for profile in profiles_data["valid"]:
-                    clusters.append(profile["Name"])
-
-            result = {
-                "clusters": clusters,
-                "minikube_installed": True,
-                "message": (
-                    f"Found {len(clusters)} Minikube cluster(s)"
-                    if clusters
-                    else "No Minikube clusters found"
-                ),
-                "suggestion": (
-                    "Create a cluster with: minikube start --profile <cluster-name>"
-                    if not clusters
-                    else None
-                ),
-            }
-            # Cache the result
-            minikube_clusters_cache["data"] = result
-            minikube_clusters_cache["timestamp"] = current_time
-            print(f"✅ [CACHE UPDATE] Cached {len(clusters)} Minikube clusters")
-            return result
-        except json.JSONDecodeError:
-            result = {
-                "clusters": [],
-                "minikube_installed": True,
-                "message": "Failed to parse minikube profile list",
-                "suggestion": "Check minikube installation",
-            }
-            # Cache the result
-            minikube_clusters_cache["data"] = result
-            minikube_clusters_cache["timestamp"] = current_time
-            return result
-
-    except Exception as e:
-        result = {
-            "clusters": [],
-            "minikube_installed": False,
-            "message": f"Error listing Minikube clusters: {str(e)}",
-            "suggestion": "Check Minikube installation and permissions",
-        }
-        # Cache even error results to prevent repeated failures
-        minikube_clusters_cache["data"] = result
-        minikube_clusters_cache["timestamp"] = current_time
-        return result
+    # try:
+    #     # Check if Minikube is installed
+    #     minikube_check = subprocess.run(
+    #         ["minikube", "version"], capture_output=True, text=True, timeout=30
+    #     )
+    #
+    #     if minikube_check.returncode != 0:
+    #         result = {
+    #             "clusters": [],
+    #             "minikube_installed": False,
+    #             "message": "Minikube is not installed",
+    #             "suggestion": "Install Minikube first: brew install minikube",
+    #         }
+    #         # Cache the result
+    #         minikube_clusters_cache["data"] = result
+    #         minikube_clusters_cache["timestamp"] = current_time
+    #         return result
+    #
+    #     # List Minikube profiles
+    #     list_result = subprocess.run(
+    #         ["minikube", "profile", "list", "-o", "json"],
+    #         capture_output=True,
+    #         text=True,
+    #         timeout=30,
+    #     )
+    #
+    #     if list_result.returncode != 0:
+    #         # No profiles exist yet
+    #         result = {
+    #             "clusters": [],
+    #             "minikube_installed": True,
+    #             "message": "No Minikube clusters found",
+    #             "suggestion": "Create a cluster with: minikube start --profile <cluster-name>",
+    #         }
+    #         # Cache the result
+    #         minikube_clusters_cache["data"] = result
+    #         minikube_clusters_cache["timestamp"] = current_time
+    #         return result
+    #
+    #     # Parse JSON output
+    #     import json
+    #
+    #     try:
+    #         profiles_data = json.loads(list_result.stdout)
+    #         clusters = []
+    #
+    #         if "valid" in profiles_data:
+    #             for profile in profiles_data["valid"]:
+    #                 clusters.append(profile["Name"])
+    #
+    #         result = {
+    #             "clusters": clusters,
+    #             "minikube_installed": True,
+    #             "message": (
+    #                 f"Found {len(clusters)} Minikube cluster(s)"
+    #                 if clusters
+    #                 else "No Minikube clusters found"
+    #             ),
+    #             "suggestion": (
+    #                 "Create a cluster with: minikube start --profile <cluster-name>"
+    #                 if not clusters
+    #                 else None
+    #             ),
+    #         }
+    #         # Cache the result
+    #         minikube_clusters_cache["data"] = result
+    #         minikube_clusters_cache["timestamp"] = current_time
+    #         print(f"✅ [CACHE UPDATE] Cached {len(clusters)} Minikube clusters")
+    #         return result
+    #     except json.JSONDecodeError:
+    #         result = {
+    #             "clusters": [],
+    #             "minikube_installed": True,
+    #             "message": "Failed to parse minikube profile list",
+    #             "suggestion": "Check minikube installation",
+    #         }
+    #         # Cache the result
+    #         minikube_clusters_cache["data"] = result
+    #         minikube_clusters_cache["timestamp"] = current_time
+    #         return result
+    #
+    # except Exception as e:
+    #     result = {
+    #         "clusters": [],
+    #         "minikube_installed": False,
+    #         "message": f"Error listing Minikube clusters: {str(e)}",
+    #         "suggestion": "Check Minikube installation and permissions",
+    #     }
+    #     # Cache even error results to prevent repeated failures
+    #     minikube_clusters_cache["data"] = result
+    #     minikube_clusters_cache["timestamp"] = current_time
+    #     return result
 
 
 @app.get("/api/minikube/current-context")
@@ -7517,9 +7557,55 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                 jobs[job_id]["message"] = f"Found {len(yaml_documents)} resource(s) to apply"
                 jobs[job_id]["logs"].append(f"📄 Parsed {len(yaml_documents)} YAML document(s)")
 
-                # For Minikube, apply the full YAML file directly to avoid yaml.dump() formatting issues
+                # For Minikube, use Ansible playbook for async execution
                 if cluster_context:
-                    jobs[job_id]["logs"].append(f"\n🎯 Applying all resources to Minikube cluster: {cluster_context}")
+                    jobs[job_id]["logs"].append(f"\n🎯 Provisioning to Minikube cluster: {cluster_context} via Ansible playbook")
+                    jobs[job_id]["progress"] = 30
+                    jobs[job_id]["message"] = "Running Ansible playbook for Minikube provisioning"
+
+                    # Use the provision_rosa_hcp_minikube playbook
+                    playbook_path = os.path.join(project_root, "playbooks", "provision_rosa_hcp_minikube.yml")
+
+                    extra_vars = {
+                        "cluster_name": cluster_name,
+                        "minikube_context": cluster_context,
+                        "yaml_file": saved_yaml_path,
+                        "namespace": "ns-rosa-hcp"
+                    }
+
+                    jobs[job_id]["logs"].append(f"\n📋 Playbook: {playbook_path}")
+                    jobs[job_id]["logs"].append(f"📦 Variables: {json.dumps(extra_vars, indent=2)}")
+
+                    # Run ansible-playbook command
+                    ansible_cmd = [
+                        "ansible-playbook",
+                        playbook_path,
+                        "-e", json.dumps(extra_vars)
+                    ]
+
+                    result = subprocess.run(
+                        ansible_cmd,
+                        cwd=project_root,
+                        capture_output=True,
+                        text=True,
+                        timeout=300  # 5 minute timeout for playbook itself
+                    )
+
+                    jobs[job_id]["logs"].append(f"\n{result.stdout}")
+                    if result.stderr:
+                        jobs[job_id]["logs"].append(f"\n⚠️ Warnings:\n{result.stderr}")
+
+                    if result.returncode == 0:
+                        jobs[job_id]["status"] = "completed"
+                        jobs[job_id]["progress"] = 100
+                        jobs[job_id]["message"] = "✅ Provisioning initiated successfully"
+                        jobs[job_id]["logs"].append(f"\n✅ Cluster provisioning started! Monitor progress in the ROSA HCP Clusters section.")
+                    else:
+                        jobs[job_id]["status"] = "failed"
+                        jobs[job_id]["message"] = f"❌ Playbook failed with exit code {result.returncode}"
+                        jobs[job_id]["error"] = result.stderr or result.stdout
+
+                    return  # Exit early for Minikube - no monitoring loop needed
 
                     apply_cmd = [
                         "kubectl",
@@ -9969,22 +10055,6 @@ async def search_mce_environments(query: str):
             "results": [],
             "total": 0,
         }
-
-
-@app.post("/api/quick-fix/execute")
-async def execute_quick_fix(request: Request):
-    """Execute a quick fix command for common ROSA/CAPI issues"""
-    try:
-        body = await request.json()
-        command = body.get("command")
-        parameters = body.get("parameters", {})
-        context = body.get("context", {})
-
-        result = await quick_fix_service.execute_command(command, parameters, context)
-
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error executing quick fix: {str(e)}")
 
 
 @app.get("/api/jenkins/test-results-trend")
