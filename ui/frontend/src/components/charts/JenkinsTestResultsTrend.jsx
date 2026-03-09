@@ -45,7 +45,7 @@ const JenkinsTestResultsTrend = () => {
           <button
             onClick={fetchTrendData}
             disabled={loading}
-            className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2"
+            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2 border border-blue-200"
           >
             <ArrowPathIcon className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -70,7 +70,7 @@ const JenkinsTestResultsTrend = () => {
             <p className="text-sm font-medium text-gray-600 mb-3">Click Refresh to load test results</p>
             <button
               onClick={fetchTrendData}
-              className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-sm transition-colors font-medium"
+              className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-sm transition-colors font-medium border border-blue-200"
             >
               Load Data
             </button>
