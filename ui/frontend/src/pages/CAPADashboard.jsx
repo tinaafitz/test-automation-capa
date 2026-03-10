@@ -209,6 +209,7 @@ const NotificationSettingsInline = () => {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [activeTab, setActiveTab] = useState('email');
+  const [saveMessage, setSaveMessage] = useState(null); // {type: 'success' | 'error', text: string}
 
   const [settings, setSettings] = useState({
     slack_enabled: false,
@@ -258,6 +259,7 @@ const NotificationSettingsInline = () => {
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveMessage(null);
     try {
       const response = await fetch(buildApiUrl('/api/notification-settings'), {
         method: 'POST',
@@ -266,13 +268,19 @@ const NotificationSettingsInline = () => {
       });
 
       if (response.ok) {
-        alert('Notification settings saved successfully!');
+        setSaveMessage({ type: 'success', text: 'Notification settings saved successfully!' });
+        // Scroll to top of page to show success message
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         const error = await response.json();
-        alert(`Failed to save settings: ${error.detail || 'Unknown error'}`);
+        setSaveMessage({ type: 'error', text: `Failed to save settings: ${error.detail || 'Unknown error'}` });
+        // Scroll to top of page to show error message
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (error) {
-      alert(`Failed to save settings: ${error.message}`);
+      setSaveMessage({ type: 'error', text: `Failed to save settings: ${error.message}` });
+      // Scroll to top of page to show error message
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setSaving(false);
     }
@@ -296,6 +304,25 @@ const NotificationSettingsInline = () => {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Success/Error Message Banner */}
+          {saveMessage && (
+            <div className={`px-4 py-3 rounded-lg border ${
+              saveMessage.type === 'success'
+                ? 'bg-green-50 border-green-200 text-green-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">{saveMessage.text}</span>
+                <button
+                  onClick={() => setSaveMessage(null)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Tabs */}
           <div className="flex gap-2 border-b border-gray-200">
             <button

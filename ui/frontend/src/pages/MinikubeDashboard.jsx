@@ -208,6 +208,7 @@ const NotificationSettingsInline = () => {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [activeTab, setActiveTab] = useState('email');
+  const [saveMessage, setSaveMessage] = useState(null); // {type: 'success' | 'error', text: string}
 
   const [settings, setSettings] = useState({
     slack_enabled: false,
@@ -224,6 +225,14 @@ const NotificationSettingsInline = () => {
     notify_on_start: false,
     notify_on_complete: true,
     notify_on_failure: true,
+    // Provision notification preferences
+    notify_provision_start: false,
+    notify_provision_success: true,
+    notify_provision_failure: true,
+    // Delete notification preferences
+    notify_delete_start: false,
+    notify_delete_success: true,
+    notify_delete_failure: true,
   });
 
   useEffect(() => {
@@ -249,6 +258,7 @@ const NotificationSettingsInline = () => {
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveMessage(null);
     try {
       const response = await fetch(buildApiUrl('/api/notification-settings'), {
         method: 'POST',
@@ -257,13 +267,19 @@ const NotificationSettingsInline = () => {
       });
 
       if (response.ok) {
-        alert('Notification settings saved successfully!');
+        setSaveMessage({ type: 'success', text: 'Notification settings saved successfully!' });
+        // Scroll to top of page to show success message
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         const error = await response.json();
-        alert(`Failed to save settings: ${error.detail || 'Unknown error'}`);
+        setSaveMessage({ type: 'error', text: `Failed to save settings: ${error.detail || 'Unknown error'}` });
+        // Scroll to top of page to show error message
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (error) {
-      alert(`Failed to save settings: ${error.message}`);
+      setSaveMessage({ type: 'error', text: `Failed to save settings: ${error.message}` });
+      // Scroll to top of page to show error message
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setSaving(false);
     }
@@ -287,6 +303,25 @@ const NotificationSettingsInline = () => {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Success/Error Message Banner */}
+          {saveMessage && (
+            <div className={`px-4 py-3 rounded-lg border ${
+              saveMessage.type === 'success'
+                ? 'bg-green-50 border-green-200 text-green-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">{saveMessage.text}</span>
+                <button
+                  onClick={() => setSaveMessage(null)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Tabs */}
           <div className="flex gap-2 border-b border-gray-200">
             <button
@@ -458,6 +493,110 @@ const NotificationSettingsInline = () => {
               </div>
             </div>
           )}
+
+          {/* Notification Preferences */}
+          <div className="pt-6 mt-6 border-t border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Notification Preferences</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Choose when you want to receive notifications for cluster operations
+            </p>
+
+            <div className="space-y-4">
+              {/* Provisioning Notifications */}
+              <details className="bg-gray-50 rounded-lg border border-gray-200">
+                <summary className="cursor-pointer p-4 font-semibold text-gray-800 hover:bg-gray-100 rounded-lg">
+                  Cluster Provisioning
+                </summary>
+                <div className="space-y-2 p-4 pt-2">
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_provision_start}
+                      onChange={(e) => handleInputChange('notify_provision_start', e.target.checked)}
+                      className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Provisioning starts</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster provisioning begins</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_provision_success}
+                      onChange={(e) => handleInputChange('notify_provision_success', e.target.checked)}
+                      className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Provisioning completes</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster is provisioned successfully</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_provision_failure}
+                      onChange={(e) => handleInputChange('notify_provision_failure', e.target.checked)}
+                      className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Provisioning failures only</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster provisioning fails</p>
+                    </div>
+                  </label>
+                </div>
+              </details>
+
+              {/* Deletion Notifications */}
+              <details className="bg-gray-50 rounded-lg border border-gray-200">
+                <summary className="cursor-pointer p-4 font-semibold text-gray-800 hover:bg-gray-100 rounded-lg">
+                  Cluster Deletion
+                </summary>
+                <div className="space-y-2 p-4 pt-2">
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_delete_start}
+                      onChange={(e) => handleInputChange('notify_delete_start', e.target.checked)}
+                      className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Deletion starts</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster deletion begins</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_delete_success}
+                      onChange={(e) => handleInputChange('notify_delete_success', e.target.checked)}
+                      className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Deletion completes</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster is deleted successfully</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.notify_delete_failure}
+                      onChange={(e) => handleInputChange('notify_delete_failure', e.target.checked)}
+                      className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-gray-300 rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Deletion failures only</span>
+                      <p className="text-xs text-gray-500">Receive notification when cluster deletion fails</p>
+                    </div>
+                  </label>
+                </div>
+              </details>
+            </div>
+          </div>
 
           {/* Save Button */}
           <div className="flex justify-end pt-4 border-t">
