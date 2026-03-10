@@ -135,9 +135,97 @@ class NotificationSettings(BaseModel):
     notify_on_start: bool = False
     notify_on_complete: bool = True
     notify_on_failure: bool = True
+    # Provision notification preferences
+    notify_provision_start: bool = False
+    notify_provision_success: bool = True
+    notify_provision_failure: bool = True
+    # Delete notification preferences
+    notify_delete_start: bool = False
+    notify_delete_success: bool = True
+    notify_delete_failure: bool = True
 
 
 # Helper functions
+def send_cluster_notifications(cluster_name: str, region: str, version: str, job_id: str, status: str, error: str = None, operation_type: str = "provision"):
+    """
+    Send notifications for cluster operations (provision/delete)
+
+    Args:
+        cluster_name: Name of the cluster
+        region: AWS region
+        version: OpenShift version
+        job_id: Job ID
+        status: 'started', 'completed', or 'failed'
+        error: Error message (for failed status)
+        operation_type: 'provision' or 'delete'
+    """
+    try:
+        # Load notification settings
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        config_path = os.path.join(project_root, "vars", "notification_config.yml")
+
+        if not os.path.exists(config_path):
+            print("Notification config not found, skipping notifications")
+            return
+
+        with open(config_path, "r") as f:
+            settings = yaml.safe_load(f) or {}
+
+        # Build job data for notifications
+        job_data = {
+            "cluster_name": cluster_name,
+            "region": region,
+            "version": version,
+            "job_id": job_id,
+        }
+
+        if error:
+            job_data["error"] = error
+
+        # Check notification preferences based on operation type and status
+        should_notify = False
+
+        if operation_type == "provision":
+            if status == "started" and settings.get("notify_provision_start", False):
+                should_notify = True
+            elif status == "completed" and settings.get("notify_provision_success", True):
+                should_notify = True
+            elif status == "failed" and settings.get("notify_provision_failure", True):
+                should_notify = True
+        elif operation_type == "delete":
+            if status == "started" and settings.get("notify_delete_start", False):
+                should_notify = True
+            elif status == "completed" and settings.get("notify_delete_success", True):
+                should_notify = True
+            elif status == "failed" and settings.get("notify_delete_failure", True):
+                should_notify = True
+
+        if not should_notify:
+            print(f"Notifications disabled for {operation_type} {status}")
+            return
+
+        # Send Slack notification
+        if settings.get("slack_enabled", False):
+            try:
+                slack_service.reload_config()  # Reload config to get latest settings
+                slack_service.send_provisioning_notification(job_data, status)
+                print(f"Slack notification sent for {operation_type} {status}")
+            except Exception as e:
+                print(f"Failed to send Slack notification: {e}")
+
+        # Send Email notification
+        if settings.get("email_enabled", False):
+            try:
+                email_service.reload_config()  # Reload config to get latest settings
+                email_service.send_provisioning_notification(job_data, status)
+                print(f"Email notification sent for {operation_type} {status}")
+            except Exception as e:
+                print(f"Failed to send email notification: {e}")
+
+    except Exception as e:
+        print(f"Error in send_cluster_notifications: {e}")
+
+
 async def run_minikube_init_playbook(
     playbook_path: str,
     cluster_name: str,
@@ -286,8 +374,10 @@ async def run_minikube_init_playbook(
         jobs[job_id]["completed_at"] = datetime.now()
 
 
-def run_ansible_playbook(playbook: str, config: dict, job_id: str):
+async def run_ansible_playbook(playbook: str, config: dict, job_id: str):
     """Run ansible playbook asynchronously"""
+    import asyncio
+
     try:
         jobs[job_id]["status"] = "running"
         jobs[job_id]["progress"] = 10
@@ -368,42 +458,54 @@ def run_ansible_playbook(playbook: str, config: dict, job_id: str):
         # Run the command (use parent directory of ui/ as working directory)
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-        # Execute playbook with real-time output streaming
-        # This prevents timeout issues and provides better UX with live progress
-        process = subprocess.Popen(
-            cmd,
+        # Execute playbook with real-time output streaming using async subprocess
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
             cwd=project_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,  # Merge stderr into stdout
-            text=True,
-            bufsize=1,  # Line buffered
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
         )
 
         # Stream output in real-time and update job logs incrementally
-        import sys
         line_count = 0
         try:
-            for line in process.stdout:
-                # Append to job logs immediately (visible in UI)
-                jobs[job_id]["logs"].append(line.rstrip())
+            # Read output line by line with timeout
+            async def read_stream():
+                nonlocal line_count
+                while True:
+                    line = await process.stdout.readline()
+                    if not line:
+                        break
 
-                # Update progress based on log output
-                line_count += 1
-                if line_count % 10 == 0:  # Update every 10 lines
-                    # Progress from 30% to 95% during execution
-                    current_progress = min(30 + (line_count // 10), 95)
-                    jobs[job_id]["progress"] = current_progress
+                    line_str = line.decode().rstrip()
+                    # Append to job logs immediately (visible in UI)
+                    jobs[job_id]["logs"].append(line_str)
 
-                # Also print to console for debugging
-                print(line, end='')
-                sys.stdout.flush()
+                    # Update progress based on log output
+                    line_count += 1
+                    if line_count % 10 == 0:  # Update every 10 lines
+                        # Progress from 30% to 95% during execution
+                        current_progress = min(30 + (line_count // 10), 95)
+                        jobs[job_id]["progress"] = current_progress
 
-            # Wait for process to complete
-            returncode = process.wait(timeout=3600)  # 60 minutes timeout (matches Jenkins deletion timeout)
+                    # Also print to console for debugging
+                    print(line_str)
 
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+            # Wait for process to complete with timeout
+            await asyncio.wait_for(
+                asyncio.gather(read_stream(), process.wait()),
+                timeout=3600  # 60 minutes timeout
+            )
+
+            returncode = process.returncode
+
+        except asyncio.TimeoutError:
+            # Kill the process on timeout
+            try:
+                process.kill()
+                await process.wait()
+            except:
+                pass
             raise  # Re-raise to be caught by outer exception handler
 
         if returncode == 0:
@@ -416,7 +518,7 @@ def run_ansible_playbook(playbook: str, config: dict, job_id: str):
 
         jobs[job_id]["completed_at"] = datetime.now()
 
-    except subprocess.TimeoutExpired:
+    except asyncio.TimeoutError:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["message"] = "Job timed out after 60 minutes"
         jobs[job_id]["logs"].append("ERROR: Process timed out after 60 minutes")
@@ -989,6 +1091,14 @@ async def get_notification_settings():
                 "notify_on_start": config.get("notify_on_start", False),
                 "notify_on_complete": config.get("notify_on_complete", True),
                 "notify_on_failure": config.get("notify_on_failure", True),
+                # Provision notification preferences
+                "notify_provision_start": config.get("notify_provision_start", False),
+                "notify_provision_success": config.get("notify_provision_success", True),
+                "notify_provision_failure": config.get("notify_provision_failure", True),
+                # Delete notification preferences
+                "notify_delete_start": config.get("notify_delete_start", False),
+                "notify_delete_success": config.get("notify_delete_success", True),
+                "notify_delete_failure": config.get("notify_delete_failure", True),
             },
         }
     except Exception as e:
@@ -1033,6 +1143,14 @@ async def update_notification_settings(settings: NotificationSettings):
             "notify_on_start": settings.notify_on_start,
             "notify_on_complete": settings.notify_on_complete,
             "notify_on_failure": settings.notify_on_failure,
+            # Provision notification preferences
+            "notify_provision_start": settings.notify_provision_start,
+            "notify_provision_success": settings.notify_provision_success,
+            "notify_provision_failure": settings.notify_provision_failure,
+            # Delete notification preferences
+            "notify_delete_start": settings.notify_delete_start,
+            "notify_delete_success": settings.notify_delete_success,
+            "notify_delete_failure": settings.notify_delete_failure,
         }
 
         with open(config_path, "w") as f:
@@ -7557,6 +7675,26 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                 jobs[job_id]["message"] = f"Found {len(yaml_documents)} resource(s) to apply"
                 jobs[job_id]["logs"].append(f"📄 Parsed {len(yaml_documents)} YAML document(s)")
 
+                # Extract cluster information from YAML for notifications
+                region = "N/A"
+                version = "N/A"
+                for doc in yaml_documents:
+                    if doc and doc.get("kind") == "RosaControlPlane":
+                        spec = doc.get("spec", {})
+                        region = spec.get("region", "N/A")
+                        version = spec.get("version", "N/A")
+                        break
+
+                # Send "started" notification
+                send_cluster_notifications(
+                    cluster_name=cluster_name,
+                    region=region,
+                    version=version,
+                    job_id=job_id,
+                    status="started",
+                    operation_type="provision"
+                )
+
                 # For Minikube, use Ansible playbook for async execution
                 if cluster_context:
                     jobs[job_id]["logs"].append(f"\n🎯 Provisioning to Minikube cluster: {cluster_context} via Ansible playbook")
@@ -7600,10 +7738,31 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                         jobs[job_id]["progress"] = 100
                         jobs[job_id]["message"] = "✅ Provisioning initiated successfully"
                         jobs[job_id]["logs"].append(f"\n✅ Cluster provisioning started! Monitor progress in the ROSA HCP Clusters section.")
+
+                        # Send "completed" notification
+                        send_cluster_notifications(
+                            cluster_name=cluster_name,
+                            region=region,
+                            version=version,
+                            job_id=job_id,
+                            status="completed",
+                            operation_type="provision"
+                        )
                     else:
                         jobs[job_id]["status"] = "failed"
                         jobs[job_id]["message"] = f"❌ Playbook failed with exit code {result.returncode}"
                         jobs[job_id]["error"] = result.stderr or result.stdout
+
+                        # Send "failed" notification
+                        send_cluster_notifications(
+                            cluster_name=cluster_name,
+                            region=region,
+                            version=version,
+                            job_id=job_id,
+                            status="failed",
+                            error=result.stderr or result.stdout,
+                            operation_type="provision"
+                        )
 
                     return  # Exit early for Minikube - no monitoring loop needed
 
