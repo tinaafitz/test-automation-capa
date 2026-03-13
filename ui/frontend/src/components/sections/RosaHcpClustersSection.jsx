@@ -75,6 +75,9 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
   const [copySuccess, setCopySuccess] = useState('');
   const [clusterPendingDeletion, setClusterPendingDeletion] = useState(null);
 
+  // AbortController for canceling polling on unmount
+  const deletionAbortController = useRef(null);
+
   // Cluster section state
   const getClusterSectionCollapsedState = () => {
     const sectionId = 'capi-rosa-hcp-clusters';
@@ -187,6 +190,10 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
     setDeletionResults(null);
     setIsDeleting(true);
 
+    // Create abort controller for this deletion operation
+    const controller = new AbortController();
+    deletionAbortController.current = controller;
+
     try {
       console.log(`🗑️ Deleting cluster: ${clusterName} in namespace: ${namespace}`);
 
@@ -239,67 +246,93 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         let attempts = 0;
 
         while (attempts < maxAttempts) {
+          // Check if aborted
+          if (controller.signal.aborted) {
+            console.log('⏹️ Polling canceled - component unmounted');
+            return;
+          }
+
           attempts++;
           console.log(`📡 Polling attempt ${attempts}/${maxAttempts}`);
 
-          const jobResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}`));
-          const jobData = await jobResponse.json();
-          console.log(`📋 Job status:`, jobData);
-
-          // Fetch logs regardless of status to show real-time output
-          const logsResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}/logs`));
-          const logsData = await logsResponse.json();
-          const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
-
-          if (jobData.status === 'completed') {
-            // Success - update with final logs
-            const output = currentOutput || 'Deletion completed successfully';
-
-            updateRecentOperationStatus(deleteId, '✅ Cluster deleted successfully!', output);
-            const successResults = {
-              success: true,
-              timestamp: new Date().toISOString(),
-              clusterName,
-              output,
-            };
-            console.log('✅ Setting deletion results (success):', successResults);
-            setDeletionResults(successResults);
-            setIsDeleting(false);
-
-            // Refresh cluster list
-            await fetchClusters();
-            return;
-          } else if (jobData.status === 'failed') {
-            // Failure - update with error logs
-            const output = currentOutput || (jobData.error || jobData.message || 'Deletion failed');
-
-            updateRecentOperationStatus(deleteId, '❌ Deletion failed', output);
-            const failureResults = {
-              success: false,
-              timestamp: new Date().toISOString(),
-              clusterName,
-              output,
-            };
-            console.log('❌ Setting deletion results (failure):', failureResults);
-            setDeletionResults(failureResults);
-            setIsDeleting(false);
-            return;
-          }
-
-          // Still running - update with current logs every 5 seconds
-          if (attempts % 5 === 0 && currentOutput) {
-            updateRecentOperationStatus(deleteId, '🗑️ Deleting...', currentOutput);
-            // Also update the inline display
-            setDeletionResults({
-              success: true,
-              timestamp: new Date().toISOString(),
-              clusterName,
-              output: currentOutput,
+          try {
+            // Add abort signal to fetch requests
+            const jobResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}`), {
+              signal: controller.signal
             });
-          }
+            const jobData = await jobResponse.json();
+            console.log(`📋 Job status:`, jobData);
 
-          // Wait and poll again
-          await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second
+            // Fetch logs regardless of status to show real-time output
+            const logsResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}/logs`), {
+              signal: controller.signal
+            });
+            const logsData = await logsResponse.json();
+            const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
+
+            if (jobData.status === 'completed') {
+              // Success - update with final logs
+              const output = currentOutput || 'Deletion completed successfully';
+
+              updateRecentOperationStatus(deleteId, '✅ Cluster deleted successfully!', output);
+              const successResults = {
+                success: true,
+                timestamp: new Date().toISOString(),
+                clusterName,
+                output,
+              };
+              console.log('✅ Setting deletion results (success):', successResults);
+              setDeletionResults(successResults);
+              setIsDeleting(false);
+
+              // Refresh cluster list
+              await fetchClusters();
+              return;
+            } else if (jobData.status === 'failed') {
+              // Failure - update with error logs
+              const output = currentOutput || (jobData.error || jobData.message || 'Deletion failed');
+
+              updateRecentOperationStatus(deleteId, '❌ Deletion failed', output);
+              const failureResults = {
+                success: false,
+                timestamp: new Date().toISOString(),
+                clusterName,
+                output,
+              };
+              console.log('❌ Setting deletion results (failure):', failureResults);
+              setDeletionResults(failureResults);
+              setIsDeleting(false);
+              return;
+            }
+
+            // Still running - update with current logs every 5 seconds
+            if (attempts % 5 === 0 && currentOutput) {
+              updateRecentOperationStatus(deleteId, '🗑️ Deleting...', currentOutput);
+              // Also update the inline display
+              setDeletionResults({
+                success: true,
+                timestamp: new Date().toISOString(),
+                clusterName,
+                output: currentOutput,
+              });
+            }
+
+            // Use abortable timeout
+            await new Promise((resolve, reject) => {
+              const timeoutId = setTimeout(resolve, 1000);
+              controller.signal.addEventListener('abort', () => {
+                clearTimeout(timeoutId);
+                reject(new DOMException('Aborted', 'AbortError'));
+              });
+            });
+
+          } catch (error) {
+            if (error.name === 'AbortError') {
+              console.log('⏹️ Fetch aborted');
+              return;
+            }
+            throw error;
+          }
         }
 
         // Timeout
@@ -309,6 +342,10 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
       await pollJobStatus();
 
     } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log('⏹️ Deletion polling canceled');
+        return;
+      }
       console.error('Deletion error:', error);
       const errorMsg = extractSafeErrorMessage(error);
       updateRecentOperationStatus(deleteId, '❌ Deletion error', errorMsg);
@@ -319,6 +356,8 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         output: errorMsg,
       });
       setIsDeleting(false);
+    } finally {
+      deletionAbortController.current = null;
     }
   };
 
@@ -334,6 +373,16 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
       setClustersError(null);
     }
   }, [ocpStatus?.connected]);
+
+  // Cleanup on component unmount - abort any active deletion polling
+  useEffect(() => {
+    return () => {
+      if (deletionAbortController.current) {
+        console.log('🧹 Cleaning up: Aborting active deletion polling');
+        deletionAbortController.current.abort();
+      }
+    };
+  }, []);
 
   // Format date for display
   const formatDate = (dateString) => {

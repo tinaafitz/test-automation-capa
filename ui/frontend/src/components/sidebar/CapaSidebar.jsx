@@ -43,6 +43,7 @@ const CapaSidebar = ({
   onTerminalClick,
   onNotificationsClick,
   onRecentTasksClick,
+  onAWSUsageClick,
   activeSection = 'environments',
   environment = 'mce' // 'mce' or 'minikube'
 }) => {
@@ -178,6 +179,12 @@ const CapaSidebar = ({
       label: 'AI Assistant',
       icon: <span className="text-lg">🤖</span>,
       onClick: onAIAssistantClick
+    },
+    {
+      id: 'aws-usage',
+      label: 'AWS Usage',
+      icon: <span className="text-lg">☁️</span>,
+      onClick: onAWSUsageClick
     },
   ];
 
