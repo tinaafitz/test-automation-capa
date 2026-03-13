@@ -1,0 +1,333 @@
+---
+# Enhanced ROSA Control Plane Wait with Active Timeout Enforcement
+#
+# This task prevents infinite retry loops by:
+# 1. Monitoring cluster age vs timeout threshold
+# 2. Forcing cluster deletion if timeout exceeded
+# 3. Cleaning up orphaned AWS resources
+# 4. Providing clear failure messages
+
+- name: Set provisioning timeout configuration
+  set_fact:
+    max_provisioning_minutes: "{{ provisioning_timeout_minutes | default(60) | int }}"
+    warning_threshold_minutes: "{{ (provisioning_timeout_minutes | default(60) | int * 0.83) | int }}"  # 83% = 50 min for 60 min timeout
+    check_interval_seconds: 30
+    max_retries: "{{ ((provisioning_timeout_minutes | default(60) | int * 60) / 30) | int }}"  # Convert minutes to 30-second intervals
+    cluster_name: "{{ cluster_name }}"
+    capi_namespace: "{{ capi_namespace | default('ns-rosa-hcp') }}"
+
+- name: Display timeout enforcement configuration
+  debug:
+    msg: |
+      ════════════════════════════════════════════════════════════
+      Timeout Enforcement Configuration
+      ════════════════════════════════════════════════════════════
+      Cluster: {{ cluster_name }}
+      Namespace: {{ capi_namespace }}
+      Maximum Provisioning Time: {{ max_provisioning_minutes }} minutes
+      Warning Threshold: {{ warning_threshold_minutes }} minutes
+      Check Interval: {{ check_interval_seconds }} seconds
+      Max Retries: {{ max_retries }}
+
+      This task will actively enforce the timeout by:
+      • Monitoring cluster age every {{ check_interval_seconds }} seconds
+      • Warning when {{ warning_threshold_minutes }} minutes elapsed
+      • Force-deleting cluster after {{ max_provisioning_minutes }} minutes
+      • Cleaning up orphaned AWS resources
+      ════════════════════════════════════════════════════════════
+
+- name: Get cluster creation timestamp
+  shell: |
+    oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
+      -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null || echo ""
+  register: creation_timestamp
+  failed_when: false
+  changed_when: false
+
+- name: Fail if cluster not found
+  fail:
+    msg: |
+      ❌ ERROR: ROSAControlPlane {{ cluster_name }} not found in namespace {{ capi_namespace }}
+
+      Cannot monitor provisioning timeout for non-existent cluster.
+      Please verify cluster name and namespace.
+  when: creation_timestamp.stdout == ""
+
+- name: Wait for ROSA Control Plane with active timeout monitoring
+  block:
+    - name: Monitor cluster provisioning with timeout enforcement
+      shell: |
+        # Get current cluster status
+        READY=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} -o jsonpath='{.status.ready}' 2>/dev/null || echo "false")
+
+        # Get creation timestamp
+        CREATED="{{ creation_timestamp.stdout }}"
+
+        # Calculate age in seconds (macOS and Linux compatible)
+        CREATED_TS=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$CREATED" "+%s" 2>/dev/null || date -d "$CREATED" "+%s" 2>/dev/null || echo "0")
+        CURRENT_TS=$(date "+%s")
+        AGE_SECONDS=$((CURRENT_TS - CREATED_TS))
+        AGE_MINUTES=$((AGE_SECONDS / 60))
+
+        # Check if ready
+        if [ "$READY" = "true" ]; then
+          echo "READY|$AGE_MINUTES"
+          exit 0
+        fi
+
+        # Check if timeout exceeded
+        if [ $AGE_MINUTES -ge {{ max_provisioning_minutes }} ]; then
+          echo "TIMEOUT|$AGE_MINUTES"
+          exit 1
+        fi
+
+        # Check if warning threshold reached
+        if [ $AGE_MINUTES -ge {{ warning_threshold_minutes }} ]; then
+          echo "WARNING|$AGE_MINUTES"
+        else
+          echo "PROVISIONING|$AGE_MINUTES"
+        fi
+      register: cluster_status_check
+      until: cluster_status_check.stdout is search("READY|") or cluster_status_check.stdout is search("TIMEOUT|")
+      retries: "{{ max_retries }}"
+      delay: "{{ check_interval_seconds }}"
+      failed_when: false
+      changed_when: false
+
+    - name: Parse cluster status
+      set_fact:
+        cluster_state: "{{ cluster_status_check.stdout.split('|')[0] }}"
+        elapsed_minutes: "{{ cluster_status_check.stdout.split('|')[1] | default('0') | int }}"
+      when: cluster_status_check.stdout is defined and '|' in cluster_status_check.stdout
+
+    - name: Display warning if approaching timeout
+      debug:
+        msg: |
+          ⚠️  WARNING: Cluster provisioning approaching timeout threshold
+
+          Cluster: {{ cluster_name }}
+          Elapsed Time: {{ elapsed_minutes }} minutes
+          Max Allowed: {{ max_provisioning_minutes }} minutes
+          Remaining: {{ max_provisioning_minutes - elapsed_minutes }} minutes
+
+          If cluster doesn't provision soon, it will be force-deleted and marked as failed.
+          Monitor progress: oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} -w
+      when:
+        - cluster_state is defined
+        - cluster_state == "WARNING"
+
+    - name: Handle timeout - Force delete cluster and cleanup
+      when:
+        - cluster_state is defined
+        - cluster_state == "TIMEOUT"
+      block:
+        - name: Display timeout error
+          debug:
+            msg: |
+              ❌ CRITICAL: Cluster provisioning TIMEOUT
+
+              Cluster: {{ cluster_name }}
+              Namespace: {{ capi_namespace }}
+              Elapsed Time: {{ elapsed_minutes }} minutes
+              Max Allowed: {{ max_provisioning_minutes }} minutes
+
+              The cluster has exceeded the maximum provisioning timeout.
+              Initiating force cleanup to prevent resource leaks...
+
+        - name: Get baseline instance profile count before cleanup
+          shell: |
+            aws iam list-instance-profiles --output json 2>/dev/null | \
+              jq -r '.InstanceProfiles[] | select(.InstanceProfileName | contains("preflight")) | .InstanceProfileName' | \
+              wc -l | tr -d ' ' || echo "0"
+          register: baseline_profile_count
+          changed_when: false
+          failed_when: false
+
+        - name: Force delete ROSAControlPlane
+          shell: |
+            oc delete rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
+              --force --grace-period=0 2>&1 || echo "Already deleted or error"
+          register: force_delete_result
+          changed_when: "'deleted' in force_delete_result.stdout"
+          failed_when: false
+
+        - name: Wait for cluster deletion to propagate
+          pause:
+            seconds: 10
+
+        - name: Cleanup orphaned ROSA preflight instance profiles
+          shell: |
+            PROFILES=$(aws iam list-instance-profiles --output json 2>/dev/null | \
+              jq -r '.InstanceProfiles[] | select(.InstanceProfileName | contains("preflight")) | .InstanceProfileName')
+
+            DELETED=0
+            if [ -n "$PROFILES" ]; then
+              for profile in $PROFILES; do
+                # Remove roles first
+                ROLES=$(aws iam get-instance-profile --instance-profile-name "$profile" --output json 2>/dev/null | \
+                  jq -r '.InstanceProfile.Roles[]? | .RoleName')
+
+                if [ -n "$ROLES" ]; then
+                  for role in $ROLES; do
+                    aws iam remove-role-from-instance-profile \
+                      --instance-profile-name "$profile" \
+                      --role-name "$role" 2>/dev/null || true
+                  done
+                fi
+
+                # Delete instance profile
+                if aws iam delete-instance-profile --instance-profile-name "$profile" 2>/dev/null; then
+                  ((DELETED++))
+                fi
+              done
+            fi
+
+            echo "$DELETED"
+          register: cleanup_result
+          changed_when: cleanup_result.stdout | int > 0
+          failed_when: false
+
+        - name: Get final instance profile count after cleanup
+          shell: |
+            aws iam list-instance-profiles --output json 2>/dev/null | \
+              jq -r '.InstanceProfiles[] | select(.InstanceProfileName | contains("preflight")) | .InstanceProfileName' | \
+              wc -l | tr -d ' ' || echo "0"
+          register: final_profile_count
+          changed_when: false
+          failed_when: false
+
+        - name: Get cluster status and conditions for diagnostics
+          shell: |
+            echo "=== CLUSTER STATUS ==="
+            oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} -o yaml 2>&1 || echo "Cluster already deleted"
+            echo ""
+            echo "=== CLUSTER CONDITIONS ==="
+            oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} -o jsonpath='{range .status.conditions[*]}{.type}{"\t"}{.status}{"\t"}{.reason}{"\t"}{.message}{"\n"}{end}' 2>&1 || echo "No conditions available"
+            echo ""
+            echo "=== CAPA CONTROLLER LOGS (Last 50 lines) ==="
+            kubectl logs -n capa-system deployment/capa-controller-manager --tail=50 2>&1 || echo "Controller logs unavailable"
+          register: diagnostic_info
+          failed_when: false
+          changed_when: false
+
+        - name: Capture full playbook execution log
+          set_fact:
+            playbook_log: |
+              === ANSIBLE PLAYBOOK EXECUTION LOG ===
+              Playbook: {{ ansible_play_name | default('Unknown') }}
+              Play Hosts: {{ ansible_play_hosts | default([]) | join(', ') }}
+              Current Host: {{ inventory_hostname }}
+
+              Task History (from this wait task):
+              {% for task_result in ansible_play_batch | default([]) %}
+              - {{ task_result }}
+              {% endfor %}
+
+              Variables in scope:
+              • cluster_name: {{ cluster_name }}
+              • capi_namespace: {{ capi_namespace }}
+              • max_provisioning_minutes: {{ max_provisioning_minutes }}
+              • elapsed_minutes: {{ elapsed_minutes }}
+              • creation_timestamp: {{ creation_timestamp.stdout }}
+              • cluster_status_check attempts: {{ cluster_status_check.attempts | default(0) }}
+
+              Cleanup Results:
+              • Force delete output: {{ force_delete_result.stdout | default('N/A') }}
+              • Cleanup profiles deleted: {{ cleanup_result.stdout | default('0') }}
+              • Baseline profile count: {{ baseline_profile_count.stdout | default('0') }}
+              • Final profile count: {{ final_profile_count.stdout | default('0') }}
+
+              Note: For full playbook output, check the job logs in the UI or backend logs.
+              The Ansible runner captures all task output including PLAY, TASK, and RECAP sections.
+
+        - name: Fail the playbook with comprehensive diagnostic output
+          fail:
+            msg: |
+              ════════════════════════════════════════════════════════════
+              ❌ PROVISIONING TIMEOUT FAILURE
+              ════════════════════════════════════════════════════════════
+
+              CLUSTER INFORMATION:
+              • Name: {{ cluster_name }}
+              • Namespace: {{ capi_namespace }}
+              • Elapsed Time: {{ elapsed_minutes }} minutes
+              • Max Allowed: {{ max_provisioning_minutes }} minutes
+              • Timeout Enforced: Yes (automation-level)
+
+              CLEANUP ACTIONS COMPLETED:
+              • Cluster force-deleted: {{ 'Yes' if 'deleted' in force_delete_result.stdout else 'Already deleted' }}
+              • Instance profiles cleaned: {{ cleanup_result.stdout | default('0') }}
+              • Baseline profile count: {{ baseline_profile_count.stdout }}
+              • Final profile count: {{ final_profile_count.stdout }}
+              • Profiles removed: {{ baseline_profile_count.stdout | int - final_profile_count.stdout | int }}
+
+              WHY THIS TIMEOUT EXISTS:
+              ⚠️  This timeout was enforced by the automation layer to prevent:
+              - Infinite retry loops (clusters running for days)
+              - AWS resource exhaustion (649+ orphaned instance profiles)
+              - Rate limiting and 429 errors
+              - AWS quota depletion (1000 instance profile limit)
+
+              DIAGNOSTIC INFORMATION:
+              {{ diagnostic_info.stdout }}
+
+              PLAYBOOK EXECUTION DETAILS:
+              {{ playbook_log }}
+
+              ROOT CAUSE INVESTIGATION STEPS:
+              1. Review cluster conditions above for error messages
+              2. Check CAPA controller logs above for failures
+              3. Verify AWS credentials: aws sts get-caller-identity
+              4. Check AWS service health: https://status.aws.amazon.com/
+              5. Verify ROSA service quotas and limits
+              6. Check for networking issues (VPC, subnets, Route53)
+
+              COMMON CAUSES OF TIMEOUT:
+              - AWS IAM permission issues (instance profiles, roles)
+              - AWS API rate limiting (too many API calls)
+              - Route53 hosted zone creation failures
+              - VPC/subnet configuration problems
+              - ROSA service availability issues
+              - Controller reconciliation errors
+
+              NEXT STEPS:
+              1. Review the diagnostic output above
+              2. Address any permission or configuration issues
+              3. Verify AWS account is in good standing
+              4. Retry provisioning with corrections
+              ════════════════════════════════════════════════════════════
+
+    - name: Display success message
+      debug:
+        msg: |
+          ✅ ROSA HCP Control Plane is READY!
+
+          Cluster: {{ cluster_name }}
+          Namespace: {{ capi_namespace }}
+          Provisioning Time: {{ elapsed_minutes }} minutes
+          Status: Running and available
+
+          The cluster provisioned successfully within the timeout period.
+      when:
+        - cluster_state is defined
+        - cluster_state == "READY"
+
+  rescue:
+    - name: Handle unexpected errors during timeout monitoring
+      debug:
+        msg: |
+          ❌ ERROR: Unexpected failure during cluster provisioning monitoring
+
+          Cluster: {{ cluster_name }}
+          Error: {{ ansible_failed_result.msg | default('Unknown error') }}
+
+          Please check:
+          1. Cluster exists: oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }}
+          2. kubectl/oc connectivity
+          3. AWS credentials configuration
+
+          Manual cleanup may be required.
+
+    - name: Re-raise the error
+      fail:
+        msg: "Cluster provisioning monitoring failed: {{ ansible_failed_result.msg | default('Unknown error') }}"
