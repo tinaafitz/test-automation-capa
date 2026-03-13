@@ -1,0 +1,137 @@
+# AWS Resource Configuration
+# This file defines thresholds, costs, and monitoring settings for AWS resources
+# Last updated: 2024-03-13
+
+# Configuration metadata
+metadata:
+  version: "1.0"
+  last_cost_update: "2024-01-15"
+  region: "us-east-1"
+  notes: "Costs based on AWS pricing as of January 2024. Verify pricing at https://aws.amazon.com/pricing/"
+
+# Resources with direct costs (billed resources)
+billed_resources:
+  nat_gateways:
+    label: "NAT Gateways"
+    icon: "🌉"
+    description: "Network address translation gateways"
+    default_threshold: 10
+    use_aws_quota: false  # NAT Gateways don't have a service quota API
+    cost_per_month: 32.40
+    cost_type: "fixed"
+    cost_notes: "Base hourly charge ($0.045/hr) + data processing ($0.045/GB)"
+
+  route53_zones:
+    label: "Route53 Zones"
+    icon: "🌐"
+    description: "DNS hosted zones"
+    default_threshold: 20
+    use_aws_quota: false
+    cost_per_month: 0.50
+    cost_type: "fixed"
+    cost_notes: "$0.50 per hosted zone per month for first 25 zones"
+
+  ec2_instances:
+    label: "EC2 Instances"
+    icon: "💻"
+    description: "Virtual server instances (cost varies by type)"
+    default_threshold: 50
+    use_aws_quota: true
+    quota_service_code: "ec2"
+    quota_code: "L-1216C47A"  # Running On-Demand instances
+    cost_type: "variable"
+    cost_notes: "Varies by instance type, region, and usage (on-demand vs reserved)"
+
+  ebs_volumes:
+    label: "EBS Volumes"
+    icon: "💾"
+    description: "Block storage volumes (~$0.10/GB/month)"
+    default_threshold: 100
+    use_aws_quota: false
+    cost_type: "variable"
+    cost_notes: "gp3: $0.08/GB/month, gp2: $0.10/GB/month, io2: $0.125/GB/month"
+
+  load_balancers:
+    label: "Load Balancers"
+    icon: "⚖️"
+    description: "Elastic and application load balancers (~$16-23/month each)"
+    default_threshold: 20
+    use_aws_quota: true
+    quota_service_code: "elasticloadbalancing"
+    quota_code: "L-53DA6B97"  # Application Load Balancers per Region
+    cost_type: "variable"
+    cost_notes: "ALB: ~$16/month, NLB: ~$23/month (base + LCU charges)"
+
+  s3_buckets:
+    label: "S3 Buckets"
+    icon: "🪣"
+    description: "Object storage buckets (cost varies by storage size)"
+    default_threshold: 100
+    use_aws_quota: false
+    cost_type: "variable"
+    cost_notes: "Storage: $0.023/GB/month (Standard), + request and data transfer costs"
+
+# Resources with no direct costs (quota management only)
+free_resources:
+  instance_profiles:
+    label: "Instance Profiles"
+    icon: "🔖"
+    description: "IAM instance profiles for EC2 instances"
+    default_threshold: 800
+    use_aws_quota: true
+    quota_service_code: "iam"
+    quota_code: "L-C07B4B0D"  # Instance profiles
+    warn_at_percent: 80
+
+  cloudformation_stacks:
+    label: "CloudFormation Stacks"
+    icon: "📚"
+    description: "Infrastructure as code stacks"
+    default_threshold: 50
+    use_aws_quota: true
+    quota_service_code: "cloudformation"
+    quota_code: "L-0485CB21"  # Stack count
+    warn_at_percent: 80
+
+  iam_roles:
+    label: "IAM Roles"
+    icon: "🔑"
+    description: "Identity and access management roles"
+    default_threshold: 500
+    use_aws_quota: true
+    quota_service_code: "iam"
+    quota_code: "L-FE177D64"  # Roles
+    warn_at_percent: 80
+
+  vpcs:
+    label: "VPCs"
+    icon: "🏢"
+    description: "Virtual private cloud networks"
+    default_threshold: 20
+    use_aws_quota: true
+    quota_service_code: "vpc"
+    quota_code: "L-F678F1CE"  # VPCs per Region
+    warn_at_percent: 80
+
+  security_groups:
+    label: "Security Groups"
+    icon: "🔒"
+    description: "Virtual firewall rules for instances"
+    default_threshold: 200
+    use_aws_quota: true
+    quota_service_code: "vpc"
+    quota_code: "L-E79EC296"  # Security groups per VPC
+    warn_at_percent: 80
+
+# Warning thresholds
+thresholds:
+  safe: 70      # <70% = green (safe)
+  warning: 90   # 70-89% = yellow (warning)
+  critical: 90  # 90%+ = red (critical)
+
+# Quota fetching settings
+quota_settings:
+  enabled: true
+  cache_duration_hours: 24  # How long to cache quota values
+  fallback_to_defaults: true  # Use defaults if quota fetch fails
+  region: "us-east-1"  # Default region for quota queries

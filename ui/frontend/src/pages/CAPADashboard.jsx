@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { CheckCircleIcon, Cog6ToothIcon, ClockIcon } from '@heroicons/react/24/outline';
 
 import CapaSidebar from '../components/sidebar/CapaSidebar';
@@ -622,6 +623,7 @@ const NotificationSettingsInline = () => {
  * CAPADashboardContent - Inner component with all the dashboard logic
  */
 const CAPADashboardContent = () => {
+  const navigate = useNavigate();
   const app = useApp();
   const dispatch = useAppDispatch();
   const apiStatus = useApiStatusContext();
@@ -1432,6 +1434,7 @@ const CAPADashboardContent = () => {
     onTerminalClick: () => setActiveSection('terminal'),
     onNotificationsClick: () => setActiveSection('notifications'),
     onRecentTasksClick: () => setActiveSection('recent-tasks'),
+    onAWSUsageClick: () => navigate('/aws-usage'),
   };
 
   // ============================================================================

@@ -10406,6 +10406,21 @@ async def get_github_repo_activity():
         }
 
 
+@app.get("/api/aws/usage-config")
+async def get_aws_config():
+    """Get AWS resource configuration with live quotas from AWS API"""
+    try:
+        from aws_config_service import aws_config_service
+        return aws_config_service.get_resource_config_with_quotas()
+    except Exception as e:
+        print(f"❌ [AWS CONFIG] Error loading AWS configuration: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to load AWS configuration: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
 if __name__ == "__main__":
     import uvicorn
 
