@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import MainDashboard from './pages/MainDashboard';
 import CAPADashboard from './pages/CAPADashboard';
 import MinikubeDashboard from './pages/MinikubeDashboard';
+import AWSUsageDashboard from './pages/AWSUsageDashboard';
 import { AppProvider } from './store/AppContext';
 import ToastNotifications from './components/ToastNotifications';
 
@@ -16,6 +17,7 @@ function App() {
             <Route path="/" element={<MainDashboard />} />
             <Route path="/mce" element={<CAPADashboard />} />
             <Route path="/minikube" element={<MinikubeDashboard />} />
+            <Route path="/aws-usage" element={<AWSUsageDashboard />} />
           </Routes>
         </div>
       </Router>

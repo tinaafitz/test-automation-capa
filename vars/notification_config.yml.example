@@ -1,0 +1,20 @@
+slack_enabled: false
+slack_webhook_url: ''
+email_enabled: true
+smtp_server: smtp.gmail.com
+smtp_port: 587
+smtp_username: your-email@gmail.com
+smtp_password: your-app-specific-password-here
+from_email: your-email@gmail.com
+to_emails:
+  - your-email@gmail.com
+use_tls: true
+app_url: http://localhost:3000
+notify_on_start: false
+notify_on_complete: true
+notify_on_failure: true
+notify_provision_start: true
+notify_provision_success: true
+notify_provision_failure: true
+notify_delete_start: true
+notify_delete_success: true

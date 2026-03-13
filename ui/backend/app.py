@@ -10406,6 +10406,228 @@ async def get_github_repo_activity():
         }
 
 
+@app.get("/api/aws/usage")
+async def get_aws_usage():
+    """Get AWS resource usage counts"""
+    try:
+        usage_data = {}
+
+        # Instance Profiles
+        try:
+            result = subprocess.run(
+                ["aws", "iam", "list-instance-profiles", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["instance_profiles"] = len(data.get("InstanceProfiles", []))
+            else:
+                usage_data["instance_profiles"] = "error"
+        except Exception as e:
+            usage_data["instance_profiles"] = "error"
+
+        # CloudFormation Stacks
+        try:
+            result = subprocess.run(
+                ["aws", "cloudformation", "list-stacks", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                # Only count non-deleted stacks
+                stacks = [s for s in data.get("StackSummaries", [])
+                         if s.get("StackStatus") not in ["DELETE_COMPLETE"]]
+                usage_data["cloudformation_stacks"] = len(stacks)
+            else:
+                usage_data["cloudformation_stacks"] = "error"
+        except Exception as e:
+            usage_data["cloudformation_stacks"] = "error"
+
+        # NAT Gateways
+        try:
+            result = subprocess.run(
+                ["aws", "ec2", "describe-nat-gateways", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                # Only count available NAT gateways
+                nat_gateways = [n for n in data.get("NatGateways", [])
+                               if n.get("State") == "available"]
+                usage_data["nat_gateways"] = len(nat_gateways)
+            else:
+                usage_data["nat_gateways"] = "error"
+        except Exception as e:
+            usage_data["nat_gateways"] = "error"
+
+        # Route53 Hosted Zones
+        try:
+            result = subprocess.run(
+                ["aws", "route53", "list-hosted-zones", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["route53_zones"] = len(data.get("HostedZones", []))
+            else:
+                usage_data["route53_zones"] = "error"
+        except Exception as e:
+            usage_data["route53_zones"] = "error"
+
+        # IAM Roles
+        try:
+            result = subprocess.run(
+                ["aws", "iam", "list-roles", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["iam_roles"] = len(data.get("Roles", []))
+            else:
+                usage_data["iam_roles"] = "error"
+        except Exception as e:
+            usage_data["iam_roles"] = "error"
+
+        # VPCs
+        try:
+            result = subprocess.run(
+                ["aws", "ec2", "describe-vpcs", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["vpcs"] = len(data.get("Vpcs", []))
+            else:
+                usage_data["vpcs"] = "error"
+        except Exception as e:
+            usage_data["vpcs"] = "error"
+
+        # Security Groups
+        try:
+            result = subprocess.run(
+                ["aws", "ec2", "describe-security-groups", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["security_groups"] = len(data.get("SecurityGroups", []))
+            else:
+                usage_data["security_groups"] = "error"
+        except Exception as e:
+            usage_data["security_groups"] = "error"
+
+        # EC2 Instances
+        try:
+            result = subprocess.run(
+                ["aws", "ec2", "describe-instances", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                # Count running and stopped instances
+                instance_count = 0
+                for reservation in data.get("Reservations", []):
+                    instance_count += len(reservation.get("Instances", []))
+                usage_data["ec2_instances"] = instance_count
+            else:
+                usage_data["ec2_instances"] = "error"
+        except Exception as e:
+            usage_data["ec2_instances"] = "error"
+
+        # EBS Volumes
+        try:
+            result = subprocess.run(
+                ["aws", "ec2", "describe-volumes", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["ebs_volumes"] = len(data.get("Volumes", []))
+            else:
+                usage_data["ebs_volumes"] = "error"
+        except Exception as e:
+            usage_data["ebs_volumes"] = "error"
+
+        # Load Balancers
+        try:
+            result = subprocess.run(
+                ["aws", "elbv2", "describe-load-balancers", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["load_balancers"] = len(data.get("LoadBalancers", []))
+            else:
+                usage_data["load_balancers"] = "error"
+        except Exception as e:
+            usage_data["load_balancers"] = "error"
+
+        # S3 Buckets
+        try:
+            result = subprocess.run(
+                ["aws", "s3api", "list-buckets", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["s3_buckets"] = len(data.get("Buckets", []))
+            else:
+                usage_data["s3_buckets"] = "error"
+        except Exception as e:
+            usage_data["s3_buckets"] = "error"
+
+        return {
+            "success": True,
+            "usage": usage_data,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        print(f"❌ [AWS USAGE] Error fetching AWS usage: {str(e)}")
+        return {
+            "success": False,
+            "usage": {},
+            "message": f"Error fetching AWS usage: {str(e)}"
+        }
+
+
+@app.get("/api/aws/usage-config")
+async def get_aws_config():
+    """Get AWS resource configuration with live quotas from AWS API"""
+    try:
+        from aws_config_service import aws_config_service
+        return aws_config_service.get_resource_config_with_quotas()
+    except Exception as e:
+        print(f"❌ [AWS CONFIG] Error loading AWS configuration: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to load AWS configuration: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
 if __name__ == "__main__":
     import uvicorn
 
