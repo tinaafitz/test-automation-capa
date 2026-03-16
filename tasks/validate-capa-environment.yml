@@ -10,10 +10,8 @@
 # ======================================================
 # STEP 1: Verify OCP Login
 # ======================================================
-- name: Verify OCP context is set (from login)
-  fail:
-    msg: "ℹ️  Not connected to OpenShift cluster yet - Click the 'Credentials' button to connect to your hub cluster"
-  when: ocp_context is not defined or ocp_context == ''
+- name: Perform OCP login and set context
+  include_tasks: login_ocp.yml
 
 - name: OCP Login Check
   debug:

@@ -95,28 +95,39 @@
 - name: Check for other login failures
   fail:
     msg: |
-      ❌ OPENSHIFT LOGIN FAILED ❌
+      ❌ Credential verification failed
 
-      Failed to login to OpenShift Hub cluster.
+      Unable to connect to OpenShift Hub cluster - this is likely a credentials issue.
 
-      Cluster: {{ api_url }}
+      Cluster URL: {{ api_url }}
       Username: {{ ocp_user }}
 
-      Error Details:
+      🔍 Root cause:
+      The cluster is not responding correctly, which typically means:
+      • The cluster URL is incorrect or the cluster doesn't exist
+      • The cluster credentials are invalid or expired
+      • The cluster is not accessible from your network
+
+      Technical error:
       {{ ocp_login_result.stderr | default(ocp_login_result.stdout) }}
 
-      ⚠️  TROUBLESHOOTING STEPS:
+      ⚠️  Action required:
 
-      1. Verify the cluster is accessible:
-         - Check if {{ api_url }} is reachable from your network
-         - Try accessing the console: {{ api_url | regex_replace(':6443', '') }}
+      1. Verify cluster credentials in vars/user_vars.yml:
+         • Is the OCP_HUB_API_URL correct?
+         • Are the kubeadmin credentials valid and not expired?
+         • Try logging in manually: oc login {{ api_url }} -u {{ ocp_user }}
 
-      2. Verify your credentials are correct in vars/user_vars.yml
+      2. Check cluster accessibility:
+         • Can you reach the cluster? curl -k {{ api_url }}
+         • Try the console: {{ api_url | regex_replace(':6443', '') }}
 
-      3. Check for network/firewall issues blocking access to the cluster
+      3. Verify network connection:
+         • Are you on VPN if required?
+         • Any firewall blocking access to the cluster?
 
-      4. Ensure the OpenShift CLI (oc) is installed and working:
-         oc version
+      💡 Tip: Update your credentials in vars/user_vars.yml and click "Credentials"
+      in the UI to reconnect with the correct cluster information.
   when: ocp_login_result.rc != 0
 
 - name: Store OCP context name
