@@ -3462,6 +3462,7 @@ def run_ansible_task_background(
 
             # Extract detailed error messages
             detailed_error = ""
+            error_summary = ""
             if result.returncode != 0 and result.stdout:
                 import re
 
@@ -3475,11 +3476,30 @@ def run_ansible_task_background(
                     # Unescape newlines
                     detailed_error = detailed_error.replace("\\n", "\n")
 
+                    # Extract a short summary for the UI
+                    # Look for the main error heading (lines starting with ❌)
+                    summary_match = re.search(r'❌\s*(.+?)(?:\n|$)', detailed_error)
+                    if summary_match:
+                        error_summary = summary_match.group(1).strip()
+                    # If no emoji heading, check for "ROOT CAUSE:" section
+                    elif "ROOT CAUSE:" in detailed_error or "🔍 ROOT CAUSE:" in detailed_error:
+                        # Extract first bullet point after ROOT CAUSE
+                        root_cause_match = re.search(r'(?:ROOT CAUSE:.*?)\n\s*[•\-]\s*(.+?)(?:\n|$)', detailed_error, re.DOTALL)
+                        if root_cause_match:
+                            error_summary = root_cause_match.group(1).strip()
+
+                    # Fallback: use first line of error message
+                    if not error_summary and detailed_error:
+                        error_summary = detailed_error.split('\n')[0][:100]
+
             error_message = (
                 detailed_error
                 if detailed_error
                 else (result.stderr if result.returncode != 0 else "")
             )
+
+            # Use summary for the message field if available, full error in error field
+            display_message = error_summary if error_summary else error_message
 
             # Update job status with timestamp
             completed_time = datetime.now().strftime("%-I:%M:%S %p")  # e.g., "4:39:21 AM"
@@ -3493,7 +3513,7 @@ def run_ansible_task_background(
                 jobs[job_id]["completed_at"] = datetime.now().isoformat()
             else:
                 jobs[job_id]["status"] = "failed"
-                jobs[job_id]["message"] = f"{description} failed: {error_message}"
+                jobs[job_id]["message"] = f"{description} failed: {display_message}"
                 jobs[job_id]["error"] = error_message
                 jobs[job_id]["completed_at"] = datetime.now().isoformat()
 
@@ -10406,6 +10426,213 @@ async def get_github_repo_activity():
         }
 
 
+@app.get("/api/aws/usage")
+async def get_aws_usage():
+    """Get AWS resource usage counts"""
+    try:
+        usage_data = {}
+
+        # Instance Profiles
+        try:
+            result = subprocess.run(
+                ["aws", "iam", "list-instance-profiles", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["instance_profiles"] = len(data.get("InstanceProfiles", []))
+            else:
+                usage_data["instance_profiles"] = "error"
+        except Exception as e:
+            usage_data["instance_profiles"] = "error"
+
+        # CloudFormation Stacks
+        try:
+            result = subprocess.run(
+                ["aws", "cloudformation", "list-stacks", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                # Only count non-deleted stacks
+                stacks = [s for s in data.get("StackSummaries", [])
+                         if s.get("StackStatus") not in ["DELETE_COMPLETE"]]
+                usage_data["cloudformation_stacks"] = len(stacks)
+            else:
+                usage_data["cloudformation_stacks"] = "error"
+        except Exception as e:
+            usage_data["cloudformation_stacks"] = "error"
+
+        # NAT Gateways
+        try:
+            result = subprocess.run(
+                ["aws", "ec2", "describe-nat-gateways", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                # Only count available NAT gateways
+                nat_gateways = [n for n in data.get("NatGateways", [])
+                               if n.get("State") == "available"]
+                usage_data["nat_gateways"] = len(nat_gateways)
+            else:
+                usage_data["nat_gateways"] = "error"
+        except Exception as e:
+            usage_data["nat_gateways"] = "error"
+
+        # Route53 Hosted Zones
+        try:
+            result = subprocess.run(
+                ["aws", "route53", "list-hosted-zones", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["route53_zones"] = len(data.get("HostedZones", []))
+            else:
+                usage_data["route53_zones"] = "error"
+        except Exception as e:
+            usage_data["route53_zones"] = "error"
+
+        # IAM Roles
+        try:
+            result = subprocess.run(
+                ["aws", "iam", "list-roles", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["iam_roles"] = len(data.get("Roles", []))
+            else:
+                usage_data["iam_roles"] = "error"
+        except Exception as e:
+            usage_data["iam_roles"] = "error"
+
+        # VPCs
+        try:
+            result = subprocess.run(
+                ["aws", "ec2", "describe-vpcs", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["vpcs"] = len(data.get("Vpcs", []))
+            else:
+                usage_data["vpcs"] = "error"
+        except Exception as e:
+            usage_data["vpcs"] = "error"
+
+        # Security Groups
+        try:
+            result = subprocess.run(
+                ["aws", "ec2", "describe-security-groups", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["security_groups"] = len(data.get("SecurityGroups", []))
+            else:
+                usage_data["security_groups"] = "error"
+        except Exception as e:
+            usage_data["security_groups"] = "error"
+
+        # EC2 Instances
+        try:
+            result = subprocess.run(
+                ["aws", "ec2", "describe-instances", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                # Count running and stopped instances
+                instance_count = 0
+                for reservation in data.get("Reservations", []):
+                    instance_count += len(reservation.get("Instances", []))
+                usage_data["ec2_instances"] = instance_count
+            else:
+                usage_data["ec2_instances"] = "error"
+        except Exception as e:
+            usage_data["ec2_instances"] = "error"
+
+        # EBS Volumes
+        try:
+            result = subprocess.run(
+                ["aws", "ec2", "describe-volumes", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["ebs_volumes"] = len(data.get("Volumes", []))
+            else:
+                usage_data["ebs_volumes"] = "error"
+        except Exception as e:
+            usage_data["ebs_volumes"] = "error"
+
+        # Load Balancers
+        try:
+            result = subprocess.run(
+                ["aws", "elbv2", "describe-load-balancers", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["load_balancers"] = len(data.get("LoadBalancers", []))
+            else:
+                usage_data["load_balancers"] = "error"
+        except Exception as e:
+            usage_data["load_balancers"] = "error"
+
+        # S3 Buckets
+        try:
+            result = subprocess.run(
+                ["aws", "s3api", "list-buckets", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                usage_data["s3_buckets"] = len(data.get("Buckets", []))
+            else:
+                usage_data["s3_buckets"] = "error"
+        except Exception as e:
+            usage_data["s3_buckets"] = "error"
+
+        return {
+            "success": True,
+            "usage": usage_data,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        print(f"❌ [AWS USAGE] Error fetching AWS usage: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to fetch AWS usage data: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
 @app.get("/api/aws/usage-config")
 async def get_aws_config():
     """Get AWS resource configuration with live quotas from AWS API"""
@@ -10417,6 +10644,348 @@ async def get_aws_config():
         return {
             "success": False,
             "message": f"Failed to load AWS configuration: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@app.get("/api/aws/resource-details/{resource_type}")
+async def get_resource_details(resource_type: str):
+    """Get detailed information about specific AWS resources including creation time, tags, and metadata"""
+    try:
+        details = []
+
+        if resource_type == "nat_gateways":
+            result = subprocess.run(
+                ["aws", "ec2", "describe-nat-gateways", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                nat_gateways = [n for n in data.get("NatGateways", [])
+                               if n.get("State") == "available"]
+
+                for nat in nat_gateways:
+                    # Get VPC name from tags if available
+                    vpc_name = None
+                    vpc_id = nat.get("VpcId", "N/A")
+
+                    # Try to get VPC name
+                    try:
+                        vpc_result = subprocess.run(
+                            ["aws", "ec2", "describe-vpcs", "--vpc-ids", vpc_id, "--output", "json"],
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        if vpc_result.returncode == 0:
+                            vpc_data = json.loads(vpc_result.stdout)
+                            vpcs = vpc_data.get("Vpcs", [])
+                            if vpcs:
+                                vpc_tags = {tag["Key"]: tag["Value"] for tag in vpcs[0].get("Tags", [])}
+                                vpc_name = vpc_tags.get("Name", vpc_id)
+                    except:
+                        vpc_name = vpc_id
+
+                    # Extract tags
+                    tags = {tag["Key"]: tag["Value"] for tag in nat.get("Tags", [])}
+
+                    details.append({
+                        "id": nat.get("NatGatewayId", "N/A"),
+                        "name": tags.get("Name", "Unnamed"),
+                        "vpc_id": vpc_id,
+                        "vpc_name": vpc_name or vpc_id,
+                        "subnet_id": nat.get("SubnetId", "N/A"),
+                        "state": nat.get("State", "N/A"),
+                        "created_at": nat.get("CreateTime", "N/A"),
+                        "tags": tags,
+                        "public_ip": nat.get("NatGatewayAddresses", [{}])[0].get("PublicIp", "N/A") if nat.get("NatGatewayAddresses") else "N/A"
+                    })
+
+        elif resource_type == "route53_zones":
+            result = subprocess.run(
+                ["aws", "route53", "list-hosted-zones", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                for zone in data.get("HostedZones", []):
+                    # Get tags for this hosted zone
+                    zone_id = zone.get("Id", "").split("/")[-1]
+                    tags = {}
+                    try:
+                        tags_result = subprocess.run(
+                            ["aws", "route53", "list-tags-for-resource",
+                             "--resource-type", "hostedzone",
+                             "--resource-id", zone_id,
+                             "--output", "json"],
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        if tags_result.returncode == 0:
+                            tags_data = json.loads(tags_result.stdout)
+                            tags = {tag["Key"]: tag["Value"] for tag in tags_data.get("ResourceTagSet", {}).get("Tags", [])}
+                    except:
+                        pass
+
+                    details.append({
+                        "id": zone.get("Id", "N/A"),
+                        "name": zone.get("Name", "N/A"),
+                        "record_count": zone.get("ResourceRecordSetCount", 0),
+                        "private_zone": zone.get("Config", {}).get("PrivateZone", False),
+                        "comment": zone.get("Config", {}).get("Comment", ""),
+                        "tags": tags
+                    })
+
+        elif resource_type == "vpcs":
+            result = subprocess.run(
+                ["aws", "ec2", "describe-vpcs", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                for vpc in data.get("Vpcs", []):
+                    tags = {tag["Key"]: tag["Value"] for tag in vpc.get("Tags", [])}
+                    details.append({
+                        "id": vpc.get("VpcId", "N/A"),
+                        "name": tags.get("Name", "Unnamed"),
+                        "cidr": vpc.get("CidrBlock", "N/A"),
+                        "state": vpc.get("State", "N/A"),
+                        "is_default": vpc.get("IsDefault", False),
+                        "tags": tags
+                    })
+
+        elif resource_type == "ec2_instances":
+            result = subprocess.run(
+                ["aws", "ec2", "describe-instances", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                for reservation in data.get("Reservations", []):
+                    for instance in reservation.get("Instances", []):
+                        tags = {tag["Key"]: tag["Value"] for tag in instance.get("Tags", [])}
+                        details.append({
+                            "id": instance.get("InstanceId", "N/A"),
+                            "name": tags.get("Name", "Unnamed"),
+                            "type": instance.get("InstanceType", "N/A"),
+                            "state": instance.get("State", {}).get("Name", "N/A"),
+                            "launch_time": instance.get("LaunchTime", "N/A"),
+                            "vpc_id": instance.get("VpcId", "N/A"),
+                            "subnet_id": instance.get("SubnetId", "N/A"),
+                            "private_ip": instance.get("PrivateIpAddress", "N/A"),
+                            "public_ip": instance.get("PublicIpAddress", "N/A"),
+                            "tags": tags
+                        })
+
+        elif resource_type == "ebs_volumes":
+            result = subprocess.run(
+                ["aws", "ec2", "describe-volumes", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                for volume in data.get("Volumes", []):
+                    tags = {tag["Key"]: tag["Value"] for tag in volume.get("Tags", [])}
+
+                    # Get attachment info
+                    attachments = volume.get("Attachments", [])
+                    attached_to = attachments[0].get("InstanceId", "Not attached") if attachments else "Not attached"
+
+                    details.append({
+                        "id": volume.get("VolumeId", "N/A"),
+                        "name": tags.get("Name", "Unnamed"),
+                        "size": f"{volume.get('Size', 0)} GB",
+                        "volume_type": volume.get("VolumeType", "N/A"),
+                        "state": volume.get("State", "N/A"),
+                        "created_at": volume.get("CreateTime", "N/A"),
+                        "availability_zone": volume.get("AvailabilityZone", "N/A"),
+                        "attached_to": attached_to,
+                        "encrypted": volume.get("Encrypted", False),
+                        "tags": tags
+                    })
+
+        elif resource_type == "instance_profiles":
+            result = subprocess.run(
+                ["aws", "iam", "list-instance-profiles", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                # Limit to first 100 profiles to prevent timeout
+                profiles_to_process = data.get("InstanceProfiles", [])[:100]
+
+                for profile in profiles_to_process:
+                    profile_name = profile.get("InstanceProfileName", "")
+                    # Skip tag fetching for instance profiles to speed up loading
+                    tags = {}
+
+                    # Get associated roles
+                    roles = [r.get("RoleName", "") for r in profile.get("Roles", [])]
+
+                    details.append({
+                        "id": profile.get("InstanceProfileId", "N/A"),
+                        "name": profile_name,
+                        "arn": profile.get("Arn", "N/A"),
+                        "created_at": profile.get("CreateDate", "N/A"),
+                        "path": profile.get("Path", "/"),
+                        "roles": roles,
+                        "tags": tags
+                    })
+
+        elif resource_type == "iam_roles":
+            result = subprocess.run(
+                ["aws", "iam", "list-roles", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                # Limit to first 100 roles to prevent timeout
+                roles_to_process = data.get("Roles", [])[:100]
+
+                for role in roles_to_process:
+                    role_name = role.get("RoleName", "")
+                    # Skip tag fetching for IAM roles to speed up loading
+                    # Tags can be added later if needed
+                    tags = {}
+
+                    details.append({
+                        "id": role.get("RoleId", "N/A"),
+                        "name": role_name,
+                        "arn": role.get("Arn", "N/A"),
+                        "created_at": role.get("CreateDate", "N/A"),
+                        "path": role.get("Path", "/"),
+                        "description": role.get("Description", ""),
+                        "max_session_duration": role.get("MaxSessionDuration", 3600),
+                        "tags": tags
+                    })
+
+        elif resource_type == "cloudformation_stacks":
+            result = subprocess.run(
+                ["aws", "cloudformation", "list-stacks", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                stacks = [s for s in data.get("StackSummaries", [])
+                         if s.get("StackStatus") not in ["DELETE_COMPLETE"]]
+
+                for stack in stacks:
+                    stack_name = stack.get("StackName", "")
+                    # Get detailed stack info including tags
+                    try:
+                        detail_result = subprocess.run(
+                            ["aws", "cloudformation", "describe-stacks", "--stack-name", stack_name, "--output", "json"],
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        if detail_result.returncode == 0:
+                            detail_data = json.loads(detail_result.stdout)
+                            if detail_data.get("Stacks"):
+                                stack_detail = detail_data["Stacks"][0]
+                                tags = {tag["Key"]: tag["Value"] for tag in stack_detail.get("Tags", [])}
+
+                                details.append({
+                                    "id": stack.get("StackId", "N/A"),
+                                    "name": stack_name,
+                                    "status": stack.get("StackStatus", "N/A"),
+                                    "created_at": stack.get("CreationTime", "N/A"),
+                                    "description": stack_detail.get("Description", ""),
+                                    "tags": tags
+                                })
+                    except:
+                        # Fallback if detailed fetch fails
+                        details.append({
+                            "id": stack.get("StackId", "N/A"),
+                            "name": stack_name,
+                            "status": stack.get("StackStatus", "N/A"),
+                            "created_at": stack.get("CreationTime", "N/A"),
+                            "description": "",
+                            "tags": {}
+                        })
+
+        elif resource_type == "security_groups":
+            result = subprocess.run(
+                ["aws", "ec2", "describe-security-groups", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                for sg in data.get("SecurityGroups", []):
+                    tags = {tag["Key"]: tag["Value"] for tag in sg.get("Tags", [])}
+
+                    # Count inbound and outbound rules
+                    ingress_rules = len(sg.get("IpPermissions", []))
+                    egress_rules = len(sg.get("IpPermissionsEgress", []))
+
+                    # Get VPC name if available
+                    vpc_id = sg.get("VpcId", "N/A")
+                    vpc_name = vpc_id
+                    try:
+                        vpc_result = subprocess.run(
+                            ["aws", "ec2", "describe-vpcs", "--vpc-ids", vpc_id, "--output", "json"],
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        if vpc_result.returncode == 0:
+                            vpc_data = json.loads(vpc_result.stdout)
+                            vpcs = vpc_data.get("Vpcs", [])
+                            if vpcs:
+                                vpc_tags = {tag["Key"]: tag["Value"] for tag in vpcs[0].get("Tags", [])}
+                                vpc_name = vpc_tags.get("Name", vpc_id)
+                    except:
+                        pass
+
+                    details.append({
+                        "id": sg.get("GroupId", "N/A"),
+                        "name": sg.get("GroupName", "Unnamed"),
+                        "description": sg.get("Description", ""),
+                        "vpc_id": vpc_id,
+                        "vpc_name": vpc_name,
+                        "ingress_rules": ingress_rules,
+                        "egress_rules": egress_rules,
+                        "tags": tags
+                    })
+
+        # Sort by creation time (most recent first) if available
+        if details and "created_at" in details[0]:
+            details.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        elif details and "launch_time" in details[0]:
+            details.sort(key=lambda x: x.get("launch_time", ""), reverse=True)
+
+        return {
+            "success": True,
+            "resource_type": resource_type,
+            "count": len(details),
+            "details": details,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        print(f"❌ [AWS RESOURCE DETAILS] Error fetching details for {resource_type}: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to fetch resource details: {str(e)}",
             "timestamp": datetime.now().isoformat()
         }
 

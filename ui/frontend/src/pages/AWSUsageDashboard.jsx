@@ -12,6 +12,11 @@ const AWSUsageDashboard = () => {
   const [billedResources, setBilledResources] = useState([]);
   const [freeResources, setFreeResources] = useState([]);
   const [configLoading, setConfigLoading] = useState(true);
+  const [selectedResource, setSelectedResource] = useState(null);
+  const [resourceDetails, setResourceDetails] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [creatorFilter, setCreatorFilter] = useState('all');
+  const [availableCreators, setAvailableCreators] = useState([]);
 
   // Combine all resources for rendering
   const resourceConfig = [...billedResources, ...freeResources];
@@ -59,6 +64,39 @@ const AWSUsageDashboard = () => {
     }
   };
 
+  const fetchResourceDetails = async (resourceType) => {
+    setDetailsLoading(true);
+    setSelectedResource(resourceType);
+    try {
+      const response = await fetch(`http://localhost:8000/api/aws/resource-details/${resourceType}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setResourceDetails(data.details);
+
+        // Extract unique creators from tags
+        const creators = new Set();
+        data.details.forEach(resource => {
+          const createdBy = resource.tags?.CreatedBy || resource.tags?.ManagedBy || 'unknown';
+          creators.add(createdBy);
+        });
+        setAvailableCreators(['all', ...Array.from(creators).sort()]);
+        setCreatorFilter('all'); // Reset filter when viewing new resource type
+      } else {
+        setError(data.message || 'Failed to fetch resource details');
+      }
+    } catch (err) {
+      setError(`Error fetching details: ${err.message}`);
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const closeDetailsModal = () => {
+    setSelectedResource(null);
+    setResourceDetails(null);
+  };
+
   // Get status color based on count and threshold
   const getStatusColor = (count, threshold) => {
     if (count === 'error') return 'bg-red-100 border-red-300';
@@ -83,13 +121,32 @@ const AWSUsageDashboard = () => {
     return (count * resource.costPerMonth).toFixed(2);
   };
 
+  const sidebarHandlers = {
+    onComponentsClick: () => navigate('/mce'),
+    onVerifyClick: () => navigate('/mce'),
+    onConfigureClick: () => navigate('/mce'),
+    onProvisionClick: () => navigate('/mce'),
+    onRosaHcpClustersClick: () => navigate('/mce'),
+    onResourcesClick: () => navigate('/mce'),
+    onEnvironmentsClick: () => navigate('/mce'),
+    onCredentialsClick: () => navigate('/mce'),
+    onTestClick: () => navigate('/mce'),
+    onTestSuiteDashboardClick: () => navigate('/mce'),
+    onTestAutomationClick: () => navigate('/mce'),
+    onAIAssistantClick: () => navigate('/mce'),
+    onHelmChartMatrixClick: () => navigate('/mce'),
+    onTerminalClick: () => navigate('/mce'),
+    onNotificationsClick: () => navigate('/mce'),
+    onRecentTasksClick: () => navigate('/mce'),
+    onAWSUsageClick: () => navigate('/aws-usage'),
+  };
+
   return (
     <div className="flex h-screen bg-gray-50">
       <CapaSidebar
+        {...sidebarHandlers}
         activeSection="aws-usage"
         environment="mce"
-        onEnvironmentsClick={() => navigate('/mce')}
-        onAWSUsageClick={() => navigate('/aws-usage')}
       />
 
       <div className="flex-1 overflow-auto" style={{ backgroundColor: '#FFF5F0' }}>
@@ -262,10 +319,12 @@ const AWSUsageDashboard = () => {
                     return (
                       <div
                         key={resource.key}
+                        onClick={() => count > 0 && !isError && fetchResourceDetails(resource.key)}
                         className={`
                           border-2 rounded-lg p-3 transition-all duration-300
                           hover:shadow-xl hover:scale-102
                           ${statusColor}
+                          ${count > 0 && !isError ? 'cursor-pointer' : 'cursor-default'}
                         `}
                       >
                         <div className="flex items-start justify-between">
@@ -281,8 +340,15 @@ const AWSUsageDashboard = () => {
                               {resource.description}
                             </p>
 
-                            <div className={`text-2xl font-bold ${textColor} mb-0.5`}>
-                              {isError ? '⚠️' : count?.toLocaleString() || '0'}
+                            <div className="flex items-center gap-2">
+                              <div className={`text-2xl font-bold ${textColor} mb-0.5`}>
+                                {isError ? '⚠️' : count?.toLocaleString() || '0'}
+                              </div>
+                              {count > 0 && !isError && (
+                                <span className="text-xs text-blue-600 font-semibold underline cursor-pointer">
+                                  Details →
+                                </span>
+                              )}
                             </div>
 
                             {isError && (
@@ -351,10 +417,12 @@ const AWSUsageDashboard = () => {
                     return (
                       <div
                         key={resource.key}
+                        onClick={() => count > 0 && !isError && fetchResourceDetails(resource.key)}
                         className={`
                           border-2 rounded-lg p-3 transition-all duration-300
                           hover:shadow-xl hover:scale-102
                           ${statusColor}
+                          ${count > 0 && !isError ? 'cursor-pointer' : 'cursor-default'}
                         `}
                       >
                         <div className="flex items-start justify-between">
@@ -370,8 +438,15 @@ const AWSUsageDashboard = () => {
                               {resource.description}
                             </p>
 
-                            <div className={`text-2xl font-bold ${textColor} mb-0.5`}>
-                              {isError ? '⚠️' : count?.toLocaleString() || '0'}
+                            <div className="flex items-center gap-2">
+                              <div className={`text-2xl font-bold ${textColor} mb-0.5`}>
+                                {isError ? '⚠️' : count?.toLocaleString() || '0'}
+                              </div>
+                              {count > 0 && !isError && (
+                                <span className="text-xs text-blue-600 font-semibold underline cursor-pointer">
+                                  Details →
+                                </span>
+                              )}
                             </div>
 
                             {isError && (
@@ -406,6 +481,244 @@ const AWSUsageDashboard = () => {
           )}
         </div>
       </div>
+
+      {/* Resource Details Modal */}
+      {selectedResource && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-orange-500 to-orange-600 text-white px-6 py-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold">
+                  {resourceConfig.find(r => r.key === selectedResource)?.label || 'Resource Details'}
+                </h2>
+                <p className="text-orange-100 text-sm mt-1">
+                  Click-to-drill down view showing creation time, tags, and metadata
+                </p>
+              </div>
+              <button
+                onClick={closeDetailsModal}
+                className="text-white hover:bg-white/20 rounded-full p-2 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-auto p-6">
+              {detailsLoading ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading resource details...</p>
+                  </div>
+                </div>
+              ) : resourceDetails && resourceDetails.length > 0 ? (
+                <div className="space-y-4">
+                  {/* Filter and Summary */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-sm text-blue-800">
+                          <strong>Found {resourceDetails.filter(r => creatorFilter === 'all' || r.tags?.CreatedBy === creatorFilter || r.tags?.ManagedBy === creatorFilter).length} resource{resourceDetails.filter(r => creatorFilter === 'all' || r.tags?.CreatedBy === creatorFilter || r.tags?.ManagedBy === creatorFilter).length !== 1 ? 's' : ''}</strong>
+                          {creatorFilter !== 'all' && ` created by ${creatorFilter}`}
+                          {' '}- Sorted by creation time (most recent first)
+                        </p>
+                      </div>
+                      {availableCreators.length > 2 && (
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs font-semibold text-blue-800">Filter by Creator:</label>
+                          <select
+                            value={creatorFilter}
+                            onChange={(e) => setCreatorFilter(e.target.value)}
+                            className="text-sm border border-blue-300 rounded px-3 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            {availableCreators.map(creator => (
+                              <option key={creator} value={creator}>
+                                {creator === 'all' ? 'All Creators' : creator}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Resource Cards */}
+                  {resourceDetails
+                    .filter(r => creatorFilter === 'all' || r.tags?.CreatedBy === creatorFilter || r.tags?.ManagedBy === creatorFilter)
+                    .map((resource, index) => (
+                    <div key={index} className="border border-gray-200 rounded-lg p-4 hover:shadow-lg transition-shadow bg-white">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Left Column */}
+                        <div>
+                          <div className="mb-3">
+                            <h3 className="text-lg font-bold text-gray-900 mb-1">
+                              {resource.name || 'Unnamed Resource'}
+                            </h3>
+                            <p className="text-xs text-gray-500 font-mono">{resource.id}</p>
+                          </div>
+
+                          {resource.created_at && (
+                            <div className="mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Created:</span>
+                              <p className="text-sm text-gray-900">
+                                {new Date(resource.created_at).toLocaleString()}
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {(() => {
+                                  const created = new Date(resource.created_at);
+                                  const now = new Date();
+                                  const diffDays = Math.floor((now - created) / (1000 * 60 * 60 * 24));
+                                  if (diffDays === 0) return '🔴 Created today';
+                                  if (diffDays === 1) return '🟡 Created yesterday';
+                                  if (diffDays <= 7) return `🟡 Created ${diffDays} days ago`;
+                                  return `Created ${diffDays} days ago`;
+                                })()}
+                              </p>
+                            </div>
+                          )}
+
+                          {resource.launch_time && (
+                            <div className="mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Launched:</span>
+                              <p className="text-sm text-gray-900">
+                                {new Date(resource.launch_time).toLocaleString()}
+                              </p>
+                            </div>
+                          )}
+
+                          {resource.vpc_id && (
+                            <div className="mb-2">
+                              <span className="text-xs font-semibold text-gray-600">VPC:</span>
+                              <p className="text-sm text-gray-900">{resource.vpc_name || resource.vpc_id}</p>
+                            </div>
+                          )}
+
+                          {resource.subnet_id && (
+                            <div className="mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Subnet:</span>
+                              <p className="text-sm text-gray-900 font-mono">{resource.subnet_id}</p>
+                            </div>
+                          )}
+
+                          {resource.public_ip && resource.public_ip !== 'N/A' && (
+                            <div className="mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Public IP:</span>
+                              <p className="text-sm text-gray-900 font-mono">{resource.public_ip}</p>
+                            </div>
+                          )}
+
+                          {resource.state && (
+                            <div className="mb-2">
+                              <span className="text-xs font-semibold text-gray-600">State:</span>
+                              <span className="ml-2 inline-block px-2 py-1 text-xs font-semibold rounded bg-green-100 text-green-800">
+                                {resource.state}
+                              </span>
+                            </div>
+                          )}
+
+                          {resource.description && (
+                            <div className="mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Description:</span>
+                              <p className="text-sm text-gray-900">{resource.description}</p>
+                            </div>
+                          )}
+
+                          {resource.ingress_rules !== undefined && (
+                            <div className="mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Inbound Rules:</span>
+                              <span className="ml-2 inline-block px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-800">
+                                {resource.ingress_rules} {resource.ingress_rules === 1 ? 'rule' : 'rules'}
+                              </span>
+                            </div>
+                          )}
+
+                          {resource.egress_rules !== undefined && (
+                            <div className="mb-2">
+                              <span className="text-xs font-semibold text-gray-600">Outbound Rules:</span>
+                              <span className="ml-2 inline-block px-2 py-1 text-xs font-semibold rounded bg-purple-100 text-purple-800">
+                                {resource.egress_rules} {resource.egress_rules === 1 ? 'rule' : 'rules'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Right Column - Tags */}
+                        <div>
+                          <h4 className="text-sm font-bold text-gray-700 mb-2">Tags & Metadata:</h4>
+                          {resource.tags && Object.keys(resource.tags).length > 0 ? (
+                            <div className="bg-gray-50 rounded p-3 max-h-64 overflow-auto">
+                              <table className="w-full text-xs">
+                                <tbody>
+                                  {Object.entries(resource.tags).map(([key, value]) => (
+                                    <tr key={key} className="border-b border-gray-200 last:border-0">
+                                      <td className="py-1 pr-2 font-semibold text-gray-600 align-top">{key}:</td>
+                                      <td className="py-1 text-gray-900 break-all">{value}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+
+                              {/* Highlight important tags */}
+                              {(resource.tags['kubernetes.io/cluster'] || resource.tags['sigs.k8s.io/cluster-api-provider-aws/cluster-name']) && (
+                                <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded">
+                                  <p className="text-xs font-semibold text-blue-800">
+                                    🔍 Created by: CAPA/Kubernetes automation
+                                  </p>
+                                  <p className="text-xs text-blue-600 mt-1">
+                                    Cluster: {resource.tags['kubernetes.io/cluster'] || resource.tags['sigs.k8s.io/cluster-api-provider-aws/cluster-name']}
+                                  </p>
+                                </div>
+                              )}
+
+                              {(resource.tags['CreatedBy'] || resource.tags['ManagedBy']) && (
+                                <div className="mt-3 p-2 bg-purple-50 border border-purple-200 rounded">
+                                  <p className="text-xs font-semibold text-purple-800">
+                                    👤 Creator: {resource.tags['CreatedBy'] || resource.tags['ManagedBy']}
+                                  </p>
+                                  {resource.tags['CreatedAt'] && (
+                                    <p className="text-xs text-purple-600 mt-1">
+                                      Created: {new Date(resource.tags['CreatedAt']).toLocaleString()}
+                                    </p>
+                                  )}
+                                  {resource.tags['CreatedByArn'] && (
+                                    <p className="text-xs text-purple-600 mt-1 font-mono break-all">
+                                      ARN: {resource.tags['CreatedByArn']}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-500 italic">No tags available</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <p className="text-gray-600">No details available</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
+              <button
+                onClick={closeDetailsModal}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

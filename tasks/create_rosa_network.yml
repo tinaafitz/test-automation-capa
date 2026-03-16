@@ -19,6 +19,33 @@
 
 - name: "Create ROSANetwork for cluster {{ cluster_name }}"
   block:
+    - name: Get current AWS user identity
+      shell: |
+        aws sts get-caller-identity --output json
+      register: aws_identity_result
+      changed_when: false
+      failed_when: false
+
+    - name: Extract AWS username from identity
+      set_fact:
+        aws_username: "{{ (aws_identity_result.stdout | from_json).Arn.split('/')[-1] if aws_identity_result.rc == 0 else 'unknown' }}"
+        aws_account_id: "{{ (aws_identity_result.stdout | from_json).Account if aws_identity_result.rc == 0 else 'unknown' }}"
+
+    - name: Set default network tags with creator information
+      set_fact:
+        default_network_tags:
+          Environment: "test"
+          TestCase: "ACM-21174"
+          CreatedBy: "{{ aws_username }}"
+          CreatedByArn: "{{ (aws_identity_result.stdout | from_json).Arn if aws_identity_result.rc == 0 else 'unknown' }}"
+          CreatedAt: "{{ ansible_date_time.iso8601 }}"
+          ManagedBy: "ansible-automation"
+          AWSAccount: "{{ aws_account_id }}"
+
+    - name: Merge user-provided tags with defaults
+      set_fact:
+        final_network_tags: "{{ default_network_tags | combine(network_tags | default({})) }}"
+
     - name: Generate ROSANetwork from template
       template:
         src: "{{ resolved_template_path }}"
@@ -30,7 +57,7 @@
           identity_name: "{{ rosa_network_identity | default('default') }}"
           availability_zones: "{{ aws_availability_zones | default([aws_region + 'a', aws_region + 'b']) }}"
           cidr_block: "{{ vpc_cidr_block | default('10.0.0.0/16') }}"
-          tags: "{{ network_tags | default({'Environment': 'test', 'TestCase': 'ACM-21174', 'CreatedBy': 'ansible-automation'}) }}"
+          tags: "{{ final_network_tags }}"
 
     - name: Check if ROSANetwork already exists
       shell: |

@@ -1155,7 +1155,25 @@ const CAPADashboardContent = () => {
               setVerificationResults(configNeededResults);
             } else {
               // This is a real failure (credentials, network, etc.)
-              updateRecentOperationStatus(verifyId, '❌ Verification failed', output);
+              // Extract error summary from the message
+              let errorSummary = '❌ Verification failed';
+
+              // Try to extract the specific error from jobData.message (backend already parsed it)
+              if (jobData.message && jobData.message.includes(':')) {
+                // Message format: "Verification failed: CREDENTIAL VERIFICATION FAILED"
+                const parts = jobData.message.split(':');
+                if (parts.length > 1) {
+                  errorSummary = '❌ ' + parts.slice(1).join(':').trim();
+                }
+              } else if (output.includes('CREDENTIAL')) {
+                errorSummary = '❌ Credential issue';
+              } else if (output.includes('LOGIN FAILED') || output.includes('authentication')) {
+                errorSummary = '❌ Authentication failed';
+              } else if (output.includes('network') || output.includes('connection')) {
+                errorSummary = '❌ Connection failed';
+              }
+
+              updateRecentOperationStatus(verifyId, errorSummary, output);
               const failureResults = {
                 success: false,
                 timestamp: new Date().toISOString(),
