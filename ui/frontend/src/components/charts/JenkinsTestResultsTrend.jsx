@@ -11,15 +11,28 @@ const JenkinsTestResultsTrend = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(buildApiUrl('/api/jenkins/test-results-trend'));
+      // Add timestamp to prevent browser caching
+      const cacheBuster = `?t=${Date.now()}`;
+      const response = await fetch(buildApiUrl(`/api/jenkins/test-results-trend${cacheBuster}`), {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
       const data = await response.json();
 
-      console.log('Jenkins trend data:', data);
+      console.log('Jenkins trend data received:', {
+        success: data.success,
+        count: data.count,
+        buildNumbers: data.trend ? data.trend.map(b => b.build) : []
+      });
 
       if (data.success && Array.isArray(data.trend)) {
         // Reverse to show oldest to newest (left to right)
         const reversed = data.trend.reverse();
-        console.log('Setting trend data with', reversed.length, 'builds');
+        console.log('Setting trend data with', reversed.length, 'builds:', reversed.map(b => `#${b.build}`).join(', '));
         setTrendData(reversed);
       } else {
         throw new Error(data.message || 'Failed to fetch Jenkins test results');
@@ -32,12 +45,17 @@ const JenkinsTestResultsTrend = () => {
     }
   };
 
+  // Auto-fetch data on component mount
+  useEffect(() => {
+    fetchTrendData();
+  }, []);
+
   // Calculate max count for scaling with better padding
   const maxCount = Math.max(...trendData.map(d => d.totalCount), 1);
   const yAxisMax = Math.ceil(maxCount * 1.1 / 10) * 10; // Round up to nearest 10 with 10% padding
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
       {/* Header - Simple styling to match page */}
       <div className="bg-gray-50 border-b border-gray-200 px-4 py-3">
         <div className="flex items-center justify-between">
@@ -78,9 +96,9 @@ const JenkinsTestResultsTrend = () => {
         ) : (
           <div>
             {/* Chart - Compact design */}
-            <div className="relative mb-4 bg-white p-4 rounded border border-gray-200" style={{ height: '240px' }}>
+            <div className="relative bg-white p-4 rounded border border-gray-200" style={{ height: '240px' }}>
               {/* Y-axis labels */}
-              <div className="absolute left-0 top-0 bottom-0 flex flex-col justify-between text-xs font-bold text-gray-700 pr-4 pt-8 pb-24" style={{ width: '50px' }}>
+              <div className="absolute left-0 top-0 bottom-0 flex flex-col justify-between text-xs font-bold text-gray-700 pr-4 pt-4 pb-4" style={{ width: '40px' }}>
                 <span className="text-right">{yAxisMax}</span>
                 <span className="text-right">{Math.floor(yAxisMax * 0.75)}</span>
                 <span className="text-right">{Math.floor(yAxisMax * 0.5)}</span>
@@ -89,7 +107,7 @@ const JenkinsTestResultsTrend = () => {
               </div>
 
               {/* Chart area */}
-              <div className="absolute" style={{ left: '56px', right: '24px', top: '32px', bottom: '80px' }}>
+              <div className="absolute" style={{ left: '48px', right: '16px', top: '16px', bottom: '16px' }}>
                 <div className="relative h-full border-l-2 border-b-2 border-gray-500">
                   {/* Horizontal grid lines */}
                   <div className="absolute inset-0">
@@ -202,22 +220,13 @@ const JenkinsTestResultsTrend = () => {
                   </div>
                 </div>
 
-                {/* X-axis labels with better spacing */}
-                <div className="absolute left-0 right-0 flex px-3" style={{ top: '100%', marginTop: '20px', gap: '8px' }}>
-                  {trendData.map((build) => (
-                    <div key={build.build} className="flex-1 text-center py-2">
-                      <div className="text-xs text-gray-800 font-bold mb-2">#{build.build}</div>
-                      <div className={`text-base font-bold inline-flex items-center justify-center w-6 h-6 rounded-full ${
-                        build.result === 'SUCCESS' ? 'text-green-600 bg-green-50' :
-                        build.result === 'FAILURE' ? 'text-red-600 bg-red-50' :
-                        'text-yellow-600 bg-yellow-50'
-                      }`}>
-                        {build.result === 'SUCCESS' ? '✓' : build.result === 'FAILURE' ? '✗' : '~'}
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
+            </div>
+
+            {/* Build number labels - below chart */}
+            <div className="flex justify-between px-4 mb-4">
+              <div className="text-sm font-bold text-gray-700">Build #{trendData[0]?.build}</div>
+              <div className="text-sm font-bold text-gray-700">Build #{trendData[trendData.length - 1]?.build}</div>
             </div>
 
             {/* Legend - Simple */}

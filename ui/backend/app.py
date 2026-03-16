@@ -4,7 +4,7 @@ ROSA Automation UI Backend
 FastAPI-based backend for the ROSA cluster automation interface
 """
 
-from fastapi import FastAPI, HTTPException, WebSocket, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, WebSocket, BackgroundTasks, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Optional
@@ -10237,7 +10237,7 @@ async def search_mce_environments(query: str):
 
 
 @app.get("/api/jenkins/test-results-trend")
-async def get_jenkins_test_results_trend():
+async def get_jenkins_test_results_trend(response: Response):
     """Get Jenkins test results trend data from CAPI tests job"""
     import requests
     from datetime import datetime
@@ -10305,6 +10305,11 @@ async def get_jenkins_test_results_trend():
         trend_data.sort(key=lambda x: x["build"], reverse=True)
 
         print(f"✅ [JENKINS] Successfully fetched trend data for {len(trend_data)} builds")
+
+        # Set cache-control headers to prevent caching
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
 
         return {
             "success": True,
