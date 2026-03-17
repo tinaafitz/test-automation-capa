@@ -109,7 +109,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             cluster_name: clusterName,
-            namespace: 'default'  // Default namespace for scanning
+            namespace: 'ns-rosa-hcp'
           }),
         });
 
@@ -129,7 +129,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
               status: r.status || 'Unknown',
               version: r.version || 'N/A',
               age: r.age || 'N/A',
-              region: 'us-west-2', // Minikube clusters are in us-west-2
+              region: 'us-west-2',
             }));
           setClusters(rosaHcpClusters);
         } else {
