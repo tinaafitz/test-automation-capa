@@ -43,6 +43,7 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
     rolePrefix: '',
     domainPrefix: '',
     channelGroup: 'stable',
+    channel: '',
     awsRegion: 'us-west-2',
     privateNetwork: false,
     additionalTags: '',
@@ -490,16 +491,41 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
                 <select
                   value={config.channelGroup}
                   onChange={(e) => handleChange('channelGroup', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  disabled={!!config.channel}
+                  className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${config.channel ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <option value="stable">Stable (Recommended)</option>
                   <option value="fast">Fast</option>
                   <option value="candidate">Candidate</option>
+                  <option value="eus">EUS</option>
+                  <option value="nightly">Nightly</option>
                 </select>
                 <p className="mt-1 text-xs text-gray-500">
                   Update channel for OpenShift releases. Stable is recommended for production.
+                  {config.channel && ' (Disabled — Channel overrides Channel Group)'}
                 </p>
               </div>
+
+              {/* Y-Stream Channel (Minikube only) */}
+              {theme === 'minikube' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Channel <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={config.channel}
+                    onChange={(e) => handleChange('channel', e.target.value)}
+                    placeholder="e.g. stable-4.16, eus-4.18"
+                    pattern="^(stable|eus|fast|candidate|nightly)-[0-9]+\.[0-9]+$"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Y-stream channel for more granular upgrade control (e.g. "stable-4.16", "eus-4.18").
+                    When set, overrides Channel Group.
+                  </p>
+                </div>
+              )}
 
               {/* FIPS Mode - Only show for OpenShift 4.21+ */}
               {(() => {

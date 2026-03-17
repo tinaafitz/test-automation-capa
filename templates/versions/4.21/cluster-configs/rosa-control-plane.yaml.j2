@@ -21,8 +21,12 @@ spec:
   # Domain prefix (required, max 15 chars)
   domainPrefix: "{{ domain_prefix | default(rosa_role_prefix) | default(cluster_name) }}"
 
-  # Channel group
+  # Channel configuration
+{% if channel is defined and channel %}
+  channel: "{{ channel }}"
+{% else %}
   channelGroup: "{{ channel_group }}"
+{% endif %}
 
   # Network configuration
   network:
