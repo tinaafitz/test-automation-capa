@@ -669,6 +669,7 @@ const MinikubeDashboardContent = () => {
   const [componentVersions, setComponentVersions] = useState([]);
   const [componentVersionsLoading, setComponentVersionsLoading] = useState(false);
   const [cliVersions, setCliVersions] = useState(null);
+  const [clusterComponents, setClusterComponents] = useState(null);
   const [expandedNamespaces, setExpandedNamespaces] = useState(new Set());
 
   // Copy handler for playbook output
@@ -727,9 +728,7 @@ const MinikubeDashboardContent = () => {
       return;
     }
 
-    const methodInfo = installMethod === 'clusterctl'
-      ? { icon: '⚡', name: 'Cluster API' }
-      : { icon: '📦', name: 'Helm Charts' };
+    const methodInfo = { icon: '⚡', name: 'Cluster API' };
 
     // Set configuring state to true
     setIsConfiguring(true);
@@ -821,11 +820,25 @@ const MinikubeDashboardContent = () => {
 
                 setIsConfiguring(false);
 
-                // Refresh resources to show updated components
+                // Refresh resources and cluster components to show updated versions
                 fetchMinikubeActiveResources(
                   verifiedMinikubeClusterInfo?.name,
                   verifiedMinikubeClusterInfo?.namespace
                 );
+                // Refresh cluster components table
+                try {
+                  const clusterName = verifiedMinikubeClusterInfo?.name || selectedMinikubeCluster || minikubeClusterInput;
+                  const compUrl = clusterName
+                    ? buildApiUrl(`/api/capi/cluster-components?cluster_name=${clusterName}`)
+                    : buildApiUrl('/api/capi/cluster-components');
+                  const compResponse = await fetch(compUrl);
+                  if (compResponse.ok) {
+                    const compData = await compResponse.json();
+                    setClusterComponents(compData.components);
+                  }
+                } catch (e) {
+                  console.error('Error refreshing cluster components:', e);
+                }
                 return;
               } else if (jobData.status === 'failed') {
                 // Failure - set error results
@@ -1039,13 +1052,13 @@ const MinikubeDashboardContent = () => {
               }
 
               if (jobData.status === 'completed') {
-                const output = currentOutput || 'Provisioning completed successfully';
+                const output = currentOutput || 'Cluster provisioned successfully!';
                 setProvisionResults({
                   success: true,
                   timestamp: new Date().toISOString(),
                   output: output,
                 });
-                updateRecentOperationStatus(provisionId, '✅ Provisioning completed successfully!', output);
+                updateRecentOperationStatus(provisionId, '✅ Cluster provisioned successfully!', output);
                 setIsProvisioning(false);
                 await refreshAllStatus();
                 return;
@@ -1078,8 +1091,8 @@ const MinikubeDashboardContent = () => {
         pollJobStatus();
       } else {
         // No job created - set immediate results
-        const output = result.message || 'Provisioning completed successfully';
-        updateRecentOperationStatus(provisionId, '✅ Provisioning completed', output);
+        const output = result.message || 'Cluster provisioned successfully!';
+        updateRecentOperationStatus(provisionId, '✅ Cluster provisioned successfully!', output);
         await refreshAllStatus();
       }
 
@@ -1169,7 +1182,7 @@ const MinikubeDashboardContent = () => {
     }
   }, [verifiedMinikubeClusterInfo, selectedMinikubeCluster, fetchComponentVersions]);
 
-  // Fetch CLI tool versions on mount
+  // Fetch CLI tool versions and cluster components on mount
   useEffect(() => {
     const fetchCliVersions = async () => {
       try {
@@ -1182,8 +1195,24 @@ const MinikubeDashboardContent = () => {
         console.error('Error fetching CLI versions:', error);
       }
     };
+    const fetchClusterComponents = async () => {
+      try {
+        const clusterName = verifiedMinikubeClusterInfo?.name || selectedMinikubeCluster || minikubeClusterInput;
+        const url = clusterName
+          ? buildApiUrl(`/api/capi/cluster-components?cluster_name=${clusterName}`)
+          : buildApiUrl('/api/capi/cluster-components');
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          setClusterComponents(data.components);
+        }
+      } catch (error) {
+        console.error('Error fetching cluster components:', error);
+      }
+    };
     fetchCliVersions();
-  }, []);
+    fetchClusterComponents();
+  }, [verifiedMinikubeClusterInfo, selectedMinikubeCluster, minikubeClusterInput]);
 
   // Fetch active minikube cluster info
   useEffect(() => {
@@ -1345,83 +1374,48 @@ const MinikubeDashboardContent = () => {
               </div>
             )}
 
+            {/* Cluster Components */}
+            {clusterComponents && clusterComponents.length > 0 && (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Cluster Components</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left py-2 px-3 font-medium text-gray-600">Component</th>
+                        <th className="text-left py-2 px-3 font-medium text-gray-600">Version</th>
+                        <th className="text-left py-2 px-3 font-medium text-gray-600">Image</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {clusterComponents.map((comp) => (
+                        <tr key={comp.name} className="border-b border-gray-100">
+                          <td className="py-2 px-3">
+                            <div className="flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full ${comp.running ? 'bg-green-500' : 'bg-red-400'}`}></span>
+                              <span className="font-medium text-gray-900">{comp.name}</span>
+                            </div>
+                          </td>
+                          <td className="py-2 px-3">
+                            <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">{comp.version}</span>
+                          </td>
+                          <td className="py-2 px-3">
+                            <code className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">{comp.image || 'N/A'}</code>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Configuration Card */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <p className="text-gray-600 mb-6">
                 Enable and configure CAPI/CAPA components on your Minikube environment.
               </p>
 
-              {/* Configuration Method Selector */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-900 mb-3">
-                  Configuration Method
-                </label>
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Clusterctl Option */}
-                  <button
-                    onClick={() => setInstallMethod('clusterctl')}
-                    disabled={isConfiguring}
-                    className={`p-4 border-2 rounded-lg transition-all ${
-                      installMethod === 'clusterctl'
-                        ? 'border-purple-600 bg-purple-50'
-                        : 'border-gray-200 hover:border-purple-300'
-                    } ${isConfiguring ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                        installMethod === 'clusterctl'
-                          ? 'border-purple-600 bg-purple-600'
-                          : 'border-gray-300'
-                      }`}>
-                        {installMethod === 'clusterctl' && (
-                          <div className="w-2 h-2 bg-white rounded-full"></div>
-                        )}
-                      </div>
-                      <div className="text-left flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-lg">⚡</span>
-                          <span className="font-semibold text-gray-900">Cluster API (clusterctl)</span>
-                        </div>
-                        <p className="text-xs text-gray-600">
-                          Official Cluster API CLI tool - recommended for production use and custom CAPA images
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-
-                  {/* Helm Option */}
-                  <button
-                    onClick={() => setInstallMethod('helm')}
-                    disabled={isConfiguring}
-                    className={`p-4 border-2 rounded-lg transition-all ${
-                      installMethod === 'helm'
-                        ? 'border-purple-600 bg-purple-50'
-                        : 'border-gray-200 hover:border-purple-300'
-                    } ${isConfiguring ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                        installMethod === 'helm'
-                          ? 'border-purple-600 bg-purple-600'
-                          : 'border-gray-300'
-                      }`}>
-                        {installMethod === 'helm' && (
-                          <div className="w-2 h-2 bg-white rounded-full"></div>
-                        )}
-                      </div>
-                      <div className="text-left flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-lg">📦</span>
-                          <span className="font-semibold text-gray-900">Helm Charts</span>
-                        </div>
-                        <p className="text-xs text-gray-600">
-                          Helm-based installation - simpler setup, good for development and testing
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              </div>
 
               <button
                 onClick={() => handleConfigure()}
@@ -1514,27 +1508,8 @@ const MinikubeDashboardContent = () => {
                 Configure CAPI/CAPA with a custom CAPA controller image for testing pre-release features.
               </p>
 
-              {/* Error message if not using clusterctl */}
-              {installMethod !== 'clusterctl' && (
-                <div className="mb-6 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
-                  <div className="flex items-start gap-3">
-                    <span className="text-2xl flex-shrink-0">❌</span>
-                    <div>
-                      <p className="text-sm font-semibold text-red-900 mb-1">Custom CAPA Image Not Available</p>
-                      <p className="text-sm text-red-800">
-                        Custom CAPA image configuration is only available when using the <strong>clusterctl</strong> installation method.
-                        Your current installation method is <strong>{installMethod === 'helm' ? 'Helm' : installMethod}</strong>.
-                      </p>
-                      <p className="text-sm text-red-700 mt-2">
-                        Please reconfigure your environment using clusterctl to enable custom image support.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Custom CAPA Image Configuration - Only for clusterctl */}
-              {installMethod === 'clusterctl' && (
+              {/* Custom CAPA Image Configuration */}
+              {(
                 <div className="space-y-4">
                   <label className="flex items-start gap-2 cursor-pointer">
                     <input
@@ -1610,17 +1585,17 @@ const MinikubeDashboardContent = () => {
                 </div>
               )}
 
-              {/* Apply Changes Button - Only enabled for clusterctl */}
+              {/* Apply Changes Button */}
               <div className="mt-6">
                 <button
                   onClick={handleReconfigureSubmit}
-                  disabled={installMethod !== 'clusterctl' || isConfiguring}
+                  disabled={isConfiguring}
                   className={`px-6 py-3 text-white rounded transition-colors font-medium flex items-center gap-2 ${
-                    (installMethod !== 'clusterctl' || isConfiguring) ? 'opacity-50 cursor-not-allowed' : ''
+                    isConfiguring ? 'opacity-50 cursor-not-allowed' : ''
                   }`}
-                  style={(installMethod === 'clusterctl' && !isConfiguring) ? { backgroundColor: '#8B5CF6' } : { backgroundColor: '#9CA3AF' }}
-                  onMouseEnter={(e) => (installMethod === 'clusterctl' && !isConfiguring) && (e.currentTarget.style.backgroundColor = '#7C3AED')}
-                  onMouseLeave={(e) => (installMethod === 'clusterctl' && !isConfiguring) && (e.currentTarget.style.backgroundColor = '#8B5CF6')}
+                  style={!isConfiguring ? { backgroundColor: '#8B5CF6' } : { backgroundColor: '#9CA3AF' }}
+                  onMouseEnter={(e) => !isConfiguring && (e.currentTarget.style.backgroundColor = '#7C3AED')}
+                  onMouseLeave={(e) => !isConfiguring && (e.currentTarget.style.backgroundColor = '#8B5CF6')}
                 >
                   {isConfiguring ? (
                     <>
