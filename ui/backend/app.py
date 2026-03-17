@@ -6308,6 +6308,7 @@ async def generate_provisioning_yaml(request: Request):
         role_prefix = config.get("rolePrefix", cluster_name)
         domain_prefix = config.get("domainPrefix", "")
         channel_group = config.get("channelGroup", "stable")
+        channel = config.get("channel", "")
         aws_region = config.get("awsRegion", "us-west-2")
 
         # Extract node pool configuration
@@ -6413,6 +6414,7 @@ async def generate_provisioning_yaml(request: Request):
             "purpose_tag": "rosa-preview",
             "domain_prefix": domain_prefix if domain_prefix else f"rosa-{cluster_name[:15]}",
             "channel_group": channel_group,
+            "channel": channel,
             "cluster_network": {
                 "pod_cidr": "10.128.0.0/14",
                 "service_cidr": "172.30.0.0/16",
