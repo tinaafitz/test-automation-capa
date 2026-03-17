@@ -9,6 +9,7 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
   const [expandedNamespaces, setExpandedNamespaces] = useState(new Set());
   const [totalCount, setTotalCount] = useState(0);
   const [selectedResource, setSelectedResource] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
   const [showYamlModal, setShowYamlModal] = useState(false);
   const [loadingYaml, setLoadingYaml] = useState(false);
 
@@ -92,14 +93,27 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
   const handleResourceClick = async (resource) => {
     setLoadingYaml(true);
 
+    // Map display types back to kubectl resource types
+    const typeMap = {
+      'Secret (ROSA Creds)': 'secret',
+      'Secret (AWS Creds)': 'secret',
+      'AWSClusterControllerIdentity': 'awsclustercontrolleridentity',
+    };
+    const rawType = resource.type || resource.kind;
+    const kubectlType = typeMap[rawType] || rawType.toLowerCase();
+
     const requestPayload = {
-      resource_type: resource.type || resource.kind,
+      resource_type: kubectlType,
       resource_name: resource.name,
       namespace: resource.namespace || '',
     };
 
+    const endpoint = theme === 'minikube'
+      ? '/api/minikube/get-resource-detail'
+      : '/api/ocp/get-resource-detail';
+
     try {
-      const response = await fetch(buildApiUrl('/api/ocp/get-resource-detail'), {
+      const response = await fetch(buildApiUrl(endpoint), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestPayload),
@@ -116,11 +130,13 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
         setShowYamlModal(true);
       } else {
         console.error('Failed to fetch resource YAML:', data.message || 'Unknown error');
-        alert(`Failed to fetch YAML: ${data.message || 'Unknown error'}`);
+        setErrorMessage(`Failed to fetch YAML: ${data.message || 'Unknown error'}`);
+        setTimeout(() => setErrorMessage(''), 5000);
       }
     } catch (error) {
       console.error('Error fetching resource YAML:', error);
-      alert(`Error fetching YAML: ${error.message}`);
+      setErrorMessage(`Error fetching YAML: ${error.message}`);
+      setTimeout(() => setErrorMessage(''), 5000);
     } finally {
       setLoadingYaml(false);
     }
@@ -206,6 +222,14 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
         </button>
       </div>
 
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="mx-6 mt-2 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+          <span className="text-sm text-red-700">{errorMessage}</span>
+          <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700 text-sm font-medium ml-4">Dismiss</button>
+        </div>
+      )}
+
       {/* Resources List */}
       <div className="px-6 py-4">
         {Object.keys(groupedResources).length === 0 ? (
@@ -247,20 +271,16 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
                         disabled={loadingYaml}
                         className="w-full px-4 py-3 hover:bg-gray-50 transition-colors text-left disabled:opacity-50"
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-gray-900">
-                                {resource.name}
-                              </span>
-                              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
-                                {resource.type || resource.kind}
-                              </span>
-                            </div>
-                          </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium text-gray-900">
+                            {resource.name}
+                          </span>
+                          <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                            {resource.type || resource.kind}
+                          </span>
                           {resource.status && (
                             <span
-                              className={`px-2 py-1 rounded text-xs font-medium ${
+                              className={`px-2 py-0.5 rounded text-xs font-medium ${
                                 resource.status === 'Ready' || resource.status === 'Running'
                                   ? 'bg-green-100 text-green-700'
                                   : resource.status === 'Pending'
