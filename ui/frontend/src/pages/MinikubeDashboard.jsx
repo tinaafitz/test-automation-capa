@@ -639,6 +639,7 @@ const MinikubeDashboardContent = () => {
   const [minikubeInfo, setMinikubeInfo] = useState(null); // Active minikube cluster info
   const [isConfiguring, setIsConfiguring] = useState(false); // Track configuration state
   const [configurationResults, setConfigurationResults] = useState(null); // Configuration output results
+  const [configurationLiveLogs, setConfigurationLiveLogs] = useState(''); // Live logs during configuration
   const [provisionResults, setProvisionResults] = useState(null); // Provision output results
   const [isProvisioning, setIsProvisioning] = useState(false); // Track provisioning state
   const [bannerRefreshKey, setBannerRefreshKey] = useState(0); // Force banner refresh
@@ -667,6 +668,7 @@ const MinikubeDashboardContent = () => {
   });
   const [componentVersions, setComponentVersions] = useState([]);
   const [componentVersionsLoading, setComponentVersionsLoading] = useState(false);
+  const [cliVersions, setCliVersions] = useState(null);
   const [expandedNamespaces, setExpandedNamespaces] = useState(new Set());
 
   // Copy handler for playbook output
@@ -717,7 +719,11 @@ const MinikubeDashboardContent = () => {
       minikubeClusterInput;
 
     if (!targetClusterName) {
-      alert('Please verify a Minikube cluster first');
+      setConfigurationResults({
+        success: false,
+        timestamp: new Date().toISOString(),
+        output: 'Please verify a Minikube cluster first. Go to Environments and select a cluster.',
+      });
       return;
     }
 
@@ -728,6 +734,7 @@ const MinikubeDashboardContent = () => {
     // Set configuring state to true
     setIsConfiguring(true);
     setConfigurationResults(null); // Clear previous results
+    setConfigurationLiveLogs(''); // Clear previous live logs
 
     try {
       // Add to Recent Operations for Task Summary
@@ -790,8 +797,12 @@ const MinikubeDashboardContent = () => {
               const logsData = await logsResponse.json();
               const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
 
+              // Update live logs on every poll so the UI shows real-time progress
+              if (currentOutput) {
+                setConfigurationLiveLogs(currentOutput);
+              }
+
               // Update Recent Operations every 5 seconds with current output
-              // Don't set configurationResults yet - wait for completion
               if (attempts % 5 === 0 && currentOutput) {
                 updateRecentOperationStatus(configureId, '⏳ Configuration running...', currentOutput);
               }
@@ -1158,6 +1169,22 @@ const MinikubeDashboardContent = () => {
     }
   }, [verifiedMinikubeClusterInfo, selectedMinikubeCluster, fetchComponentVersions]);
 
+  // Fetch CLI tool versions on mount
+  useEffect(() => {
+    const fetchCliVersions = async () => {
+      try {
+        const response = await fetch(buildApiUrl('/api/capi/cli-versions'));
+        if (response.ok) {
+          const data = await response.json();
+          setCliVersions(data.tools);
+        }
+      } catch (error) {
+        console.error('Error fetching CLI versions:', error);
+      }
+    };
+    fetchCliVersions();
+  }, []);
+
   // Fetch active minikube cluster info
   useEffect(() => {
     const fetchActiveProfile = async () => {
@@ -1296,6 +1323,28 @@ const MinikubeDashboardContent = () => {
             {/* Title */}
             <h2 className="text-2xl font-bold text-purple-900">Configure CAPI/CAPA</h2>
 
+            {/* CLI Tool Versions */}
+            {cliVersions && (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">CLI Tool Versions</h3>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  {Object.entries(cliVersions).map(([tool, info]) => (
+                    <div key={tool} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
+                      info.installed ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full ${info.installed ? 'bg-green-500' : 'bg-red-400'}`}></span>
+                      <div>
+                        <span className="font-medium text-gray-900">{tool}</span>
+                        <span className="text-gray-500 ml-1 text-xs">
+                          {info.installed ? info.version : 'not installed'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Configuration Card */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <p className="text-gray-600 mb-6">
@@ -1403,7 +1452,15 @@ const MinikubeDashboardContent = () => {
                   <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
                   <h3 className="text-lg font-semibold text-gray-900">Running Configuration...</h3>
                 </div>
-                <p className="text-gray-600">Please wait while the playbook executes. This may take a minute or two.</p>
+                <p className="text-gray-600 mb-4">Please wait while the playbook executes. This may take a minute or two.</p>
+                {configurationLiveLogs && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Live Output:</h4>
+                    <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto min-h-[100px]">
+                      <pre className="whitespace-pre-wrap">{configurationLiveLogs}</pre>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1587,7 +1644,15 @@ const MinikubeDashboardContent = () => {
                   <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
                   <h3 className="text-lg font-semibold text-gray-900">Running Configuration...</h3>
                 </div>
-                <p className="text-gray-600">Please wait while the playbook executes. This may take a minute or two.</p>
+                <p className="text-gray-600 mb-4">Please wait while the playbook executes. This may take a minute or two.</p>
+                {configurationLiveLogs && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Live Output:</h4>
+                    <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto min-h-[100px]">
+                      <pre className="whitespace-pre-wrap">{configurationLiveLogs}</pre>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

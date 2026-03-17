@@ -428,26 +428,84 @@ const MCEEnvironmentSelector = ({
         const data = await response.json();
         console.log('Response data:', data);
 
-        if (data.success) {
-          // Update cluster status to success
+        if (data.success && data.job_id) {
+          // Async creation started - poll for job completion
+          setCreateMessage(`Creating cluster '${clusterName}'... (job: ${data.job_id.substring(0, 8)})`);
+          setCreateMessageType('info');
+
+          const pollJob = async () => {
+            const maxAttempts = 300; // 5 minutes max (1s intervals)
+            let attempts = 0;
+
+            while (attempts < maxAttempts) {
+              attempts++;
+              try {
+                const jobResponse = await fetch(`http://localhost:8000/api/jobs/${data.job_id}`);
+                const jobData = await jobResponse.json();
+
+                // Update notes with latest log line
+                const logsResponse = await fetch(`http://localhost:8000/api/jobs/${data.job_id}/logs`);
+                const logsData = await logsResponse.json();
+                const lastLog = logsData.logs?.filter(l => l.trim()).slice(-1)[0] || 'Creating...';
+
+                setEnvironments(prev => prev.map(env =>
+                  env.clusterName === clusterName
+                    ? { ...env, notes: lastLog }
+                    : env
+                ));
+
+                if (jobData.status === 'completed') {
+                  setEnvironments(prev => prev.map(env =>
+                    env.clusterName === clusterName
+                      ? { ...env, status: 'pass', notes: 'Cluster created successfully' }
+                      : env
+                  ));
+                  await fetchEnvironments();
+                  setCreateMessage(`Cluster '${clusterName}' created successfully!`);
+                  setCreateMessageType('success');
+                  setTimeout(() => { setCreateMessage(''); setCreateMessageType(''); }, 3000);
+                  return;
+                } else if (jobData.status === 'failed') {
+                  const errorMsg = jobData.message || 'Creation failed';
+                  setEnvironments(prev => prev.map(env =>
+                    env.clusterName === clusterName
+                      ? { ...env, status: 'fail', notes: `Failed: ${errorMsg}` }
+                      : env
+                  ));
+                  setCreateMessage(`Failed to create cluster: ${errorMsg}`);
+                  setCreateMessageType('error');
+                  return;
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              } catch (err) {
+                console.error('Error polling job:', err);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              }
+            }
+
+            // Timeout
+            setEnvironments(prev => prev.map(env =>
+              env.clusterName === clusterName
+                ? { ...env, status: 'fail', notes: 'Creation timed out' }
+                : env
+            ));
+            setCreateMessage('Cluster creation timed out');
+            setCreateMessageType('error');
+          };
+
+          pollJob();
+        } else if (data.success) {
+          // Synchronous success (shouldn't happen with new backend, but handle gracefully)
           setEnvironments(prev => prev.map(env =>
             env.clusterName === clusterName
-              ? { ...env, status: 'pass', notes: `Cluster created successfully` }
+              ? { ...env, status: 'pass', notes: 'Cluster created successfully' }
               : env
           ));
-
-          // Refresh environments to sync with backend
           await fetchEnvironments();
-
-          // Show success message
           setCreateMessage(`Cluster '${clusterName}' created successfully!`);
           setCreateMessageType('success');
-
-          // Clear message
-          setTimeout(() => {
-            setCreateMessage('');
-            setCreateMessageType('');
-          }, 3000);
+          setTimeout(() => { setCreateMessage(''); setCreateMessageType(''); }, 3000);
         } else {
           // Backend returned success: false with error details
           const errorMsg = data.message || data.error || 'Unknown error';

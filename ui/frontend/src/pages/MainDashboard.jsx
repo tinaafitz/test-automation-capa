@@ -208,7 +208,7 @@ const CombinedRosaHcpClusters = ({ onRefresh }) => {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <button
-                    onClick={() => alert(`Delete cluster: ${cluster.name}`)}
+                    onClick={() => { console.log(`Delete cluster: ${cluster.name}`); setError('Delete cluster functionality coming soon'); setTimeout(() => setError(null), 5000); }}
                     className="text-gray-400 hover:text-red-600"
                     title="Delete cluster"
                   >

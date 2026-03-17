@@ -36,6 +36,8 @@ const HelmChartTestDashboard = ({ theme = 'mce' }) => {
   const [expandedProviders, setExpandedProviders] = useState(new Set()); // Start with all collapsed
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval] = useState(5000); // 5 seconds
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('');
 
   // Git source configuration
   const [chartSource, setChartSource] = useState('git'); // 'helm_repo' or 'git'
@@ -254,7 +256,7 @@ const HelmChartTestDashboard = ({ theme = 'mce' }) => {
       console.error('Error running test:', error);
       // Update the recent operation to show error
       recentOps.updateRecentOperationStatus(testRunId, `❌ Failed to start: ${error.message}`);
-      alert(`Failed to start test: ${error.message}`);
+      setToastMessage(`Failed to start test: ${error.message}`); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
     }
   };
 
@@ -288,12 +290,24 @@ const HelmChartTestDashboard = ({ theme = 'mce' }) => {
       }
     } catch (error) {
       console.error('Error running all tests:', error);
-      alert(`Failed to start tests: ${error.message}`);
+      setToastMessage(`Failed to start tests: ${error.message}`); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
     }
   };
 
   return (
     <div className="space-y-6">
+      {toastMessage && (
+        <div className={`p-4 rounded-lg border ${
+          toastType === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
+          toastType === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
+          'bg-blue-50 border-blue-200 text-blue-800'
+        }`}>
+          <div className="flex items-center justify-between">
+            <span className="text-sm">{toastMessage}</span>
+            <button onClick={() => setToastMessage('')} className="text-sm font-medium ml-4">Dismiss</button>
+          </div>
+        </div>
+      )}
       {/* Page Title */}
       <div>
         <h2 className="text-2xl font-bold text-blue-900">Helm Chart Test Matrix</h2>

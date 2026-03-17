@@ -642,6 +642,8 @@ const CAPADashboardContent = () => {
   const [mceLastConfigured, setMceLastConfigured] = useState(null);
   const [isConfiguring, setIsConfiguring] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('');
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [isCheckingProvisionJob, setIsCheckingProvisionJob] = useState(false);
 
@@ -1380,7 +1382,7 @@ const CAPADashboardContent = () => {
 
     } catch (error) {
       console.error('Preview generation error:', error);
-      alert(`Failed to generate preview: ${extractSafeErrorMessage(error)}`);
+      setToastMessage(`Failed to generate preview: ${extractSafeErrorMessage(error)}`); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
     }
   };
 
@@ -1413,9 +1415,7 @@ const CAPADashboardContent = () => {
 
       if (response.ok) {
         // Show success message
-        alert(
-          `✅ Credentials set successfully for ${credentials.clusterName}!\n\nYou can now verify or configure the environment.`
-        );
+        setToastMessage(`Credentials set successfully for ${credentials.clusterName}! You can now verify or configure the environment.`); setToastType('success'); setTimeout(() => setToastMessage(''), 5000);
 
         // Refresh API status to reflect the new credentials
         await refreshAllStatus();
@@ -1423,10 +1423,10 @@ const CAPADashboardContent = () => {
         setCredentialsRefreshKey(prev => prev + 1);
       } else {
         const error = await response.json();
-        alert(`Failed to save credentials: ${error.message || 'Unknown error'}`);
+        setToastMessage(`Failed to save credentials: ${error.message || 'Unknown error'}`); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
       }
     } catch (error) {
-      alert(`Failed to save credentials: ${error.message}`);
+      setToastMessage(`Failed to save credentials: ${error.message}`); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
     }
   };
 
@@ -1786,7 +1786,7 @@ const CAPADashboardContent = () => {
                   // Get the original config from yamlEditorData
                   const config = yamlEditorData?.config;
                   if (!config) {
-                    alert('Configuration data not found');
+                    setToastMessage('Configuration data not found'); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
                     return;
                   }
 
@@ -2126,12 +2126,12 @@ const CAPADashboardContent = () => {
                     if (jobData.status === 'completed') {
                       const output = currentOutput || 'Test completed successfully';
                       updateRecentOperationStatus(testId, `✅ ${testSuite.name} completed!`, output);
-                      alert(`✅ ${testSuite.name} completed successfully!\n\nCheck Task Summary for full details.`);
+                      setToastMessage(`${testSuite.name} completed successfully! Check Task Summary for full details.`); setToastType('success'); setTimeout(() => setToastMessage(''), 5000);
                       return;
                     } else if (jobData.status === 'failed') {
                       const output = currentOutput || (jobData.error || jobData.message || 'Test failed');
                       updateRecentOperationStatus(testId, `❌ ${testSuite.name} failed`, output);
-                      alert(`❌ ${testSuite.name} failed.\n\nCheck Task Summary for error details.`);
+                      setToastMessage(`${testSuite.name} failed. Check Task Summary for error details.`); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
                       return;
                     }
 
@@ -2161,7 +2161,7 @@ const CAPADashboardContent = () => {
                 );
               } catch (error) {
                 console.error('Test execution error:', error);
-                alert(`❌ Failed to start test:\n\n${error.message}\n\nYou can run manually:\nansible-playbook ${playbookFile}`);
+                setToastMessage(`Failed to start test: ${error.message}. You can run manually: ansible-playbook ${playbookFile}`); setToastType('error'); setTimeout(() => setToastMessage(''), 8000);
               }
             }}
           />
@@ -2357,6 +2357,20 @@ const CAPADashboardContent = () => {
             verificationTimestamp={mceLastVerified}
           />
 
+          {/* Toast Message */}
+          {toastMessage && (
+            <div className={`mb-4 p-4 rounded-lg border ${
+              toastType === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
+              toastType === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
+              'bg-blue-50 border-blue-200 text-blue-800'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">{toastMessage}</span>
+                <button onClick={() => setToastMessage('')} className="text-sm font-medium ml-4">Dismiss</button>
+              </div>
+            </div>
+          )}
+
           {/* Main Content */}
           {renderMainContent()}
         </div>
@@ -2375,7 +2389,7 @@ const CAPADashboardContent = () => {
           // Get the original config from yamlEditorData
           const config = yamlEditorData?.config;
           if (!config) {
-            alert('Configuration data not found');
+            setToastMessage('Configuration data not found'); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
             return;
           }
 

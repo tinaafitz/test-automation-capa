@@ -3,6 +3,8 @@ import PropTypes from 'prop-types';
 import { BeakerIcon, ChevronDownIcon, ChevronUpIcon, DocumentDuplicateIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 
 const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite, isProvisioning = false }) => {
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('');
   const [selectedVersion, setSelectedVersion] = useState('4.21');
   const [expandedItems, setExpandedItems] = useState({});
   const [copySuccess, setCopySuccess] = useState(false);
@@ -184,11 +186,11 @@ const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite, isProvisioning =
   const handleProvisionSelected = async () => {
     const selectedTests = testItems.filter((item) => item.selected);
     if (selectedTests.length === 0) {
-      alert('Please select at least one test suite');
+      setToastMessage('Please select at least one test suite'); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
       return;
     }
     if (selectedTests.length > 1) {
-      alert('Please select only one test suite at a time');
+      setToastMessage('Please select only one test suite at a time'); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
       return;
     }
 
@@ -224,15 +226,13 @@ const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite, isProvisioning =
           });
 
           if (response.ok) {
-            alert('Setup task started! Check the Task Summary section for progress.');
+            setToastMessage('Setup task started! Check the Task Summary section for progress.'); setToastType('success'); setTimeout(() => setToastMessage(''), 5000);
           } else {
-            alert('Failed to start setup task. You may need to run it manually.');
+            setToastMessage('Failed to start setup task. You may need to run it manually.'); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
           }
         } catch (error) {
           console.error('Error starting setup task:', error);
-          alert(
-            'Error starting setup task. You can run it manually:\n\nansible-playbook tasks/setup-rosa-log-forwarding.yml'
-          );
+          setToastMessage('Error starting setup task. You can run it manually: ansible-playbook tasks/setup-rosa-log-forwarding.yml'); setToastType('error'); setTimeout(() => setToastMessage(''), 8000);
         }
       }
     }
@@ -264,7 +264,7 @@ const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite, isProvisioning =
       })
       .catch(err => {
         console.error('Failed to copy:', err);
-        alert('Failed to copy to clipboard');
+        setToastMessage('Failed to copy to clipboard'); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
       });
   };
 
@@ -339,6 +339,18 @@ const TestSuiteDashboard = ({ theme = 'mce', onSelectTestSuite, isProvisioning =
 
   return (
     <div className="space-y-6">
+      {toastMessage && (
+        <div className={`p-4 rounded-lg border ${
+          toastType === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
+          toastType === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
+          'bg-blue-50 border-blue-200 text-blue-800'
+        }`}>
+          <div className="flex items-center justify-between">
+            <span className="text-sm">{toastMessage}</span>
+            <button onClick={() => setToastMessage('')} className="text-sm font-medium ml-4">Dismiss</button>
+          </div>
+        </div>
+      )}
       {/* Page Title */}
       <div>
         <h2 className="text-2xl font-bold text-blue-900">Feature Test Dashboard</h2>
