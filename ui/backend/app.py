@@ -1740,1023 +1740,6 @@ async def save_credentials(update: CredentialsUpdate):
         raise HTTPException(status_code=500, detail=f"Error saving credentials: {str(e)}")
 
 
-@app.post("/api/kind/verify-cluster")
-async def verify_kind_cluster(request: dict):
-    """Verify if a Kind cluster exists and is accessible"""
-    cluster_name = request.get("cluster_name", "").strip()
-
-    if not cluster_name:
-        return {
-            "exists": False,
-            "accessible": False,
-            "message": "Cluster name is required",
-            "suggestion": "Please provide a valid Kind cluster name",
-        }
-
-    try:
-        # Check if Kind is installed
-        kind_check = subprocess.run(
-            ["kind", "--version"], capture_output=True, text=True, timeout=10
-        )
-
-        if kind_check.returncode != 0:
-            return {
-                "exists": False,
-                "accessible": False,
-                "message": "Kind is not installed",
-                "suggestion": "Install Kind first: brew install kind (macOS) or download from https://kind.sigs.k8s.io/",
-                "cluster_name": cluster_name,
-            }
-
-        # Check if Kind cluster context exists in kubeconfig
-        # This works even when cluster was created on host (not in container)
-        context_name = f"kind-{cluster_name}"
-        context_check = subprocess.run(
-            ["kubectl", "config", "get-contexts", context_name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-        cluster_exists = context_check.returncode == 0
-
-        if not cluster_exists:
-            # List available Kind contexts for suggestion
-            contexts_result = subprocess.run(
-                ["kubectl", "config", "get-contexts", "-o", "name"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            all_contexts = (
-                contexts_result.stdout.strip().split("\n")
-                if contexts_result.returncode == 0
-                else []
-            )
-            available_kind_clusters = [
-                ctx.replace("kind-", "") for ctx in all_contexts if ctx.startswith("kind-")
-            ]
-
-            return {
-                "exists": False,
-                "accessible": False,
-                "message": f"Kind cluster '{cluster_name}' does not exist",
-                "suggestion": f"Create the cluster with: kind create cluster --name {cluster_name}",
-                "cluster_name": cluster_name,
-                "available_clusters": available_kind_clusters,
-            }
-
-        # Test cluster accessibility with kubectl
-        try:
-            # Get cluster context name
-            context_name = f"kind-{cluster_name}"
-
-            # Test kubectl access
-            kubectl_test = subprocess.run(
-                ["kubectl", "cluster-info", "--context", context_name],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-
-            if kubectl_test.returncode == 0:
-                # Get cluster info
-                cluster_info = {}
-                if "Kubernetes control plane" in kubectl_test.stdout:
-                    for line in kubectl_test.stdout.split("\n"):
-                        if "Kubernetes control plane" in line:
-                            # Extract API URL
-                            import re
-
-                            url_match = re.search(r"https?://[^\s]+", line)
-                            if url_match:
-                                cluster_info["api_url"] = url_match.group()
-
-                # Check for components in the cluster
-                components = {"checks_passed": 0, "warnings": 0, "failed": 0, "details": []}
-
-                # Check AWS credentials secret
-                aws_creds_check = subprocess.run(
-                    [
-                        "kubectl",
-                        "get",
-                        "secret",
-                        "capa-manager-bootstrap-credentials",
-                        "-n",
-                        "capa-system",
-                        "--context",
-                        context_name,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if aws_creds_check.returncode == 0:
-                    components["checks_passed"] += 1
-                    components["details"].append(
-                        {
-                            "name": "AWS Credentials",
-                            "status": "configured",
-                            "message": "AWS credentials secret found",
-                        }
-                    )
-                else:
-                    components["warnings"] += 1
-                    components["details"].append(
-                        {
-                            "name": "AWS Credentials",
-                            "status": "not_configured",
-                            "message": "AWS credentials secret not found in capa-system namespace",
-                        }
-                    )
-
-                # Check OCM Client Secret (rosa-creds-secret)
-                ocm_secret_check = subprocess.run(
-                    [
-                        "kubectl",
-                        "get",
-                        "secret",
-                        "rosa-creds-secret",
-                        "-n",
-                        "ns-rosa-hcp",
-                        "--context",
-                        context_name,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if ocm_secret_check.returncode == 0:
-                    components["checks_passed"] += 1
-                    components["details"].append(
-                        {
-                            "name": "OCM Client Secret",
-                            "status": "configured",
-                            "message": "ROSA credentials secret found",
-                        }
-                    )
-                else:
-                    components["failed"] += 1
-                    components["details"].append(
-                        {
-                            "name": "OCM Client Secret",
-                            "status": "missing",
-                            "message": "ROSA credentials secret not found in ns-rosa-hcp namespace",
-                        }
-                    )
-
-                cluster_info["components"] = components
-
-                return {
-                    "exists": True,
-                    "accessible": True,
-                    "message": f"Kind cluster '{cluster_name}' is running and accessible",
-                    "cluster_name": cluster_name,
-                    "context_name": context_name,
-                    "cluster_info": cluster_info,
-                    "suggestion": f"You can use this cluster for testing. Update your vars/user_vars.yml with the cluster details.",
-                }
-            else:
-                return {
-                    "exists": True,
-                    "accessible": False,
-                    "message": f"Kind cluster '{cluster_name}' exists but is not accessible",
-                    "suggestion": f"The cluster may be stopped. Try: kind delete cluster --name {cluster_name} && kind create cluster --name {cluster_name}",
-                    "cluster_name": cluster_name,
-                    "error_details": kubectl_test.stderr,
-                }
-
-        except subprocess.TimeoutExpired:
-            return {
-                "exists": True,
-                "accessible": False,
-                "message": f"Kind cluster '{cluster_name}' exists but connection timed out",
-                "suggestion": "The cluster may be unresponsive. Try recreating it.",
-                "cluster_name": cluster_name,
-            }
-
-    except subprocess.TimeoutExpired:
-        return {
-            "exists": False,
-            "accessible": False,
-            "message": "Kind command timed out",
-            "suggestion": "Check Kind installation and system performance",
-            "cluster_name": cluster_name,
-        }
-    except Exception as e:
-        return {
-            "exists": False,
-            "accessible": False,
-            "message": f"Error checking Kind cluster: {str(e)}",
-            "suggestion": "Check Kind installation and permissions",
-            "cluster_name": cluster_name,
-        }
-
-
-@app.get("/api/kind/list-clusters")
-async def list_kind_clusters():
-    """List available Kind clusters"""
-    try:
-        # Check if Kind is installed
-        kind_check = subprocess.run(
-            ["kind", "--version"], capture_output=True, text=True, timeout=10
-        )
-
-        if kind_check.returncode != 0:
-            return {
-                "clusters": [],
-                "kind_installed": False,
-                "message": "Kind is not installed",
-                "suggestion": "Install Kind first: brew install kind (macOS) or download from https://kind.sigs.k8s.io/",
-            }
-
-        # List Kind clusters from kubeconfig contexts
-        # This works even when clusters were created on host (not in container)
-        list_result = subprocess.run(
-            ["kubectl", "config", "get-contexts", "-o", "name"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-        if list_result.returncode != 0:
-            return {
-                "clusters": [],
-                "kind_installed": True,
-                "message": "Failed to list kubeconfig contexts",
-                "suggestion": "Check kubectl installation and kubeconfig",
-            }
-
-        # Extract Kind cluster names from contexts (kind-* pattern)
-        all_contexts = [
-            line.strip() for line in list_result.stdout.strip().split("\n") if line.strip()
-        ]
-        clusters = [ctx.replace("kind-", "") for ctx in all_contexts if ctx.startswith("kind-")]
-
-        return {
-            "clusters": clusters,
-            "kind_installed": True,
-            "message": (
-                f"Found {len(clusters)} Kind cluster(s)" if clusters else "No Kind clusters found"
-            ),
-            "suggestion": (
-                "Create a cluster with: kind create cluster --name <cluster-name>"
-                if not clusters
-                else None
-            ),
-        }
-
-    except Exception as e:
-        return {
-            "clusters": [],
-            "kind_installed": False,
-            "message": f"Error listing Kind clusters: {str(e)}",
-            "suggestion": "Check Kind installation and permissions",
-        }
-
-
-@app.post("/api/kind/create-cluster")
-async def create_kind_cluster(request: Request):
-    """Create a new Kind cluster"""
-    try:
-        # Parse request body
-        body = await request.json()
-        cluster_name = body.get("cluster_name", "").strip()
-
-        if not cluster_name:
-            return {
-                "success": False,
-                "message": "Cluster name is required",
-                "suggestion": "Provide a valid cluster name",
-            }
-
-        # Validate cluster name (Kubernetes naming conventions)
-        import re
-
-        name_pattern = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
-        if not name_pattern.match(cluster_name):
-            return {
-                "success": False,
-                "message": "Invalid cluster name format",
-                "suggestion": "Use lowercase letters, numbers, and hyphens only. Must start and end with alphanumeric character.",
-            }
-
-        # Check if Kind is installed
-        kind_check = subprocess.run(
-            ["kind", "--version"], capture_output=True, text=True, timeout=10
-        )
-
-        if kind_check.returncode != 0:
-            return {
-                "success": False,
-                "message": "Kind is not installed",
-                "suggestion": "Install Kind first: brew install kind (macOS) or download from https://kind.sigs.k8s.io/",
-            }
-
-        # Check if cluster already exists
-        list_result = subprocess.run(
-            ["kind", "get", "clusters"], capture_output=True, text=True, timeout=10
-        )
-
-        if list_result.returncode == 0:
-            existing_clusters = [
-                line.strip() for line in list_result.stdout.strip().split("\n") if line.strip()
-            ]
-            if cluster_name in existing_clusters:
-                return {
-                    "success": False,
-                    "message": f"Cluster '{cluster_name}' already exists",
-                    "suggestion": "Choose a different name or delete the existing cluster",
-                }
-
-        # Create the cluster
-        create_result = subprocess.run(
-            ["kind", "create", "cluster", "--name", cluster_name],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minutes timeout for cluster creation
-        )
-
-        if create_result.returncode != 0:
-            return {
-                "success": False,
-                "message": f"Failed to create cluster: {create_result.stderr}",
-                "suggestion": "Check Docker is running and you have sufficient resources",
-            }
-
-        # Verify the cluster was created and is accessible
-        kubectl_test = subprocess.run(
-            [
-                "kubectl",
-                "cluster-info",
-                "--context",
-                f"kind-{cluster_name}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-
-        if kubectl_test.returncode == 0:
-            return {
-                "success": True,
-                "message": f"Cluster '{cluster_name}' created successfully",
-                "cluster_name": cluster_name,
-                "context_name": f"kind-{cluster_name}",
-                "output": create_result.stdout,
-            }
-        else:
-            return {
-                "success": True,
-                "message": f"Cluster '{cluster_name}' created but verification failed",
-                "cluster_name": cluster_name,
-                "warning": "Cluster may need a moment to initialize",
-            }
-
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "message": "Cluster creation timed out",
-            "suggestion": "This may take a while. Check 'kind get clusters' to see if it completed.",
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error creating Kind cluster: {str(e)}",
-            "suggestion": "Check Kind installation and Docker daemon status",
-        }
-
-
-@app.post("/api/kind/create-ocm-secret")
-async def create_ocm_secret(request: Request):
-    """Create OCM client secret by running the create-ocmclient-secret.sh script"""
-    try:
-        # Parse request body
-        body = await request.json()
-        cluster_name = body.get("cluster_name", "").strip()
-
-        if not cluster_name:
-            return {
-                "success": False,
-                "message": "Cluster name is required",
-            }
-
-        # Script path - look in project root or home directory
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        script_paths = [
-            os.path.join(project_root, "scripts", "create-ocmclient-secret.sh"),
-            os.path.expanduser("~/create-ocmclient-secret.sh"),
-        ]
-
-        script_path = None
-        for path in script_paths:
-            if os.path.exists(path):
-                script_path = path
-                break
-
-        if not script_path:
-            return {
-                "success": False,
-                "message": f"Script not found. Looked in: {', '.join(script_paths)}",
-                "suggestion": "Please create the script at one of the expected locations",
-            }
-
-        # Set the kubectl context for the script
-        context_name = f"kind-{cluster_name}"
-
-        # Run the script with the appropriate context
-        # First, ensure the namespace exists
-        ns_create = subprocess.run(
-            ["kubectl", "create", "namespace", "ns-rosa-hcp", "--context", context_name],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        # Ignore error if namespace already exists
-
-        # Run the script
-        result = subprocess.run(
-            ["bash", script_path],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            env={
-                **os.environ,
-                "KUBECONFIG": os.environ.get("KUBECONFIG", os.path.expanduser("~/.kube/config")),
-            },
-        )
-
-        if result.returncode == 0:
-            return {
-                "success": True,
-                "message": "OCM client secret created successfully",
-                "output": result.stdout,
-            }
-        else:
-            return {
-                "success": False,
-                "message": f"Failed to create secret: {result.stderr}",
-                "output": result.stdout,
-            }
-
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "message": "Script execution timed out",
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error creating OCM secret: {str(e)}",
-        }
-
-
-@app.post("/api/kind/execute-command")
-async def execute_kind_command(request: Request):
-    """Execute a kubectl command in the context of a Kind cluster"""
-    try:
-        # Parse request body
-        body = await request.json()
-        cluster_name = body.get("cluster_name", "").strip()
-        command = body.get("command", "").strip()
-
-        if not cluster_name:
-            return {
-                "success": False,
-                "error": "Cluster name is required",
-                "output": "",
-            }
-
-        if not command:
-            return {
-                "success": False,
-                "error": "Command is required",
-                "output": "",
-            }
-
-        # Security check: Only block truly dangerous file system and system commands
-        # Allow kubectl/oc/rosa commands and aliases (which will be resolved by shell)
-
-        # Only block destructive file system operations and system commands
-        # Note: We allow 'oc delete' and 'kubectl delete' for Kubernetes resources
-        dangerous_patterns = [
-            r"\brm\s+-rf\s+/",  # rm -rf / or similar
-            r"\bmkfs\b",  # format filesystem
-            r"\bdd\b.*of=/dev",  # dd to device
-            r"\bshutdown\b",
-            r"\breboot\b",
-            r"\bkillall\b",
-            r":\(\)",  # fork bomb
-        ]
-
-        import re
-
-        for pattern in dangerous_patterns:
-            if re.search(pattern, command, re.IGNORECASE):
-                return {
-                    "success": False,
-                    "error": "This command is not allowed for security reasons",
-                    "output": "",
-                }
-
-        # Get kubeconfig for the Kind cluster
-        kubeconfig_result = subprocess.run(
-            ["kind", "get", "kubeconfig", "--name", cluster_name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-        if kubeconfig_result.returncode != 0:
-            return {
-                "success": False,
-                "error": f"Failed to get kubeconfig: {kubeconfig_result.stderr}",
-                "output": "",
-            }
-
-        # Write kubeconfig to a temporary file
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".kubeconfig") as f:
-            f.write(kubeconfig_result.stdout)
-            temp_kubeconfig = f.name
-
-        try:
-            # Use bash login shell with alias expansion
-            user_shell = os.environ.get("SHELL", "/bin/bash")
-
-            # Build a command that sources profile and runs the user command
-            # Redirect stderr from sourcing to suppress "Restored session" messages
-            wrapper_command = f"""
-                # Source profile files silently
-                [ -f ~/.profile ] && source ~/.profile 2>/dev/null
-                [ -f ~/.bashrc ] && source ~/.bashrc 2>/dev/null
-                [ -f ~/.bash_profile ] && source ~/.bash_profile 2>/dev/null
-                # Enable alias expansion
-                shopt -s expand_aliases 2>/dev/null || true
-                # Run the actual command
-                {command}
-            """
-
-            result = subprocess.run(
-                [user_shell, "-c", wrapper_command],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                env={**os.environ, "KUBECONFIG": temp_kubeconfig},
-            )
-
-            return {
-                "success": result.returncode == 0,
-                "output": result.stdout if result.stdout else result.stderr,
-                "exit_code": result.returncode,
-            }
-
-        finally:
-            # Clean up temporary kubeconfig
-            if os.path.exists(temp_kubeconfig):
-                os.unlink(temp_kubeconfig)
-
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "error": "Command execution timed out (60s limit)",
-            "output": "",
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"Error executing command: {str(e)}",
-            "output": "",
-        }
-
-
-@app.post("/api/kind/get-active-resources")
-async def get_active_resources(request: Request):
-    """Get active CAPI/ROSA resources from the Kind cluster"""
-    try:
-        body = await request.json()
-        cluster_name = body.get("cluster_name", "").strip()
-        namespace = body.get("namespace", "ns-rosa-hcp").strip()
-
-        if not cluster_name:
-            return {"success": False, "message": "Cluster name is required", "resources": []}
-
-        context_name = f"kind-{cluster_name}"
-        resources = []
-
-        # Helper function to calculate age from creation timestamp
-        def calculate_age(creation_timestamp):
-            from datetime import datetime, timezone
-
-            try:
-                # Parse the Kubernetes timestamp
-                created = datetime.fromisoformat(creation_timestamp.replace("Z", "+00:00"))
-                now = datetime.now(timezone.utc)
-                delta = now - created
-
-                # Calculate human-readable duration
-                days = delta.days
-                hours, remainder = divmod(delta.seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-
-                if days > 0:
-                    return f"{days}d{hours}h"
-                elif hours > 0:
-                    return f"{hours}h{minutes}m"
-                elif minutes > 0:
-                    return f"{minutes}m{seconds}s"
-                else:
-                    return f"{seconds}s"
-            except Exception:
-                return "unknown"
-
-        # Fetch CAPI Clusters
-        try:
-            result = subprocess.run(
-                [
-                    "kubectl",
-                    "get",
-                    "clusters.cluster.x-k8s.io",
-                    "-n",
-                    namespace,
-                    "--context",
-                    context_name,
-                    "-o",
-                    "json",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                import json as json_module
-
-                data = json_module.loads(result.stdout)
-                for item in data.get("items", []):
-                    metadata = item.get("metadata", {})
-                    spec = item.get("spec", {})
-                    status = item.get("status", {})
-                    resources.append(
-                        {
-                            "type": "CAPI Clusters",
-                            "name": metadata.get("name", "unknown"),
-                            "namespace": namespace,
-                            "version": spec.get("topology", {}).get("version", "v1.5.3"),
-                            "status": (
-                                "Ready"
-                                if status.get("phase") == "Provisioned"
-                                else status.get("phase", "Active")
-                            ),
-                            "age": calculate_age(metadata.get("creationTimestamp", "")),
-                        }
-                    )
-        except Exception:
-            pass
-
-        # Fetch ROSACluster
-        try:
-            result = subprocess.run(
-                [
-                    "kubectl",
-                    "get",
-                    "rosacluster",
-                    "-n",
-                    namespace,
-                    "--context",
-                    context_name,
-                    "-o",
-                    "json",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                import json as json_module
-
-                data = json_module.loads(result.stdout)
-                for item in data.get("items", []):
-                    metadata = item.get("metadata", {})
-                    spec = item.get("spec", {})
-                    status = item.get("status", {})
-
-                    # Check for ready status - could be in status.ready field or in conditions
-                    is_ready = False
-
-                    # First check if there's a direct ready field
-                    if status.get("ready") == True or status.get("ready") == "true":
-                        is_ready = True
-                    else:
-                        # Check conditions for various ready condition types
-                        conditions = status.get("conditions", [])
-                        for condition in conditions:
-                            condition_type = condition.get("type", "")
-                            # Check for various possible ready condition types
-                            if condition.get("status") == "True" and (
-                                condition_type == "Ready"
-                                or condition_type == "ROSAClusterReady"
-                                or condition_type == "RosaClusterReady"
-                            ):
-                                is_ready = True
-                                break
-
-                    resources.append(
-                        {
-                            "type": "ROSACluster",
-                            "name": metadata.get("name", "unknown"),
-                            "namespace": namespace,
-                            "version": spec.get("version", "v4.20"),
-                            "status": "Ready" if is_ready else "Provisioning",
-                            "age": calculate_age(metadata.get("creationTimestamp", "")),
-                        }
-                    )
-        except Exception:
-            pass
-
-        # Fetch RosaControlPlane
-        try:
-            result = subprocess.run(
-                [
-                    "kubectl",
-                    "get",
-                    "rosacontrolplane",
-                    "-n",
-                    namespace,
-                    "--context",
-                    context_name,
-                    "-o",
-                    "json",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                import json as json_module
-
-                data = json_module.loads(result.stdout)
-                for item in data.get("items", []):
-                    metadata = item.get("metadata", {})
-                    spec = item.get("spec", {})
-                    status = item.get("status", {})
-
-                    # Check for ready status - could be in status.ready field or in conditions
-                    is_ready = False
-
-                    # First check if there's a direct ready field
-                    if status.get("ready") == True or status.get("ready") == "true":
-                        is_ready = True
-                    else:
-                        # Check conditions for various ready condition types
-                        conditions = status.get("conditions", [])
-                        for condition in conditions:
-                            condition_type = condition.get("type", "")
-                            # Check for various possible ready condition types
-                            if condition.get("status") == "True" and (
-                                condition_type == "Ready"
-                                or condition_type == "ROSAControlPlaneReady"
-                                or condition_type == "RosaControlPlaneReady"
-                            ):
-                                is_ready = True
-                                break
-
-                    resources.append(
-                        {
-                            "type": "RosaControlPlane",
-                            "name": metadata.get("name", "unknown"),
-                            "namespace": metadata.get("namespace", namespace),
-                            "version": spec.get("version", "v4.20"),
-                            "status": "Ready" if is_ready else "Provisioning",
-                            "age": calculate_age(metadata.get("creationTimestamp", "")),
-                        }
-                    )
-        except Exception:
-            pass
-
-        # Fetch RosaNetwork
-        try:
-            result = subprocess.run(
-                [
-                    "kubectl",
-                    "get",
-                    "rosanetwork",
-                    "-n",
-                    namespace,
-                    "--context",
-                    context_name,
-                    "-o",
-                    "json",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                import json as json_module
-
-                data = json_module.loads(result.stdout)
-                for item in data.get("items", []):
-                    metadata = item.get("metadata", {})
-                    spec = item.get("spec", {})
-                    status = item.get("status", {})
-
-                    # Check conditions for RosaNetwork ready state
-                    # Could be ROSANetworkReady, RosaNetworkReady, or just Ready
-                    is_ready = False
-                    conditions = status.get("conditions", [])
-                    for condition in conditions:
-                        condition_type = condition.get("type", "")
-                        # Check for various possible ready condition types
-                        if condition.get("status") == "True" and (
-                            condition_type == "ROSANetworkReady"
-                            or condition_type == "RosaNetworkReady"
-                            or condition_type == "Ready"
-                        ):
-                            is_ready = True
-                            break
-
-                    resources.append(
-                        {
-                            "type": "RosaNetwork",
-                            "name": metadata.get("name", "unknown"),
-                            "namespace": metadata.get("namespace", namespace),
-                            "version": spec.get("version", "v4.20"),
-                            "status": "Ready" if is_ready else "Configuring",
-                            "age": calculate_age(metadata.get("creationTimestamp", "")),
-                        }
-                    )
-        except Exception:
-            pass
-
-        # Fetch RosaRoleConfig
-        try:
-            result = subprocess.run(
-                [
-                    "kubectl",
-                    "get",
-                    "rosaroleconfig",
-                    "-n",
-                    namespace,
-                    "--context",
-                    context_name,
-                    "-o",
-                    "json",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                import json as json_module
-
-                data = json_module.loads(result.stdout)
-                for item in data.get("items", []):
-                    metadata = item.get("metadata", {})
-                    spec = item.get("spec", {})
-                    status = item.get("status", {})
-                    role_config_name = metadata.get("name", "unknown")
-
-                    # Check conditions for RosaRoleConfig ready state
-                    # Could be ROSARoleConfigReady, RosaRoleConfigReady, or just Ready
-                    is_ready = False
-                    conditions = status.get("conditions", [])
-                    for condition in conditions:
-                        condition_type = condition.get("type", "")
-                        # Check for various possible ready condition types
-                        if condition.get("status") == "True" and (
-                            condition_type == "ROSARoleConfigReady"
-                            or condition_type == "RosaRoleConfigReady"
-                            or condition_type == "Ready"
-                        ):
-                            is_ready = True
-                            break
-
-                    # Fetch YAML for this RosaRoleConfig
-                    yaml_result = subprocess.run(
-                        [
-                            "kubectl",
-                            "get",
-                            "rosaroleconfig",
-                            role_config_name,
-                            "-n",
-                            namespace,
-                            "--context",
-                            cluster_name,
-                            "-o",
-                            "yaml",
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    yaml_content = yaml_result.stdout if yaml_result.returncode == 0 else ""
-
-                    resources.append(
-                        {
-                            "type": "RosaRoleConfig",
-                            "name": role_config_name,
-                            "namespace": metadata.get("namespace", namespace),
-                            "version": spec.get("version", "v4.20"),
-                            "status": "Ready" if is_ready else "Configuring",
-                            "age": calculate_age(metadata.get("creationTimestamp", "")),
-                            "yaml": yaml_content,
-                        }
-                    )
-        except Exception:
-            pass
-
-        return {
-            "success": True,
-            "resources": resources,
-            "message": f"Found {len(resources)} active resource(s)",
-        }
-
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error fetching active resources: {str(e)}",
-            "resources": [],
-        }
-
-
-@app.post("/api/kind/get-resource-detail")
-async def get_resource_detail(request: Request):
-    """Get full YAML details of a specific resource from the Kind cluster"""
-    try:
-        body = await request.json()
-        cluster_name = body.get("cluster_name", "").strip()
-        resource_type = body.get("resource_type", "").strip()
-        resource_name = body.get("resource_name", "").strip()
-        namespace = body.get("namespace", "ns-rosa-hcp").strip()
-
-        if not cluster_name or not resource_type or not resource_name:
-            return {
-                "success": False,
-                "message": "cluster_name, resource_type, and resource_name are required",
-                "data": None,
-            }
-
-        context_name = f"kind-{cluster_name}"
-
-        # Map friendly resource types to kubectl resource types
-        resource_type_map = {
-            "CAPI Clusters": "clusters.cluster.x-k8s.io",
-            "ROSACluster": "rosacluster",
-            "RosaControlPlane": "rosacontrolplane",
-            "RosaNetwork": "rosanetwork",
-            "RosaRoleConfig": "rosaroleconfig",
-        }
-
-        kubectl_resource_type = resource_type_map.get(resource_type, resource_type.lower())
-
-        # Fetch the resource details in YAML format
-        try:
-            result = subprocess.run(
-                [
-                    "kubectl",
-                    "get",
-                    kubectl_resource_type,
-                    resource_name,
-                    "-n",
-                    namespace,
-                    "--context",
-                    context_name,
-                    "-o",
-                    "yaml",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-
-            if result.returncode == 0:
-                return {
-                    "success": True,
-                    "data": result.stdout,
-                    "resource_type": resource_type,
-                    "resource_name": resource_name,
-                    "namespace": namespace,
-                    "message": f"Successfully fetched {resource_type} '{resource_name}'",
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": f"Failed to fetch resource: {result.stderr}",
-                    "data": None,
-                }
-
-        except subprocess.TimeoutExpired:
-            return {"success": False, "message": "Request timed out", "data": None}
-
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error fetching resource detail: {str(e)}",
-            "data": None,
-        }
-
-
 @app.get("/api/ocp/connection-status")
 async def get_ocp_connection_status():
     """Test OpenShift Hub connection using OCP_HUB variables from user_vars.yml"""
@@ -5265,6 +4248,71 @@ async def get_capi_cli_versions():
     return {"tools": tools, "timestamp": datetime.now().isoformat()}
 
 
+@app.get("/api/capi/cluster-components")
+async def get_capi_cluster_components(cluster_name: str = None):
+    """Get CAPI/CAPA/cert-manager component versions and images from a cluster"""
+    if not cluster_name:
+        # Try to get from credentials
+        try:
+            cred_path = os.path.join(os.path.dirname(__file__), "credentials.json")
+            if os.path.exists(cred_path):
+                with open(cred_path) as f:
+                    creds = json.load(f)
+                    cluster_name = creds.get("minikubeCluster") or creds.get("clusterName")
+        except Exception:
+            pass
+
+    if not cluster_name:
+        return {"components": [], "message": "No cluster specified"}
+
+    components = []
+    deployments = [
+        {"name": "CAPI", "deploy": "capi-controller-manager", "namespace": "capi-system"},
+        {"name": "CAPA", "deploy": "capa-controller-manager", "namespace": "capa-system"},
+        {"name": "cert-manager", "deploy": "cert-manager", "namespace": "cert-manager"},
+        {"name": "cert-manager-cainjector", "deploy": "cert-manager-cainjector", "namespace": "cert-manager"},
+        {"name": "cert-manager-webhook", "deploy": "cert-manager-webhook", "namespace": "cert-manager"},
+    ]
+
+    for d in deployments:
+        try:
+            result = subprocess.run(
+                ["kubectl", "get", "deployment", d["deploy"], "-n", d["namespace"],
+                 "--context", cluster_name, "-o",
+                 "jsonpath={.spec.template.spec.containers[*].image}"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                image = result.stdout.strip()
+                # Extract version from image tag
+                version = image.split(":")[-1] if ":" in image else "unknown"
+                components.append({
+                    "name": d["name"],
+                    "version": version,
+                    "image": image,
+                    "namespace": d["namespace"],
+                    "running": True,
+                })
+            else:
+                components.append({
+                    "name": d["name"],
+                    "version": "not found",
+                    "image": "",
+                    "namespace": d["namespace"],
+                    "running": False,
+                })
+        except Exception:
+            components.append({
+                "name": d["name"],
+                "version": "error",
+                "image": "",
+                "namespace": d["namespace"],
+                "running": False,
+            })
+
+    return {"components": components, "cluster_name": cluster_name, "timestamp": datetime.now().isoformat()}
+
+
 @app.get("/api/minikube/list-clusters")
 async def list_minikube_clusters():
     """List available Minikube profiles (cached for 30 seconds)"""
@@ -7730,6 +6778,9 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
 
                 # Split multi-document YAML by ---
                 import yaml
+                import time
+                import json
+                import asyncio
 
                 yaml_documents = list(yaml.safe_load_all(yaml_content))
 
@@ -7759,6 +6810,17 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
 
                 # For Minikube, use Ansible playbook for async execution
                 if cluster_context:
+                    # Filter out ManagedCluster resources (MCE/ACM-specific, not available on minikube)
+                    mce_kinds = {"ManagedCluster"}
+                    filtered_docs = [doc for doc in yaml_documents if doc and doc.get("kind") not in mce_kinds]
+                    skipped = len(yaml_documents) - len(filtered_docs)
+                    if skipped > 0:
+                        jobs[job_id]["logs"].append(f"⏭️  Skipped {skipped} MCE-specific resource(s) (ManagedCluster) - not applicable to Minikube")
+                        # Re-save the filtered YAML
+                        filtered_yaml = "\n---\n".join(yaml.dump(doc, default_flow_style=False) for doc in filtered_docs)
+                        with open(saved_yaml_path, "w") as f:
+                            f.write(filtered_yaml)
+
                     jobs[job_id]["logs"].append(f"\n🎯 Provisioning to Minikube cluster: {cluster_context} via Ansible playbook")
                     jobs[job_id]["progress"] = 30
                     jobs[job_id]["message"] = "Running Ansible playbook for Minikube provisioning"
@@ -7770,7 +6832,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                         "cluster_name": cluster_name,
                         "minikube_context": cluster_context,
                         "yaml_file": saved_yaml_path,
-                        "namespace": "ns-rosa-hcp"
+                        "target_namespace": "ns-rosa-hcp"
                     }
 
                     jobs[job_id]["logs"].append(f"\n📋 Playbook: {playbook_path}")
@@ -7783,7 +6845,8 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                         "-e", json.dumps(extra_vars)
                     ]
 
-                    result = subprocess.run(
+                    result = await asyncio.to_thread(
+                        subprocess.run,
                         ansible_cmd,
                         cwd=project_root,
                         capture_output=True,
@@ -7795,27 +6858,11 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                     if result.stderr:
                         jobs[job_id]["logs"].append(f"\n⚠️ Warnings:\n{result.stderr}")
 
-                    if result.returncode == 0:
-                        jobs[job_id]["status"] = "completed"
-                        jobs[job_id]["progress"] = 100
-                        jobs[job_id]["message"] = "✅ Provisioning initiated successfully"
-                        jobs[job_id]["logs"].append(f"\n✅ Cluster provisioning started! Monitor progress in the ROSA HCP Clusters section.")
-
-                        # Send "completed" notification
-                        send_cluster_notifications(
-                            cluster_name=cluster_name,
-                            region=region,
-                            version=version,
-                            job_id=job_id,
-                            status="completed",
-                            operation_type="provision"
-                        )
-                    else:
+                    if result.returncode != 0:
                         jobs[job_id]["status"] = "failed"
                         jobs[job_id]["message"] = f"❌ Playbook failed with exit code {result.returncode}"
                         jobs[job_id]["error"] = result.stderr or result.stdout
 
-                        # Send "failed" notification
                         send_cluster_notifications(
                             cluster_name=cluster_name,
                             region=region,
@@ -7825,8 +6872,120 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                             error=result.stderr or result.stdout,
                             operation_type="provision"
                         )
+                        return
 
-                    return  # Exit early for Minikube - no monitoring loop needed
+                    # Resources applied successfully - now poll until cluster is ready
+                    jobs[job_id]["progress"] = 40
+                    jobs[job_id]["message"] = "✅ Resources applied - monitoring cluster provisioning..."
+                    jobs[job_id]["logs"].append(f"\n✅ Resources applied successfully! Now monitoring cluster status...")
+                    jobs[job_id]["logs"].append(f"⏳ Polling RosaControlPlane status (this typically takes 15-20 minutes)...\n")
+
+                    max_wait_time = 3600  # 60 minutes
+                    poll_interval = 15  # Check every 15 seconds
+                    start_time = time.time()
+                    last_log_time = 0
+
+                    while (time.time() - start_time) < max_wait_time:
+                        try:
+                            # Check RosaControlPlane status
+                            check_cmd = [
+                                "kubectl", "--context", cluster_context,
+                                "get", "rosacontrolplane", cluster_name,
+                                "-n", "ns-rosa-hcp", "-o", "json"
+                            ]
+                            check_result = await asyncio.to_thread(
+                                subprocess.run,
+                                check_cmd, capture_output=True, text=True, timeout=30
+                            )
+
+                            if check_result.returncode == 0:
+                                rcp_data = json.loads(check_result.stdout)
+                                status_obj = rcp_data.get("status", {})
+                                ready = status_obj.get("ready", False)
+                                conditions = status_obj.get("conditions", [])
+
+                                # Find the ROSAControlPlaneReady condition
+                                rcp_reason = "Unknown"
+                                rcp_message = ""
+                                for cond in conditions:
+                                    if cond.get("type") == "ROSAControlPlaneReady":
+                                        rcp_reason = cond.get("reason", "Unknown")
+                                        rcp_message = cond.get("message", "")
+                                        break
+
+                                elapsed = time.time() - start_time
+                                elapsed_min = int(elapsed // 60)
+                                elapsed_sec = int(elapsed % 60)
+
+                                if ready:
+                                    jobs[job_id]["status"] = "completed"
+                                    jobs[job_id]["progress"] = 100
+                                    jobs[job_id]["message"] = f"✅ Cluster {cluster_name} provisioned successfully!"
+                                    jobs[job_id]["logs"].append(f"\n✅ Cluster {cluster_name} is READY! ({elapsed_min}m {elapsed_sec}s)")
+
+                                    send_cluster_notifications(
+                                        cluster_name=cluster_name,
+                                        region=region,
+                                        version=version,
+                                        job_id=job_id,
+                                        status="completed",
+                                        operation_type="provision"
+                                    )
+                                    return
+
+                                elif rcp_reason in ["ReconciliationError", "ProvisioningFailed", "Failed"]:
+                                    jobs[job_id]["status"] = "failed"
+                                    jobs[job_id]["progress"] = 100
+                                    jobs[job_id]["message"] = f"❌ Cluster {cluster_name} provisioning failed: {rcp_reason}"
+                                    jobs[job_id]["logs"].append(f"\n❌ Provisioning failed: {rcp_reason}")
+                                    if rcp_message:
+                                        jobs[job_id]["logs"].append(f"   {rcp_message}")
+
+                                    send_cluster_notifications(
+                                        cluster_name=cluster_name,
+                                        region=region,
+                                        version=version,
+                                        job_id=job_id,
+                                        status="failed",
+                                        error=f"{rcp_reason}: {rcp_message}",
+                                        operation_type="provision"
+                                    )
+                                    return
+
+                                else:
+                                    # Still provisioning - update progress (40-90%)
+                                    progress = min(90, 40 + int((elapsed / max_wait_time) * 50))
+                                    jobs[job_id]["progress"] = progress
+                                    jobs[job_id]["message"] = f"⏳ Provisioning... ({rcp_reason}) - {elapsed_min}m {elapsed_sec}s"
+
+                                    # Log every 30 seconds
+                                    if time.time() - last_log_time >= 30:
+                                        jobs[job_id]["logs"].append(f"   [{elapsed_min}m {elapsed_sec}s] Status: {rcp_reason}")
+                                        if rcp_message:
+                                            jobs[job_id]["logs"].append(f"             {rcp_message}")
+                                        last_log_time = time.time()
+
+                        except Exception as poll_error:
+                            jobs[job_id]["logs"].append(f"⚠️ Poll error: {str(poll_error)}")
+
+                        await asyncio.sleep(poll_interval)
+
+                    # Timeout
+                    jobs[job_id]["status"] = "failed"
+                    jobs[job_id]["progress"] = 100
+                    jobs[job_id]["message"] = f"❌ Provisioning timed out after 60 minutes"
+                    jobs[job_id]["logs"].append(f"\n❌ Timeout: Cluster did not reach ready state within 60 minutes")
+
+                    send_cluster_notifications(
+                        cluster_name=cluster_name,
+                        region=region,
+                        version=version,
+                        job_id=job_id,
+                        status="failed",
+                        error="Provisioning timed out after 60 minutes",
+                        operation_type="provision"
+                    )
+                    return
 
                     apply_cmd = [
                         "kubectl",
@@ -7856,9 +7015,6 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
 
                         # Wait for cluster to be ready (for Minikube/ROSA provisioning)
                         jobs[job_id]["logs"].append(f"\n⏳ Monitoring cluster provisioning status...")
-
-                        import time
-                        import json
 
                         max_wait_time = 3600  # 60 minutes max wait
                         poll_interval = 10  # Check every 10 seconds
@@ -7890,7 +7046,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
 
                                     if clusters_data.get("items"):
                                         cluster = clusters_data["items"][0]  # Get first cluster
-                                        cluster_name = cluster["metadata"]["name"]
+                                        found_cluster_name = cluster["metadata"]["name"]
                                         phase = cluster.get("status", {}).get("phase", "Unknown")
 
                                         # Check RosaControlPlane ready status
@@ -7900,7 +7056,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                             cluster_context,
                                             "get",
                                             "rosacontrolplane",
-                                            cluster_name,
+                                            found_cluster_name,
                                             "-n", "ns-rosa-hcp",
                                             "-o", "jsonpath={.status.ready}"
                                         ]
@@ -7918,23 +7074,23 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                         if phase == "Provisioned" and rcp_ready:
                                             jobs[job_id]["status"] = "completed"
                                             jobs[job_id]["progress"] = 100
-                                            jobs[job_id]["message"] = f"✅ Cluster {cluster_name} is ready!"
-                                            jobs[job_id]["logs"].append(f"\n✅ Cluster {cluster_name} provisioned successfully!")
+                                            jobs[job_id]["message"] = f"✅ Cluster {found_cluster_name} is ready!"
+                                            jobs[job_id]["logs"].append(f"\n✅ Cluster {found_cluster_name} provisioned successfully!")
                                             jobs[job_id]["logs"].append(f"   Phase: {phase}")
                                             jobs[job_id]["logs"].append(f"   RosaControlPlane Ready: {rcp_ready}")
                                             return
                                         elif phase == "Failed":
                                             jobs[job_id]["status"] = "failed"
                                             jobs[job_id]["progress"] = 100
-                                            jobs[job_id]["message"] = f"❌ Cluster {cluster_name} provisioning failed"
-                                            jobs[job_id]["logs"].append(f"\n❌ Cluster {cluster_name} entered Failed state")
+                                            jobs[job_id]["message"] = f"❌ Cluster {found_cluster_name} provisioning failed"
+                                            jobs[job_id]["logs"].append(f"\n❌ Cluster {found_cluster_name} entered Failed state")
                                             return
                                         else:
                                             # Update progress incrementally (50-90%)
                                             elapsed = time.time() - start_time
                                             progress = min(90, 50 + int((elapsed / max_wait_time) * 40))
                                             jobs[job_id]["progress"] = progress
-                                            jobs[job_id]["message"] = f"⏳ Cluster {cluster_name} provisioning... (Phase: {phase}, RCP Ready: {rcp_ready})"
+                                            jobs[job_id]["message"] = f"⏳ Cluster {found_cluster_name} provisioning... (Phase: {phase}, RCP Ready: {rcp_ready})"
 
                                             # Log status update every 60 seconds
                                             if int(elapsed) % 60 == 0:
@@ -7943,7 +7099,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                             except Exception as status_error:
                                 jobs[job_id]["logs"].append(f"⚠️  Error checking cluster status: {str(status_error)}")
 
-                            time.sleep(poll_interval)
+                            await asyncio.sleep(poll_interval)
 
                         # Timeout reached
                         jobs[job_id]["status"] = "failed"
@@ -8110,8 +7266,10 @@ sed '/creationTimestamp:/d' | \
                 jobs[job_id]["completed_at"] = datetime.now()
                 jobs[job_id]["return_code"] = 1
 
-        # Start background task
-        background_tasks.add_task(apply_yaml_background)
+        # Start background task using asyncio.create_task so blocking calls
+        # don't freeze the event loop
+        import asyncio
+        asyncio.create_task(apply_yaml_background())
 
         return {
             "job_id": job_id,
