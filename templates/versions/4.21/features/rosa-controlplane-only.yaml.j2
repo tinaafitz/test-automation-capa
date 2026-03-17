@@ -78,7 +78,11 @@ spec:
   fips: "Enabled"
   {% endif -%}
   region: {{ aws_region }}
+{% if channel is defined and channel %}
+  channel: {{ channel }}
+{% else %}
   channelGroup: {{ channel_group | default('stable') }}
+{% endif %}
 
   defaultMachinePoolSpec:
     instanceType: {{ machine_pool.instance_type | default('m5.xlarge') }}
