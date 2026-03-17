@@ -61,7 +61,9 @@
 - name: Apply updated CRDs from CAPA source
   when: lookup('env', 'CUSTOM_CAPA_IMAGE') == 'true' and lookup('env', 'CUSTOM_CAPA_SOURCE_PATH') != ''
   shell: |
-    kubectl apply -k {{ lookup('env', 'CUSTOM_CAPA_SOURCE_PATH') }}/config/default/
+    for crd in {{ lookup('env', 'CUSTOM_CAPA_SOURCE_PATH') }}/config/crd/bases/*.yaml; do
+      kubectl apply -f "$crd" 2>&1
+    done
   register: apply_crds
 
 - name: Display CRD application result
@@ -69,7 +71,47 @@
   debug:
     msg:
       - "✅ Updated CRDs applied from CAPA source"
-      - "Source: {{ lookup('env', 'CUSTOM_CAPA_SOURCE_PATH') }}/config/default/"
+      - "Source: {{ lookup('env', 'CUSTOM_CAPA_SOURCE_PATH') }}/config/crd/bases/"
+      - "{{ apply_crds.stdout_lines | default([]) }}"
+
+- name: Create RBAC for NodeadmConfig resources (required by newer CAPA builds)
+  when: lookup('env', 'CUSTOM_CAPA_IMAGE') == 'true'
+  shell: |
+    kubectl apply -f - <<'EOF'
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: nodeadmconfig-access
+    rules:
+    - apiGroups: ["bootstrap.cluster.x-k8s.io"]
+      resources: ["nodeadmconfigs", "nodeadmconfigs/status", "nodeadmconfigtemplates", "nodeadmconfigtemplates/status"]
+      verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    EOF
+  register: nodeadm_role
+
+- name: Bind NodeadmConfig RBAC to CAPA controller service account
+  when: lookup('env', 'CUSTOM_CAPA_IMAGE') == 'true'
+  shell: |
+    kubectl apply -f - <<'EOF'
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: nodeadmconfig-access-binding
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: nodeadmconfig-access
+    subjects:
+    - kind: ServiceAccount
+      name: capa-controller-manager
+      namespace: capa-system
+    EOF
+  register: nodeadm_binding
+
+- name: Display NodeadmConfig RBAC result
+  when: lookup('env', 'CUSTOM_CAPA_IMAGE') == 'true'
+  debug:
+    msg: "✅ NodeadmConfig RBAC configured for CAPA controller"
 
 - name: Patch CAPA controller deployment with custom image
   when: lookup('env', 'CUSTOM_CAPA_IMAGE') == 'true'
