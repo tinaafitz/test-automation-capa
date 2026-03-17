@@ -7730,6 +7730,9 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
 
                 # Split multi-document YAML by ---
                 import yaml
+                import time
+                import json
+                import asyncio
 
                 yaml_documents = list(yaml.safe_load_all(yaml_content))
 
@@ -7759,6 +7762,17 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
 
                 # For Minikube, use Ansible playbook for async execution
                 if cluster_context:
+                    # Filter out ManagedCluster resources (MCE/ACM-specific, not available on minikube)
+                    mce_kinds = {"ManagedCluster"}
+                    filtered_docs = [doc for doc in yaml_documents if doc and doc.get("kind") not in mce_kinds]
+                    skipped = len(yaml_documents) - len(filtered_docs)
+                    if skipped > 0:
+                        jobs[job_id]["logs"].append(f"⏭️  Skipped {skipped} MCE-specific resource(s) (ManagedCluster) - not applicable to Minikube")
+                        # Re-save the filtered YAML
+                        filtered_yaml = "\n---\n".join(yaml.dump(doc, default_flow_style=False) for doc in filtered_docs)
+                        with open(saved_yaml_path, "w") as f:
+                            f.write(filtered_yaml)
+
                     jobs[job_id]["logs"].append(f"\n🎯 Provisioning to Minikube cluster: {cluster_context} via Ansible playbook")
                     jobs[job_id]["progress"] = 30
                     jobs[job_id]["message"] = "Running Ansible playbook for Minikube provisioning"
@@ -7770,7 +7784,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                         "cluster_name": cluster_name,
                         "minikube_context": cluster_context,
                         "yaml_file": saved_yaml_path,
-                        "namespace": "ns-rosa-hcp"
+                        "target_namespace": "ns-rosa-hcp"
                     }
 
                     jobs[job_id]["logs"].append(f"\n📋 Playbook: {playbook_path}")
@@ -7783,7 +7797,8 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                         "-e", json.dumps(extra_vars)
                     ]
 
-                    result = subprocess.run(
+                    result = await asyncio.to_thread(
+                        subprocess.run,
                         ansible_cmd,
                         cwd=project_root,
                         capture_output=True,
@@ -7795,27 +7810,11 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                     if result.stderr:
                         jobs[job_id]["logs"].append(f"\n⚠️ Warnings:\n{result.stderr}")
 
-                    if result.returncode == 0:
-                        jobs[job_id]["status"] = "completed"
-                        jobs[job_id]["progress"] = 100
-                        jobs[job_id]["message"] = "✅ Provisioning initiated successfully"
-                        jobs[job_id]["logs"].append(f"\n✅ Cluster provisioning started! Monitor progress in the ROSA HCP Clusters section.")
-
-                        # Send "completed" notification
-                        send_cluster_notifications(
-                            cluster_name=cluster_name,
-                            region=region,
-                            version=version,
-                            job_id=job_id,
-                            status="completed",
-                            operation_type="provision"
-                        )
-                    else:
+                    if result.returncode != 0:
                         jobs[job_id]["status"] = "failed"
                         jobs[job_id]["message"] = f"❌ Playbook failed with exit code {result.returncode}"
                         jobs[job_id]["error"] = result.stderr or result.stdout
 
-                        # Send "failed" notification
                         send_cluster_notifications(
                             cluster_name=cluster_name,
                             region=region,
@@ -7825,8 +7824,120 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                             error=result.stderr or result.stdout,
                             operation_type="provision"
                         )
+                        return
 
-                    return  # Exit early for Minikube - no monitoring loop needed
+                    # Resources applied successfully - now poll until cluster is ready
+                    jobs[job_id]["progress"] = 40
+                    jobs[job_id]["message"] = "✅ Resources applied - monitoring cluster provisioning..."
+                    jobs[job_id]["logs"].append(f"\n✅ Resources applied successfully! Now monitoring cluster status...")
+                    jobs[job_id]["logs"].append(f"⏳ Polling RosaControlPlane status (this typically takes 15-20 minutes)...\n")
+
+                    max_wait_time = 3600  # 60 minutes
+                    poll_interval = 15  # Check every 15 seconds
+                    start_time = time.time()
+                    last_log_time = 0
+
+                    while (time.time() - start_time) < max_wait_time:
+                        try:
+                            # Check RosaControlPlane status
+                            check_cmd = [
+                                "kubectl", "--context", cluster_context,
+                                "get", "rosacontrolplane", cluster_name,
+                                "-n", "ns-rosa-hcp", "-o", "json"
+                            ]
+                            check_result = await asyncio.to_thread(
+                                subprocess.run,
+                                check_cmd, capture_output=True, text=True, timeout=30
+                            )
+
+                            if check_result.returncode == 0:
+                                rcp_data = json.loads(check_result.stdout)
+                                status_obj = rcp_data.get("status", {})
+                                ready = status_obj.get("ready", False)
+                                conditions = status_obj.get("conditions", [])
+
+                                # Find the ROSAControlPlaneReady condition
+                                rcp_reason = "Unknown"
+                                rcp_message = ""
+                                for cond in conditions:
+                                    if cond.get("type") == "ROSAControlPlaneReady":
+                                        rcp_reason = cond.get("reason", "Unknown")
+                                        rcp_message = cond.get("message", "")
+                                        break
+
+                                elapsed = time.time() - start_time
+                                elapsed_min = int(elapsed // 60)
+                                elapsed_sec = int(elapsed % 60)
+
+                                if ready:
+                                    jobs[job_id]["status"] = "completed"
+                                    jobs[job_id]["progress"] = 100
+                                    jobs[job_id]["message"] = f"✅ Cluster {cluster_name} provisioned successfully!"
+                                    jobs[job_id]["logs"].append(f"\n✅ Cluster {cluster_name} is READY! ({elapsed_min}m {elapsed_sec}s)")
+
+                                    send_cluster_notifications(
+                                        cluster_name=cluster_name,
+                                        region=region,
+                                        version=version,
+                                        job_id=job_id,
+                                        status="completed",
+                                        operation_type="provision"
+                                    )
+                                    return
+
+                                elif rcp_reason in ["ReconciliationError", "ProvisioningFailed", "Failed"]:
+                                    jobs[job_id]["status"] = "failed"
+                                    jobs[job_id]["progress"] = 100
+                                    jobs[job_id]["message"] = f"❌ Cluster {cluster_name} provisioning failed: {rcp_reason}"
+                                    jobs[job_id]["logs"].append(f"\n❌ Provisioning failed: {rcp_reason}")
+                                    if rcp_message:
+                                        jobs[job_id]["logs"].append(f"   {rcp_message}")
+
+                                    send_cluster_notifications(
+                                        cluster_name=cluster_name,
+                                        region=region,
+                                        version=version,
+                                        job_id=job_id,
+                                        status="failed",
+                                        error=f"{rcp_reason}: {rcp_message}",
+                                        operation_type="provision"
+                                    )
+                                    return
+
+                                else:
+                                    # Still provisioning - update progress (40-90%)
+                                    progress = min(90, 40 + int((elapsed / max_wait_time) * 50))
+                                    jobs[job_id]["progress"] = progress
+                                    jobs[job_id]["message"] = f"⏳ Provisioning... ({rcp_reason}) - {elapsed_min}m {elapsed_sec}s"
+
+                                    # Log every 30 seconds
+                                    if time.time() - last_log_time >= 30:
+                                        jobs[job_id]["logs"].append(f"   [{elapsed_min}m {elapsed_sec}s] Status: {rcp_reason}")
+                                        if rcp_message:
+                                            jobs[job_id]["logs"].append(f"             {rcp_message}")
+                                        last_log_time = time.time()
+
+                        except Exception as poll_error:
+                            jobs[job_id]["logs"].append(f"⚠️ Poll error: {str(poll_error)}")
+
+                        await asyncio.sleep(poll_interval)
+
+                    # Timeout
+                    jobs[job_id]["status"] = "failed"
+                    jobs[job_id]["progress"] = 100
+                    jobs[job_id]["message"] = f"❌ Provisioning timed out after 60 minutes"
+                    jobs[job_id]["logs"].append(f"\n❌ Timeout: Cluster did not reach ready state within 60 minutes")
+
+                    send_cluster_notifications(
+                        cluster_name=cluster_name,
+                        region=region,
+                        version=version,
+                        job_id=job_id,
+                        status="failed",
+                        error="Provisioning timed out after 60 minutes",
+                        operation_type="provision"
+                    )
+                    return
 
                     apply_cmd = [
                         "kubectl",
@@ -7856,9 +7967,6 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
 
                         # Wait for cluster to be ready (for Minikube/ROSA provisioning)
                         jobs[job_id]["logs"].append(f"\n⏳ Monitoring cluster provisioning status...")
-
-                        import time
-                        import json
 
                         max_wait_time = 3600  # 60 minutes max wait
                         poll_interval = 10  # Check every 10 seconds
@@ -7890,7 +7998,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
 
                                     if clusters_data.get("items"):
                                         cluster = clusters_data["items"][0]  # Get first cluster
-                                        cluster_name = cluster["metadata"]["name"]
+                                        found_cluster_name = cluster["metadata"]["name"]
                                         phase = cluster.get("status", {}).get("phase", "Unknown")
 
                                         # Check RosaControlPlane ready status
@@ -7900,7 +8008,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                             cluster_context,
                                             "get",
                                             "rosacontrolplane",
-                                            cluster_name,
+                                            found_cluster_name,
                                             "-n", "ns-rosa-hcp",
                                             "-o", "jsonpath={.status.ready}"
                                         ]
@@ -7918,16 +8026,16 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                         if phase == "Provisioned" and rcp_ready:
                                             jobs[job_id]["status"] = "completed"
                                             jobs[job_id]["progress"] = 100
-                                            jobs[job_id]["message"] = f"✅ Cluster {cluster_name} is ready!"
-                                            jobs[job_id]["logs"].append(f"\n✅ Cluster {cluster_name} provisioned successfully!")
+                                            jobs[job_id]["message"] = f"✅ Cluster {found_cluster_name} is ready!"
+                                            jobs[job_id]["logs"].append(f"\n✅ Cluster {found_cluster_name} provisioned successfully!")
                                             jobs[job_id]["logs"].append(f"   Phase: {phase}")
                                             jobs[job_id]["logs"].append(f"   RosaControlPlane Ready: {rcp_ready}")
                                             return
                                         elif phase == "Failed":
                                             jobs[job_id]["status"] = "failed"
                                             jobs[job_id]["progress"] = 100
-                                            jobs[job_id]["message"] = f"❌ Cluster {cluster_name} provisioning failed"
-                                            jobs[job_id]["logs"].append(f"\n❌ Cluster {cluster_name} entered Failed state")
+                                            jobs[job_id]["message"] = f"❌ Cluster {found_cluster_name} provisioning failed"
+                                            jobs[job_id]["logs"].append(f"\n❌ Cluster {found_cluster_name} entered Failed state")
                                             return
                                         else:
                                             # Update progress incrementally (50-90%)
@@ -7943,7 +8051,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                             except Exception as status_error:
                                 jobs[job_id]["logs"].append(f"⚠️  Error checking cluster status: {str(status_error)}")
 
-                            time.sleep(poll_interval)
+                            await asyncio.sleep(poll_interval)
 
                         # Timeout reached
                         jobs[job_id]["status"] = "failed"
@@ -8110,8 +8218,10 @@ sed '/creationTimestamp:/d' | \
                 jobs[job_id]["completed_at"] = datetime.now()
                 jobs[job_id]["return_code"] = 1
 
-        # Start background task
-        background_tasks.add_task(apply_yaml_background)
+        # Start background task using asyncio.create_task so blocking calls
+        # don't freeze the event loop
+        import asyncio
+        asyncio.create_task(apply_yaml_background())
 
         return {
             "job_id": job_id,

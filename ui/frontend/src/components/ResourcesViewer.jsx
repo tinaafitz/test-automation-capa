@@ -12,6 +12,7 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
   const [errorMessage, setErrorMessage] = useState('');
   const [showYamlModal, setShowYamlModal] = useState(false);
   const [loadingYaml, setLoadingYaml] = useState(false);
+  const [activeClusterName, setActiveClusterName] = useState('');
 
   // Auto-fetch resources on mount
   useEffect(() => {
@@ -28,6 +29,7 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
         const credResponse = await fetch(buildApiUrl('/api/credentials'));
         const credData = await credResponse.json();
         const clusterName = credData.credentials?.minikubeCluster || credData.credentials?.clusterName || 'sat-minikube-test';
+        setActiveClusterName(clusterName);
 
         // Fetch resources from multiple namespaces in parallel with timeout
         const namespaces = ['ns-rosa-hcp', 'capa-system', 'default'];
@@ -103,6 +105,7 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
     const kubectlType = typeMap[rawType] || rawType.toLowerCase();
 
     const requestPayload = {
+      cluster_name: activeClusterName,
       resource_type: kubectlType,
       resource_name: resource.name,
       namespace: resource.namespace || '',
