@@ -37,6 +37,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# AI Agent Framework (optional - only imported if --ai-agent flag is used)
+try:
+    from agents import MonitoringAgent, DiagnosticAgent, RemediationAgent
+    AI_AGENTS_AVAILABLE = True
+except ImportError:
+    AI_AGENTS_AVAILABLE = False
+
 # Terminal colors for output
 class Colors:
     HEADER = '\033[95m'
@@ -53,7 +60,7 @@ class Colors:
 class TestSuiteRunner:
     """Main test suite runner class."""
 
-    def __init__(self, base_dir: Path = Path.cwd(), extra_vars: Optional[Dict[str, str]] = None, dry_run: bool = False, verbosity: int = 0):
+    def __init__(self, base_dir: Path = Path.cwd(), extra_vars: Optional[Dict[str, str]] = None, dry_run: bool = False, verbosity: int = 0, ai_agent_enabled: bool = False, ai_agent_dry_run: bool = False):
         self.base_dir = base_dir
         self.test_suites_dir = base_dir / "test-suites"
         self.results_dir = base_dir / "test-results"
@@ -74,11 +81,73 @@ class TestSuiteRunner:
             "passed": 0,
             "failed": 0,
             "skipped": 0,
-            "suites": []
+            "suites": [],
+            "ai_agent_statistics": None
         }
 
         # Create results directory if it doesn't exist
         self.results_dir.mkdir(exist_ok=True)
+
+        # Initialize AI agents if enabled
+        self.ai_agent_enabled = ai_agent_enabled
+        self.monitor_agent = None
+        self.diagnostic_agent = None
+        self.remediation_agent = None
+
+        if self.ai_agent_enabled:
+            if not AI_AGENTS_AVAILABLE:
+                print(f"{Colors.YELLOW}Warning: AI agents requested but not available - install agents/ module{Colors.ENDC}")
+                self.ai_agent_enabled = False
+            else:
+                print(f"{Colors.CYAN}Initializing AI Agent Framework...{Colors.ENDC}")
+
+                self.monitor_agent = MonitoringAgent(base_dir, enabled=True, verbose=(verbosity > 0))
+                self.diagnostic_agent = DiagnosticAgent(base_dir, enabled=True, verbose=(verbosity > 0))
+                self.remediation_agent = RemediationAgent(base_dir, enabled=True, verbose=(verbosity > 0), dry_run=ai_agent_dry_run)
+
+                self.monitor_agent.set_issue_callback(self._ai_agent_issue_detected)
+
+                mode_text = "DRY RUN MODE" if ai_agent_dry_run else "LIVE MODE"
+                print(f"{Colors.GREEN}AI Agent Framework initialized ({mode_text}){Colors.ENDC}")
+                print(f"{Colors.CYAN}  - Monitoring Agent: Real-time issue detection{Colors.ENDC}")
+                print(f"{Colors.CYAN}  - Diagnostic Agent: Root cause analysis{Colors.ENDC}")
+                print(f"{Colors.CYAN}  - Remediation Agent: Autonomous fixes{Colors.ENDC}\n")
+
+    def _ai_agent_issue_detected(self, issue_type: str, context: Dict, issue: Dict):
+        """
+        AI Agent callback - called when monitoring agent detects an issue.
+        Orchestrates the diagnostic and remediation chain.
+        """
+        resource_key = context.get("resource_key")
+
+        try:
+            print(f"\n{Colors.YELLOW}AI Agent detected issue: {issue_type}{Colors.ENDC}")
+
+            diagnosis = self.diagnostic_agent.diagnose(issue_type, context)
+
+            if diagnosis:
+                print(f"{Colors.CYAN}   Root cause: {diagnosis.get('root_cause', 'Unknown')}{Colors.ENDC}")
+                print(f"{Colors.CYAN}   Recommended fix: {diagnosis.get('recommended_fix', 'None')}{Colors.ENDC}")
+
+                if diagnosis.get('confidence', 0) >= 0.7:
+                    success, message = self.remediation_agent.remediate(diagnosis)
+
+                    if success:
+                        print(f"{Colors.GREEN}   Fix applied: {message}{Colors.ENDC}\n")
+                        self.monitor_agent.mark_issue_resolved(issue_type, resource_key)
+                    else:
+                        print(f"{Colors.YELLOW}   Fix result: {message}{Colors.ENDC}\n")
+                        self.monitor_agent.mark_issue_failed(issue_type, resource_key)
+                else:
+                    print(f"{Colors.YELLOW}   Confidence too low for auto-remediation{Colors.ENDC}\n")
+                    self.monitor_agent.mark_issue_failed(issue_type, resource_key)
+            else:
+                print(f"{Colors.YELLOW}   Unable to diagnose issue{Colors.ENDC}\n")
+                self.monitor_agent.mark_issue_failed(issue_type, resource_key)
+
+        except Exception as e:
+            print(f"{Colors.YELLOW}   AI Agent error: {str(e)}{Colors.ENDC}\n")
+            self.monitor_agent.mark_issue_failed(issue_type, resource_key)
 
     def load_test_suite(self, suite_id: str) -> Optional[Dict]:
         """Load test suite JSON from file."""
@@ -178,6 +247,14 @@ class TestSuiteRunner:
                     sys.stdout.flush()
                     # Also store for later use
                     output_lines.append(line)
+
+                    # AI Agent Hook: Process line in real-time for issue detection
+                    if self.ai_agent_enabled and self.monitor_agent:
+                        try:
+                            self.monitor_agent.process_line(line)
+                        except Exception as e:
+                            if self.verbosity > 0:
+                                print(f"{Colors.YELLOW}AI Agent Warning: {str(e)}{Colors.ENDC}")
 
                 # Wait for process to complete
                 returncode = process.wait(timeout=timeout)
@@ -734,6 +811,27 @@ class TestSuiteRunner:
         print(f"   {Colors.GREEN}✓ Passed: {self.results['passed']}{Colors.ENDC}")
         print(f"   {Colors.RED}✗ Failed: {self.results['failed']}{Colors.ENDC}")
         print(f"   ⏱️  Total Duration: {self._format_duration(self.results['duration'])}")
+
+        # Print AI Agent statistics if enabled
+        if self.ai_agent_enabled and self.monitor_agent:
+            print(f"\n{Colors.BOLD}AI AGENT STATISTICS:{Colors.ENDC}")
+
+            monitor_stats = self.monitor_agent.get_statistics()
+            print(f"   Issues Detected: {monitor_stats.get('patterns_detected', 0)}")
+            print(f"   Interventions: {monitor_stats.get('interventions_performed', 0)}")
+
+            if self.remediation_agent:
+                success_rates = self.remediation_agent.get_success_rate()
+                if success_rates:
+                    print(f"\n{Colors.CYAN}   Fix Success Rates:{Colors.ENDC}")
+                    for fix_name, stats in success_rates.items():
+                        print(f"      {fix_name}: {stats['success_rate']} ({stats['successes']}/{stats['total_attempts']})")
+
+                self.results['ai_agent_statistics'] = {
+                    'monitor_stats': monitor_stats,
+                    'fix_success_rates': success_rates
+                }
+
         print("\n" + "=" * 80 + "\n")
 
     @staticmethod
@@ -840,6 +938,18 @@ Examples:
         help="Increase verbosity (-v, -vv, -vvv, or -vvvv for maximum)"
     )
 
+    parser.add_argument(
+        "--ai-agent",
+        action="store_true",
+        help="Enable AI agent framework for autonomous issue detection and remediation"
+    )
+
+    parser.add_argument(
+        "--ai-agent-dry-run",
+        action="store_true",
+        help="Run AI agents in dry-run mode (detect and diagnose but don't apply fixes)"
+    )
+
     args = parser.parse_args()
 
     # Parse extra vars from command line
@@ -853,7 +963,13 @@ Examples:
                 print(f"{Colors.YELLOW}Warning: Ignoring invalid extra var format: {var}{Colors.ENDC}")
 
     # Initialize runner
-    runner = TestSuiteRunner(extra_vars=extra_vars, dry_run=args.dry_run, verbosity=args.verbose)
+    runner = TestSuiteRunner(
+        extra_vars=extra_vars,
+        dry_run=args.dry_run,
+        verbosity=args.verbose,
+        ai_agent_enabled=args.ai_agent,
+        ai_agent_dry_run=args.ai_agent_dry_run
+    )
 
     # List suites if requested
     if args.list:
