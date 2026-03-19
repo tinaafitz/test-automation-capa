@@ -21,6 +21,19 @@ from slack_notification_service import SlackNotificationService
 from email_notification_service import EmailNotificationService
 from ai_assistant_service import AIAssistantService
 
+# AI Agent Framework (monitoring, diagnostic, remediation)
+try:
+    import sys
+    _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
+    from agents import MonitoringAgent, DiagnosticAgent, RemediationAgent, IssueState
+    AI_AGENTS_AVAILABLE = True
+    print("AI Agent Framework loaded successfully")
+except ImportError as e:
+    AI_AGENTS_AVAILABLE = False
+    print(f"AI Agent Framework not available: {e}")
+
 app = FastAPI(title="ROSA Automation API", version="1.0.0")
 
 # Add production endpoints (health checks, metrics, monitoring)
@@ -49,6 +62,105 @@ app.add_middleware(
 
 # In-memory storage for demo (use Redis/DB in production)
 jobs: Dict[str, dict] = {}
+
+# AI Agent instances per job (keyed by job_id)
+ai_agent_sessions: Dict[str, dict] = {}
+
+
+def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
+    """Initialize AI agent framework for a job. Returns dict of agents or None."""
+    if not AI_AGENTS_AVAILABLE:
+        return None
+
+    try:
+        from pathlib import Path
+        base_dir = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+        monitor = MonitoringAgent(base_dir=base_dir)
+        diagnostic = DiagnosticAgent(base_dir=base_dir)
+        remediation = RemediationAgent(base_dir=base_dir, dry_run=dry_run)
+
+        def on_issue_detected(issue_type, context, issue):
+            diagnosis = diagnostic.diagnose(issue_type, context)
+            resource_key = context.get("resource_key", "")
+            if diagnosis and diagnosis.get("confidence", 0) >= 0.7:
+                success, message = remediation.remediate(diagnosis)
+                if success:
+                    monitor.mark_issue_resolved(issue_type, resource_key)
+                else:
+                    monitor.mark_issue_failed(issue_type, resource_key)
+                # Log agent action to job logs so users can see it
+                if job_id in jobs:
+                    action_icon = "✅" if success else "⚠️"
+                    jobs[job_id].setdefault("logs", []).append(
+                        f"🤖 Agent detected: {issue_type} ({resource_key})"
+                    )
+                    jobs[job_id]["logs"].append(
+                        f"   {action_icon} {message}"
+                    )
+            elif diagnosis:
+                # Low confidence — reset tracked issue to DETECTED so agent
+                # can re-evaluate on next retry (e.g., CloudFormation stack
+                # transitions from DELETE_IN_PROGRESS to DELETE_FAILED)
+                tracking_key = f"{issue_type}:{resource_key}"
+                tracked = monitor._tracked_issues.get(tracking_key)
+                if tracked:
+                    tracked.state = IssueState.DETECTED
+                    # Don't count low-confidence checks as real attempts,
+                    # but keep attempts >= 1 so the 60s throttle stays active
+                    if tracked.attempts > 1:
+                        tracked.attempts -= 1
+                    # Only log every 5th low-confidence check to reduce noise
+                    low_conf_count = getattr(tracked, '_low_conf_count', 0) + 1
+                    tracked._low_conf_count = low_conf_count
+                    should_log = (low_conf_count == 1 or low_conf_count % 5 == 0)
+                else:
+                    should_log = True
+                if should_log and job_id in jobs:
+                    root_cause = diagnosis.get("root_cause", "")
+                    jobs[job_id].setdefault("logs", []).append(
+                        f"🤖 Agent checked: {issue_type} ({resource_key}) — {root_cause}"
+                    )
+            # Store agent events for the stats API
+            if job_id in jobs:
+                jobs[job_id].setdefault("agent_events", [])
+                jobs[job_id]["agent_events"].append({
+                    "type": "issue_detected",
+                    "issue_type": issue_type,
+                    "resource_key": resource_key,
+                    "diagnosis": diagnosis.get("root_cause", "") if diagnosis else "",
+                    "fix_applied": diagnosis.get("recommended_fix", "") if diagnosis else "",
+                    "timestamp": datetime.now().isoformat(),
+                })
+
+        monitor.set_issue_callback(on_issue_detected)
+
+        session = {
+            "monitor": monitor,
+            "diagnostic": diagnostic,
+            "remediation": remediation,
+        }
+        ai_agent_sessions[job_id] = session
+        print(f"[AI Agent] Initialized for job {job_id} (dry_run={dry_run})")
+        return session
+    except Exception as e:
+        print(f"[AI Agent] Failed to initialize: {e}")
+        return None
+
+
+def get_agent_stats(job_id: str) -> dict:
+    """Get AI agent statistics for a job."""
+    session = ai_agent_sessions.get(job_id)
+    if not session:
+        return {"enabled": False}
+
+    monitor = session["monitor"]
+    remediation = session["remediation"]
+    return {
+        "enabled": True,
+        "issues_detected": len(monitor.patterns_detected),
+        "interventions": len(remediation.interventions),
+    }
 
 # Cache for expensive operations (TTL: 30 seconds)
 minikube_clusters_cache = {
@@ -226,14 +338,14 @@ def send_cluster_notifications(cluster_name: str, region: str, version: str, job
         print(f"Error in send_cluster_notifications: {e}")
 
 
-async def run_minikube_init_playbook(
+def run_minikube_init_playbook(
     playbook_path: str,
     cluster_name: str,
     job_id: str,
     install_method: str = "clusterctl",
     custom_capa_image: dict = None,
 ):
-    """Run Minikube CAPI initialization playbook asynchronously with real-time log streaming"""
+    """Run Minikube CAPI initialization playbook (sync, called via asyncio.to_thread)"""
     try:
         jobs[job_id]["status"] = "running"
         jobs[job_id]["progress"] = 10
@@ -312,37 +424,34 @@ async def run_minikube_init_playbook(
         jobs[job_id]["logs"] = ["=== ANSIBLE PLAYBOOK OUTPUT ===", ""]
 
         # Run the initialization playbook with real-time output streaming
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             cwd=project_root,
             env=env,
+            text=True,
+            bufsize=1,
         )
 
-        # Stream stdout and stderr in real-time
-        async def read_stream(stream, is_stderr=False):
-            while True:
-                line = await stream.readline()
-                if not line:
-                    break
-                line_text = line.decode("utf-8").rstrip()
-                if is_stderr:
-                    jobs[job_id]["logs"].append(f"[STDERR] {line_text}")
-                else:
-                    jobs[job_id]["logs"].append(line_text)
+        # Read stdout line by line for real-time streaming
+        for line in process.stdout:
+            line_text = line.rstrip()
+            jobs[job_id]["logs"].append(line_text)
 
-                # Update progress based on log content
-                if "TASK" in line_text:
-                    current_progress = jobs[job_id]["progress"]
-                    if current_progress < 90:
-                        jobs[job_id]["progress"] = min(current_progress + 5, 90)
+            # Update progress based on log content
+            if "TASK" in line_text:
+                current_progress = jobs[job_id]["progress"]
+                if current_progress < 90:
+                    jobs[job_id]["progress"] = min(current_progress + 5, 90)
 
-        # Read both streams concurrently
-        await asyncio.gather(read_stream(process.stdout, False), read_stream(process.stderr, True))
+        # Capture any remaining stderr
+        stderr_output = process.stderr.read()
+        if stderr_output:
+            for line in stderr_output.strip().split("\n"):
+                jobs[job_id]["logs"].append(f"[STDERR] {line}")
 
-        # Wait for process to complete
-        returncode = await process.wait()
+        returncode = process.wait(timeout=600)
 
         jobs[job_id]["logs"].append("")
         jobs[job_id]["logs"].append("=== PLAYBOOK COMPLETED ===")
@@ -361,7 +470,7 @@ async def run_minikube_init_playbook(
             ] = f"❌ Failed to initialize CAPI/CAPA on cluster '{cluster_name}'"
             jobs[job_id]["completed_at"] = datetime.now()
 
-    except asyncio.TimeoutError:
+    except subprocess.TimeoutExpired:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["message"] = "Initialization timed out after 10 minutes"
         jobs[job_id]["progress"] = 100
@@ -374,10 +483,8 @@ async def run_minikube_init_playbook(
         jobs[job_id]["completed_at"] = datetime.now()
 
 
-async def run_ansible_playbook(playbook: str, config: dict, job_id: str):
-    """Run ansible playbook asynchronously"""
-    import asyncio
-
+def run_ansible_playbook(playbook: str, config: dict, job_id: str):
+    """Run ansible playbook synchronously (called via asyncio.to_thread to avoid blocking event loop)"""
     try:
         jobs[job_id]["status"] = "running"
         jobs[job_id]["progress"] = 10
@@ -458,55 +565,47 @@ async def run_ansible_playbook(playbook: str, config: dict, job_id: str):
         # Run the command (use parent directory of ui/ as working directory)
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-        # Execute playbook with real-time output streaming using async subprocess
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
+        # Execute playbook with real-time output streaming
+        process = subprocess.Popen(
+            cmd,
             cwd=project_root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
 
         # Stream output in real-time and update job logs incrementally
+        import time as _time
         line_count = 0
-        try:
-            # Read output line by line with timeout
-            async def read_stream():
-                nonlocal line_count
-                while True:
-                    line = await process.stdout.readline()
-                    if not line:
-                        break
+        for line in process.stdout:
+            line_str = line.rstrip()
+            # Append to job logs immediately (visible in UI)
+            jobs[job_id]["logs"].append(line_str)
 
-                    line_str = line.decode().rstrip()
-                    # Append to job logs immediately (visible in UI)
-                    jobs[job_id]["logs"].append(line_str)
+            # AI Agent: Process each line for real-time issue detection
+            agent_session = ai_agent_sessions.get(job_id)
+            if agent_session and agent_session.get("monitor"):
+                try:
+                    agent_session["monitor"].process_line(line_str)
+                except Exception:
+                    pass
 
-                    # Update progress based on log output
-                    line_count += 1
-                    if line_count % 10 == 0:  # Update every 10 lines
-                        # Progress from 30% to 95% during execution
-                        current_progress = min(30 + (line_count // 10), 95)
-                        jobs[job_id]["progress"] = current_progress
+            # Update progress based on log output
+            line_count += 1
+            if line_count % 10 == 0:  # Update every 10 lines
+                # Progress from 30% to 95% during execution
+                current_progress = min(30 + (line_count // 10), 95)
+                jobs[job_id]["progress"] = current_progress
 
-                    # Also print to console for debugging
-                    print(line_str)
+            # Also print to console for debugging
+            print(line_str)
 
-            # Wait for process to complete with timeout
-            await asyncio.wait_for(
-                asyncio.gather(read_stream(), process.wait()),
-                timeout=3600  # 60 minutes timeout
-            )
+            # Yield the GIL periodically so the event loop can process requests
+            if line_count % 5 == 0:
+                _time.sleep(0.001)
 
-            returncode = process.returncode
-
-        except asyncio.TimeoutError:
-            # Kill the process on timeout
-            try:
-                process.kill()
-                await process.wait()
-            except:
-                pass
-            raise  # Re-raise to be caught by outer exception handler
+        returncode = process.wait(timeout=3600)
 
         if returncode == 0:
             jobs[job_id]["status"] = "completed"
@@ -516,9 +615,10 @@ async def run_ansible_playbook(playbook: str, config: dict, job_id: str):
             jobs[job_id]["status"] = "failed"
             jobs[job_id]["message"] = f"Playbook failed with exit code {returncode}"
 
+        jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
         jobs[job_id]["completed_at"] = datetime.now()
 
-    except asyncio.TimeoutError:
+    except subprocess.TimeoutExpired:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["message"] = "Job timed out after 60 minutes"
         jobs[job_id]["logs"].append("ERROR: Process timed out after 60 minutes")
@@ -809,8 +909,11 @@ async def create_cluster(config: ClusterConfig, background_tasks: BackgroundTask
         "availability_zone_count": len(config.availability_zones),
     }
 
-    # Start background task
-    background_tasks.add_task(run_ansible_playbook, playbook, extra_vars, job_id)
+    # Initialize AI agents for provisioning monitoring
+    init_ai_agents(job_id)
+
+    # Start background task (use asyncio.to_thread to avoid blocking event loop)
+    asyncio.create_task(asyncio.to_thread(run_ansible_playbook, playbook, extra_vars, job_id))
 
     return {
         "cluster_id": cluster_id,
@@ -855,10 +958,10 @@ async def delete_cluster(cluster_id: str, background_tasks: BackgroundTasks):
         "logs": [],
     }
 
-    # Start deletion task
-    background_tasks.add_task(
+    # Start deletion task (use asyncio.to_thread to avoid blocking event loop)
+    asyncio.create_task(asyncio.to_thread(
         run_ansible_playbook, "delete_rosa_hcp_cluster.yaml", cluster["config"], job_id
-    )
+    ))
 
     return {"job_id": job_id, "message": "Cluster deletion started"}
 
@@ -1036,15 +1139,18 @@ async def websocket_job_updates(websocket: WebSocket, job_id: str):
 
             # Send update if progress changed
             if current_progress != last_progress:
-                await websocket.send_json(
-                    {
-                        "job_id": job_id,
-                        "status": job.get("status", "unknown"),
-                        "progress": current_progress,
-                        "message": job.get("message", ""),
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
+                update = {
+                    "job_id": job_id,
+                    "status": job.get("status", "unknown"),
+                    "progress": current_progress,
+                    "message": job.get("message", ""),
+                    "timestamp": datetime.now().isoformat(),
+                }
+                # Include AI agent stats if available
+                agent_stats = get_agent_stats(job_id)
+                if agent_stats.get("enabled"):
+                    update["agent_stats"] = agent_stats
+                await websocket.send_json(update)
                 last_progress = current_progress
 
             # Close connection if job completed
@@ -1057,6 +1163,18 @@ async def websocket_job_updates(websocket: WebSocket, job_id: str):
         print(f"WebSocket error: {e}")
     finally:
         await websocket.close()
+
+
+# AI Agent Stats API
+@app.get("/api/jobs/{job_id}/agent-stats")
+async def get_job_agent_stats(job_id: str):
+    """Get AI agent statistics for a specific job"""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    stats = get_agent_stats(job_id)
+    # Also include any stored agent events
+    events = jobs[job_id].get("agent_events", [])
+    return {"success": True, "agent_stats": stats, "agent_events": events}
 
 
 # Notification Settings APIs
@@ -2749,8 +2867,8 @@ async def run_ansible_task(request: dict, background_tasks: BackgroundTasks):
             "logs": [],
         }
 
-        # Run task in background
-        background_tasks.add_task(
+        # Run task in background (use asyncio.to_thread to avoid blocking event loop)
+        asyncio.create_task(asyncio.to_thread(
             run_ansible_task_background,
             job_id,
             task_file,
@@ -2759,7 +2877,7 @@ async def run_ansible_task(request: dict, background_tasks: BackgroundTasks):
             kube_context,
             extra_vars,
             cluster_type,
-        )
+        ))
 
         return {
             "success": True,
@@ -2938,29 +3056,28 @@ async def get_rosa_clusters(context: str = None):
     """
     import json
 
-    # If context is provided, get CAPI cluster names from that context to filter
-    capi_cluster_names = None
-    if context:
-        try:
-            # Build kubectl command - use current context if context='current'
-            kubectl_cmd = ["kubectl"]
-            if context != "current":
-                kubectl_cmd.extend(["--context", context])
-            kubectl_cmd.extend(["get", "cluster", "-n", "ns-rosa-hcp", "-o", "json"])
+    # Always get CAPI cluster names from the current hub to filter ROSA CLI output.
+    # This ensures we only show clusters created/managed by this environment.
+    capi_cluster_names = set()
+    try:
+        kubectl_cmd = ["oc", "get", "rosacontrolplane", "-n", "ns-rosa-hcp", "-o", "json"]
+        if context and context != "current":
+            kubectl_cmd = ["kubectl", "--context", context, "get", "rosacontrolplane", "-n", "ns-rosa-hcp", "-o", "json"]
 
-            result = subprocess.run(
-                kubectl_cmd,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                capi_data = json.loads(result.stdout)
-                capi_cluster_names = set([item.get("metadata", {}).get("name") for item in capi_data.get("items", [])])
-                actual_context = context if context != "current" else "current (MCE hub)"
-                print(f"[ROSA Clusters] Filtering by context '{actual_context}': {capi_cluster_names}")
-        except Exception as e:
-            print(f"[ROSA Clusters] Error getting CAPI clusters from context '{context}': {e}")
+        result = subprocess.run(
+            kubectl_cmd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            capi_data = json.loads(result.stdout)
+            capi_cluster_names = set([item.get("metadata", {}).get("name") for item in capi_data.get("items", [])])
+            print(f"[ROSA Clusters] CAPI clusters on hub: {capi_cluster_names}")
+    except Exception as e:
+        print(f"[ROSA Clusters] Error getting CAPI clusters: {e}")
+        # If we can't reach the hub, set to None to skip filtering (fallback to showing all)
+        capi_cluster_names = None
 
     try:
         # Try to get actual ROSA clusters using rosa CLI with short timeout
@@ -2980,7 +3097,7 @@ async def get_rosa_clusters(context: str = None):
                 for cluster in rosa_clusters:
                     cluster_name = cluster.get("name", "unknown")
 
-                    # If filtering by context, only include clusters that exist in CAPI
+                    # Only include clusters that exist as CAPI resources on this hub
                     if capi_cluster_names is not None and cluster_name not in capi_cluster_names:
                         continue
 
@@ -3178,25 +3295,44 @@ async def get_rosa_clusters(context: str = None):
         }
 
 
-async def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
-    """Background task to perform actual cluster deletion"""
-    import asyncio
+def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
+    """Background task to perform actual cluster deletion (sync, called via asyncio.to_thread)"""
+    import time as _time
 
     deleted_resources = []
     errors = []
 
+    def log_delete(msg):
+        """Write to stdout, logs array, and feed to AI agent monitor."""
+        jobs[job_id]["stdout"] += msg + "\n"
+        jobs[job_id].setdefault("logs", []).append(msg)
+        print(f"[DELETE-CLUSTER] {msg}")
+        # Feed to AI agent for real-time issue detection
+        agent_session = ai_agent_sessions.get(job_id)
+        if agent_session and agent_session.get("monitor"):
+            try:
+                agent_session["monitor"].process_line(msg)
+            except Exception:
+                pass
+
     try:
+        jobs[job_id]["progress"] = 5
+        jobs[job_id]["message"] = f"Deleting cluster {cluster_name}..."
+
         # Step 1: Delete Cluster and ROSAControlPlane together
-        # This triggers proper cascading deletion and avoids RBAC issues with MachinePools
-        # Using the recommended format: oc delete -n <namespace> cluster/<name> rosacontrolplane/<name>
         try:
-            print(f"🗑️ [DELETE-CLUSTER] Deleting cluster and rosacontrolplane for {cluster_name}")
-            jobs[job_id][
-                "stdout"
-            ] += f"🗑️ Deleting cluster/{cluster_name} and rosacontrolplane/{cluster_name}\n"
-            jobs[job_id][
-                "stdout"
-            ] += f"ℹ️  This triggers cascading deletion of all dependent resources\n"
+            log_delete(f"🗑️ Deleting cluster/{cluster_name} and rosacontrolplane/{cluster_name}")
+            log_delete(f"ℹ️  This triggers cascading deletion of all dependent resources")
+
+            # Feed agent context for deletion monitoring
+            agent_session = ai_agent_sessions.get(job_id)
+            if agent_session and agent_session.get("monitor"):
+                try:
+                    agent_session["monitor"].process_line(
+                        f"#AGENT_CONTEXT: resource_name={cluster_name} namespace={namespace} resource_type=rosacontrolplane"
+                    )
+                except Exception:
+                    pass
 
             result = subprocess.run(
                 [
@@ -3212,32 +3348,29 @@ async def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: st
                 timeout=60,
             )
 
+            jobs[job_id]["progress"] = 15
+
             if result.returncode == 0:
                 deleted_resources.append(f"cluster/{cluster_name}")
                 deleted_resources.append(f"rosacontrolplane/{cluster_name}")
-                print(
-                    f"✅ [DELETE-CLUSTER] Deletion initiated for cluster/{cluster_name} and rosacontrolplane/{cluster_name}"
-                )
-                jobs[job_id][
-                    "stdout"
-                ] += f"✅ Deletion initiated for cluster/{cluster_name} and rosacontrolplane/{cluster_name}\n"
-                jobs[job_id][
-                    "stdout"
-                ] += f"✅ Kubernetes will cascade delete MachinePools automatically\n"
+                log_delete(f"✅ Deletion initiated for cluster/{cluster_name} and rosacontrolplane/{cluster_name}")
+                log_delete(f"✅ Kubernetes will cascade delete MachinePools automatically")
 
-                # Step 2: Wait for the cluster to be fully deleted (max 10 minutes for ROSA cluster deletion)
-                print(f"⏳ [DELETE-CLUSTER] Waiting for cluster/{cluster_name} to be deleted...")
-                jobs[job_id]["stdout"] += f"⏳ Waiting for cluster deletion to complete...\n"
+                # Step 2: Wait for the cluster to be fully deleted
+                log_delete(f"⏳ Waiting for cluster deletion to complete...")
+                jobs[job_id]["message"] = "Waiting for cluster deletion..."
 
-                max_wait_time = 600  # 10 minutes (ROSA deletion can take longer)
-                check_interval = 10  # Check every 10 seconds
+                max_wait_time = 600
+                check_interval = 10
                 elapsed_time = 0
 
                 while elapsed_time < max_wait_time:
-                    await asyncio.sleep(check_interval)
+                    _time.sleep(check_interval)
                     elapsed_time += check_interval
 
-                    # Check if resource still exists
+                    # Update progress (15% to 70% during wait)
+                    jobs[job_id]["progress"] = min(15 + int(elapsed_time / max_wait_time * 55), 70)
+
                     check_result = subprocess.run(
                         ["oc", "get", "cluster", cluster_name, "-n", namespace],
                         capture_output=True,
@@ -3246,49 +3379,47 @@ async def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: st
                     )
 
                     if check_result.returncode != 0 and "not found" in check_result.stderr.lower():
-                        print(
-                            f"✅ [DELETE-CLUSTER] cluster/{cluster_name} successfully deleted after {elapsed_time}s"
-                        )
-                        jobs[job_id][
-                            "stdout"
-                        ] += f"✅ cluster/{cluster_name} successfully deleted after {elapsed_time}s\n✅ ROSA cluster has been removed from AWS/OCM\n"
+                        log_delete(f"✅ cluster/{cluster_name} successfully deleted after {elapsed_time}s")
+                        log_delete(f"✅ ROSA cluster has been removed from AWS/OCM")
                         break
                     else:
-                        print(f"⏳ [DELETE-CLUSTER] Still waiting... ({elapsed_time}s elapsed)")
-                        if elapsed_time % 60 == 0:  # Update job every 60 seconds
-                            jobs[job_id][
-                                "stdout"
-                            ] += f"⏳ Still waiting for ROSA cluster deletion... ({elapsed_time}s elapsed)\n"
+                        status_line = f"⏳ Still waiting for cluster deletion... ({elapsed_time}s elapsed)"
+                        # Feed every check to the agent (detects stuck deletions)
+                        log_delete(status_line) if elapsed_time % 60 == 0 else None
+                        # Always feed agent even if not logging to UI
+                        agent_session = ai_agent_sessions.get(job_id)
+                        if agent_session and agent_session.get("monitor"):
+                            try:
+                                status_output = check_result.stdout.strip()
+                                agent_session["monitor"].process_line(
+                                    f"FAILED - RETRYING: cluster/{cluster_name} deletion still pending ({elapsed_time}s) {status_output}"
+                                )
+                            except Exception:
+                                pass
 
                 if elapsed_time >= max_wait_time:
                     errors.append(
                         f"Timeout waiting for cluster/{cluster_name} to delete after {max_wait_time}s"
                     )
-                    print(
-                        f"⚠️ [DELETE-CLUSTER] Timeout waiting for cluster deletion, but it may still complete in the background"
-                    )
-                    jobs[job_id][
-                        "stdout"
-                    ] += f"⚠️ Timeout waiting for deletion after {max_wait_time}s, but the ROSA cluster deletion may still complete in the background\n"
+                    log_delete(f"⚠️ Timeout waiting for deletion after {max_wait_time}s, but deletion may still complete in background")
             else:
                 if "not found" not in result.stderr.lower():
                     errors.append(f"Failed to delete resources: {result.stderr}")
-                    print(f"❌ [DELETE-CLUSTER] Error deleting resources: {result.stderr}")
-                    jobs[job_id]["stderr"] += f"❌ Error deleting resources: {result.stderr}\n"
+                    log_delete(f"❌ Error deleting resources: {result.stderr}")
 
         except subprocess.TimeoutExpired:
             errors.append(f"Timeout deleting cluster and rosacontrolplane")
-            jobs[job_id][
-                "stderr"
-            ] += f"❌ Timeout deleting cluster/{cluster_name} and rosacontrolplane/{cluster_name}\n"
+            log_delete(f"❌ Timeout deleting cluster/{cluster_name} and rosacontrolplane/{cluster_name}")
         except Exception as e:
             errors.append(f"Error deleting cluster and rosacontrolplane: {str(e)}")
-            jobs[job_id][
-                "stderr"
-            ] += f"❌ Error deleting cluster/{cluster_name} and rosacontrolplane/{cluster_name}: {str(e)}\n"
+            log_delete(f"❌ Error: {str(e)}")
 
-        # Step 3: Clean up remaining ROSA resources if they still exist (they should cascade delete automatically)
-        # MachinePools should be cascade deleted by Kubernetes, but other resources may need manual cleanup
+        # Step 3: Clean up remaining ROSA resources
+        jobs[job_id]["progress"] = 75
+        jobs[job_id]["message"] = "Cleaning up remaining resources..."
+        log_delete(f"")
+        log_delete(f"🧹 Checking for remaining resources to clean up...")
+
         cleanup_resources = [
             ("rosanetwork", f"{cluster_name}-network"),
             ("rosaroleconfig", f"{cluster_name}-roles"),
@@ -3296,9 +3427,8 @@ async def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: st
             ("rosacluster", cluster_name),
         ]
 
-        for resource_type, resource_name in cleanup_resources:
+        for i, (resource_type, resource_name) in enumerate(cleanup_resources):
             try:
-                # Check if resource exists
                 check_result = subprocess.run(
                     ["oc", "get", resource_type, resource_name, "-n", namespace],
                     capture_output=True,
@@ -3307,9 +3437,18 @@ async def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: st
                 )
 
                 if check_result.returncode == 0:
-                    print(
-                        f"🧹 [DELETE-CLUSTER] Cleaning up remaining {resource_type}/{resource_name}"
-                    )
+                    log_delete(f"🧹 Cleaning up {resource_type}/{resource_name}")
+
+                    # Feed agent context for this resource
+                    agent_session = ai_agent_sessions.get(job_id)
+                    if agent_session and agent_session.get("monitor"):
+                        try:
+                            agent_session["monitor"].process_line(
+                                f"#AGENT_CONTEXT: resource_name={resource_name} namespace={namespace} resource_type={resource_type}"
+                            )
+                        except Exception:
+                            pass
+
                     result = subprocess.run(
                         [
                             "oc",
@@ -3328,19 +3467,31 @@ async def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: st
 
                     if result.returncode == 0:
                         deleted_resources.append(f"{resource_type}/{resource_name}")
-                        print(f"✅ [DELETE-CLUSTER] Cleaned up {resource_type}/{resource_name}")
-                        jobs[job_id]["stdout"] += f"🧹 Cleaned up {resource_type}/{resource_name}\n"
+                        log_delete(f"✅ Cleaned up {resource_type}/{resource_name}")
+                    else:
+                        log_delete(f"⚠️ Failed to delete {resource_type}/{resource_name}: {result.stderr}")
                 else:
-                    print(
-                        f"✅ [DELETE-CLUSTER] {resource_type}/{resource_name} already deleted (cascade)"
-                    )
+                    log_delete(f"✅ {resource_type}/{resource_name} already deleted (cascade)")
 
             except Exception as e:
-                print(
-                    f"⚠️ [DELETE-CLUSTER] Error checking/cleaning up {resource_type}/{resource_name}: {str(e)}"
-                )
+                log_delete(f"⚠️ Error cleaning up {resource_type}/{resource_name}: {str(e)}")
 
-        # Update job with final status
+            jobs[job_id]["progress"] = 75 + int((i + 1) / len(cleanup_resources) * 20)
+
+        # Final status
+        jobs[job_id]["progress"] = 100
+        jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
+
+        # Log agent summary if agents were active
+        agent_stats = jobs[job_id]["agent_stats"]
+        if agent_stats.get("enabled"):
+            log_delete(f"")
+            log_delete(f"🤖 AI Agent Summary:")
+            log_delete(f"   Issues detected: {agent_stats.get('issues_detected', 0)}")
+            log_delete(f"   Interventions: {agent_stats.get('interventions', 0)}")
+            if agent_stats.get('interventions', 0) > 0:
+                log_delete(f"   ✅ Agent auto-fixed {agent_stats['interventions']} issue(s) during deletion")
+
         if deleted_resources:
             message = (
                 f"✅ Successfully deleted cluster {cluster_name}\n\nDeleted resources:\n"
@@ -3351,7 +3502,9 @@ async def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: st
 
             jobs[job_id]["status"] = "completed"
             jobs[job_id]["return_code"] = 0
-            jobs[job_id]["stdout"] += f"\n{message}"
+            log_delete(f"")
+            log_delete(message)
+            jobs[job_id]["message"] = f"✅ Cluster {cluster_name} deleted"
         else:
             message = f"❌ Failed to delete cluster {cluster_name}"
             if errors:
@@ -3359,7 +3512,8 @@ async def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: st
 
             jobs[job_id]["status"] = "failed"
             jobs[job_id]["return_code"] = 1
-            jobs[job_id]["stderr"] += f"\n{message}"
+            log_delete(message)
+            jobs[job_id]["message"] = f"❌ Failed to delete {cluster_name}"
 
     except Exception as e:
         import traceback
@@ -3369,6 +3523,9 @@ async def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: st
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["return_code"] = 1
         jobs[job_id]["stderr"] += f"❌ Error: {str(e)}\n{traceback.format_exc()}"
+        jobs[job_id].setdefault("logs", []).append(f"❌ Error: {str(e)}")
+        jobs[job_id]["progress"] = 100
+        jobs[job_id]["message"] = f"❌ Error deleting {cluster_name}"
 
 
 @app.delete("/api/rosa/clusters/{cluster_name}")
@@ -3394,16 +3551,22 @@ async def delete_rosa_cluster(
             "id": job_id,
             "description": f"Delete ROSA HCP Cluster: {cluster_name}",
             "status": "running",
+            "progress": 0,
+            "message": f"Deleting cluster {cluster_name}...",
             "created_at": time.time(),
             "task_file": None,
             "playbook_file": None,
             "stdout": "",
             "stderr": "",
+            "logs": [],
             "return_code": None,
         }
 
-        # Start deletion in background
-        background_tasks.add_task(perform_cluster_deletion, job_id, cluster_name, namespace)
+        # Initialize AI agents for deletion monitoring
+        init_ai_agents(job_id)
+
+        # Start deletion in background (use asyncio.to_thread to avoid blocking event loop)
+        asyncio.create_task(asyncio.to_thread(perform_cluster_deletion, job_id, cluster_name, namespace))
 
         # Return immediately
         return {
@@ -3738,100 +3901,73 @@ async def run_ansible_role(request: dict):
         raise HTTPException(status_code=500, detail=error_msg)
 
 
-def run_playbook_background(playbook: str, extra_vars: dict, job_id: str, description: str):
-    """Run ansible playbook asynchronously in background"""
+def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, description: str):
+    """Run ansible playbook in a thread (called via asyncio.to_thread to avoid blocking event loop)"""
+    import re
+
     try:
         jobs[job_id]["status"] = "running"
         jobs[job_id]["progress"] = 10
         jobs[job_id]["message"] = f"Starting playbook: {playbook}"
 
-        # Ensure the playbook file exists
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         playbook_path = os.path.join(project_root, playbook)
 
-        # Prepare ansible command
-        cmd = [
-            "ansible-playbook",
-            playbook_path,
-            "-v",  # Verbose output
-        ]
+        cmd = ["ansible-playbook", playbook_path, "-v"]
 
-        # Add extra vars if provided (convert camelCase to snake_case for Ansible)
         def camel_to_snake(name):
-            """Convert camelCase to snake_case with special case handling"""
-            import re
-
-            # Special case mappings for compound words that should stay together
-            special_cases = {
-                'openShift': 'openshift',
-                'OpenShift': 'openshift',
-            }
-
-            # Replace special cases first
+            special_cases = {'openShift': 'openshift', 'OpenShift': 'openshift'}
             for camel, snake in special_cases.items():
                 if camel in name:
                     name = name.replace(camel, snake)
-
-            # Standard camelCase to snake_case conversion
             s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
             return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
         for key, value in extra_vars.items():
             snake_key = camel_to_snake(key)
-            cmd.extend(["-e", f"{snake_key}={value}"])
+            str_value = str(value).strip() if value is not None else ""
+            cmd.extend(["-e", f"{snake_key}={str_value}"])
 
-        print(f"Running ansible playbook: {' '.join(cmd)}")
+        print(f"[Playbook] Running: {' '.join(cmd)}")
         jobs[job_id]["progress"] = 30
         jobs[job_id]["message"] = "Executing ansible playbook"
 
-        # Prepare environment with KUBECONFIG
         env = os.environ.copy()
-        # Ensure KUBECONFIG is set (use default if not already set)
         if "KUBECONFIG" not in env:
             env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
 
-        print(f"Using KUBECONFIG: {env.get('KUBECONFIG')}")
-
-        # Execute playbook with real-time output streaming
-        # This prevents timeout issues and provides better UX with live progress
-        import sys
         process = subprocess.Popen(
-            cmd,
-            cwd=project_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,  # Merge stderr into stdout
-            text=True,
-            bufsize=1,  # Line buffered
-            env=env,
+            cmd, cwd=project_root,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, env=env,
         )
 
-        # Stream output in real-time and update job logs incrementally
+        import time as _time
         line_count = 0
-        try:
-            for line in process.stdout:
-                # Append to job logs immediately (visible in UI)
-                jobs[job_id]["logs"].append(line.rstrip())
+        for line in process.stdout:
+            line_stripped = line.rstrip()
+            jobs[job_id]["logs"].append(line_stripped)
 
-                # Update progress based on log output
-                line_count += 1
-                if line_count % 10 == 0:  # Update every 10 lines
-                    # Progress from 30% to 95% during execution
-                    current_progress = min(30 + (line_count // 10), 95)
-                    jobs[job_id]["progress"] = current_progress
+            # AI Agent: Process each line for real-time issue detection
+            agent_session = ai_agent_sessions.get(job_id)
+            if agent_session and agent_session.get("monitor"):
+                try:
+                    agent_session["monitor"].process_line(line_stripped)
+                except Exception:
+                    pass
 
-                # Also print to console for debugging
-                print(line, end='')
-                sys.stdout.flush()
+            line_count += 1
+            if line_count % 10 == 0:
+                jobs[job_id]["progress"] = min(30 + (line_count // 10), 95)
 
-            # Wait for process to complete
-            returncode = process.wait(timeout=3600)  # 60 minutes timeout (matches Jenkins deletion timeout)
+            print(line_stripped)
 
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-            raise  # Re-raise to be caught by outer exception handler
+            # Yield the GIL periodically so the event loop can process requests
+            if line_count % 5 == 0:
+                _time.sleep(0.001)
 
-        print(f"Ansible playbook completed with return code: {returncode}")
+        returncode = process.wait(timeout=3600)
+        print(f"[Playbook] Completed with return code: {returncode}")
 
         if returncode == 0:
             jobs[job_id]["status"] = "completed"
@@ -3841,19 +3977,29 @@ def run_playbook_background(playbook: str, extra_vars: dict, job_id: str, descri
             jobs[job_id]["status"] = "failed"
             jobs[job_id]["message"] = f"Playbook failed with return code {returncode}"
 
+        jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
         jobs[job_id]["completed_at"] = datetime.now()
         jobs[job_id]["return_code"] = returncode
 
     except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["message"] = "Playbook timed out after 60 minutes"
         jobs[job_id]["logs"].append("ERROR: Process timed out after 60 minutes")
+        jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
         jobs[job_id]["completed_at"] = datetime.now()
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["message"] = f"Error: {str(e)}"
         jobs[job_id]["logs"].append(f"ERROR: {str(e)}")
+        jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
         jobs[job_id]["completed_at"] = datetime.now()
+
+
+async def run_playbook_background(playbook: str, extra_vars: dict, job_id: str, description: str):
+    """Wrapper that runs the playbook in a thread so the event loop stays free."""
+    await asyncio.to_thread(_run_playbook_in_thread, playbook, extra_vars, job_id, description)
 
 
 @app.post("/api/ansible/run-playbook")
@@ -3888,9 +4034,12 @@ async def run_ansible_playbook_endpoint(request: dict, background_tasks: Backgro
             "description": description,
         }
 
-        # Run playbook in background
-        background_tasks.add_task(
-            run_playbook_background, playbook, extra_vars, job_id, description
+        # Initialize AI agents for playbook monitoring
+        init_ai_agents(job_id)
+
+        # Run playbook as async task (not background_tasks which blocks the event loop)
+        asyncio.create_task(
+            run_playbook_background(playbook, extra_vars, job_id, description)
         )
 
         return {
@@ -4945,15 +5094,15 @@ async def initialize_minikube_capi(request: Request, background_tasks: Backgroun
             "custom_capa_image": custom_capa_image,
         }
 
-        # Run configuration in background
-        background_tasks.add_task(
+        # Run configuration in background (use asyncio.to_thread to avoid blocking event loop)
+        asyncio.create_task(asyncio.to_thread(
             run_minikube_init_playbook,
             playbook_path,
             cluster_name,
             job_id,
             install_method,
             custom_capa_image,
-        )
+        ))
 
         return {
             "success": True,
@@ -5093,8 +5242,8 @@ async def create_minikube_cluster(request: Request, background_tasks: Background
             "logs": [],
         }
 
-        # Start creation in background
-        background_tasks.add_task(_run_minikube_create, cluster_name, job_id)
+        # Start creation in background (use asyncio.to_thread to avoid blocking event loop)
+        asyncio.create_task(asyncio.to_thread(_run_minikube_create, cluster_name, job_id))
 
         return {
             "success": True,
@@ -6706,6 +6855,9 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
             "description": f"Apply ROSA provisioning YAML for {cluster_name}",
         }
 
+        # Initialize AI agents for provisioning monitoring
+        agents = init_ai_agents(job_id)
+
         # Run application in background
         async def apply_yaml_background():
             try:
@@ -6854,11 +7006,22 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                 elapsed_min = int(elapsed // 60)
                                 elapsed_sec = int(elapsed % 60)
 
+                                # AI Agent: Feed status to monitoring agent
+                                if agents and agents.get("monitor"):
+                                    try:
+                                        status_line = f"#AGENT_CONTEXT: resource_name={cluster_name} namespace=ns-rosa-hcp resource_type=rosacontrolplane"
+                                        agents["monitor"].process_line(status_line)
+                                        status_line = f"RosaControlPlane {cluster_name}: ready={ready} reason={rcp_reason} message={rcp_message}"
+                                        agents["monitor"].process_line(status_line)
+                                    except Exception as agent_err:
+                                        print(f"[AI Agent] Warning: {agent_err}")
+
                                 if ready:
                                     jobs[job_id]["status"] = "completed"
                                     jobs[job_id]["progress"] = 100
                                     jobs[job_id]["message"] = f"✅ Cluster {cluster_name} provisioned successfully!"
                                     jobs[job_id]["logs"].append(f"\n✅ Cluster {cluster_name} is READY! ({elapsed_min}m {elapsed_sec}s)")
+                                    jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
 
                                     send_cluster_notifications(
                                         cluster_name=cluster_name,
@@ -6877,6 +7040,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                     jobs[job_id]["logs"].append(f"\n❌ Provisioning failed: {rcp_reason}")
                                     if rcp_message:
                                         jobs[job_id]["logs"].append(f"   {rcp_message}")
+                                    jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
 
                                     send_cluster_notifications(
                                         cluster_name=cluster_name,
@@ -8188,7 +8352,7 @@ async def run_test_suite(run_config: TestSuiteRun, background_tasks: BackgroundT
         }
 
         # Run test suite in background
-        async def run_test_suite_background():
+        def run_test_suite_background():
             try:
                 job_data = jobs[job_id]
                 job_data["status"] = "running"
@@ -8405,8 +8569,8 @@ async def run_test_suite(run_config: TestSuiteRun, background_tasks: BackgroundT
                 job_data["logs"].append(traceback.format_exc())
                 job_data["completed_at"] = datetime.now()
 
-        # Start background task
-        background_tasks.add_task(run_test_suite_background)
+        # Start background task (use asyncio.to_thread to avoid blocking event loop)
+        asyncio.create_task(asyncio.to_thread(run_test_suite_background))
 
         return {
             "success": True,
@@ -8467,7 +8631,7 @@ async def get_test_suite_history():
 # ==============================================================================
 
 
-async def run_helm_test_playbook(
+def run_helm_test_playbook(
     job_id: str,
     provider: str,
     environment: str,
@@ -8477,7 +8641,7 @@ async def run_helm_test_playbook(
     git_branch: str = "main",
 ):
     """
-    Background task to run Helm chart test playbook
+    Background task to run Helm chart test playbook (sync, called via asyncio.to_thread)
     Supports both Helm repository and Git-sourced charts
     """
     import re  # Import at function start
@@ -8835,8 +8999,8 @@ async def run_helm_test(request: HelmTestRun, background_tasks: BackgroundTasks)
             "started_at": datetime.now().isoformat(),
         }
 
-        # Run Ansible playbook in background
-        background_tasks.add_task(
+        # Run Ansible playbook in background (use asyncio.to_thread to avoid blocking event loop)
+        asyncio.create_task(asyncio.to_thread(
             run_helm_test_playbook,
             job_id,
             provider,
@@ -8845,7 +9009,7 @@ async def run_helm_test(request: HelmTestRun, background_tasks: BackgroundTasks)
             request.chart_source,
             request.git_repo,
             request.git_branch,
-        )
+        ))
 
         source_info = (
             f" (Git: {request.git_branch})" if request.chart_source == "git" else " (Helm repo)"
@@ -8936,8 +9100,8 @@ async def run_all_helm_tests(request: HelmTestRunAll, background_tasks: Backgrou
                     "started_at": datetime.now().isoformat(),
                 }
 
-                # Queue background task (defaults to helm_repo)
-                background_tasks.add_task(
+                # Queue background task (use asyncio.to_thread to avoid blocking event loop)
+                asyncio.create_task(asyncio.to_thread(
                     run_helm_test_playbook,
                     job_id,
                     provider,
@@ -8946,7 +9110,7 @@ async def run_all_helm_tests(request: HelmTestRunAll, background_tasks: Backgrou
                     "helm_repo",  # chart_source
                     None,  # git_repo
                     "main",  # git_branch
-                )
+                ))
 
         conn.commit()
         conn.close()

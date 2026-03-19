@@ -645,6 +645,8 @@ const CAPADashboardContent = () => {
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('');
   const [isProvisioning, setIsProvisioning] = useState(false);
+  const [provisionJobId, setProvisionJobId] = useState(null);
+  const [provisionOpId, setProvisionOpId] = useState(null);
   const [isCheckingProvisionJob, setIsCheckingProvisionJob] = useState(false);
 
   const {
@@ -706,6 +708,7 @@ const CAPADashboardContent = () => {
           const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
 
           // Set provision results to show the running job
+          setProvisionJobId(runningProvisionJob.id);
           setProvisionResults({
             success: true,
             timestamp: new Date().toISOString(),
@@ -734,11 +737,13 @@ const CAPADashboardContent = () => {
   const pollProvisionJob = async (jobId) => {
     const maxAttempts = 1800; // 30 minutes max
     let attempts = 0;
+    setProvisionJobId(jobId);
 
     const poll = async () => {
       if (attempts >= maxAttempts) {
         console.log('⏱️ Max polling attempts reached');
         setIsProvisioning(false);
+        setProvisionJobId(null);
         return;
       }
 
@@ -748,17 +753,24 @@ const CAPADashboardContent = () => {
         const jobResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}`));
         const jobData = await jobResponse.json();
 
-        // Fetch logs
-        const logsResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}/logs`));
+        // Fetch logs and agent stats
+        const [logsResponse, agentResponse] = await Promise.all([
+          fetch(buildApiUrl(`/api/jobs/${jobId}/logs`)),
+          fetch(buildApiUrl(`/api/jobs/${jobId}/agent-stats`)).catch(() => null),
+        ]);
         const logsData = await logsResponse.json();
         const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
+        const agentData = agentResponse ? await agentResponse.json().catch(() => null) : null;
+        const agentStats = agentData?.agent_stats || null;
 
-        // Update provision results every 5 seconds with current output
-        if (attempts % 5 === 0 && currentOutput) {
+        // Update provision results every poll with current output
+        if (currentOutput) {
           setProvisionResults({
             success: jobData.status !== 'failed',
             timestamp: new Date().toISOString(),
             output: currentOutput,
+            isRunning: jobData.status === 'running',
+            agentStats,
           });
         }
 
@@ -768,8 +780,11 @@ const CAPADashboardContent = () => {
             success: true,
             timestamp: new Date().toISOString(),
             output: currentOutput || 'Provisioning completed successfully',
+            isRunning: false,
+            agentStats,
           });
           setIsProvisioning(false);
+          setProvisionJobId(null);
           return;
         } else if (jobData.status === 'failed') {
           console.log('❌ Provision job failed');
@@ -777,18 +792,22 @@ const CAPADashboardContent = () => {
             success: false,
             timestamp: new Date().toISOString(),
             output: currentOutput || 'Provisioning failed',
+            isRunning: false,
+            agentStats,
           });
           setIsProvisioning(false);
+          setProvisionJobId(null);
           return;
         }
 
         // Continue polling if still running
         if (jobData.status === 'running') {
-          setTimeout(poll, 1000); // Poll every 1 second
+          setTimeout(poll, 2000); // Poll every 2 seconds
         }
       } catch (error) {
         console.error('Error polling provision job:', error);
         setIsProvisioning(false);
+        setProvisionJobId(null);
       }
     };
 
@@ -1739,14 +1758,32 @@ const CAPADashboardContent = () => {
             {/* Provisioning in Progress Banner */}
             {isProvisioning && !provisionResults && (
               <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4">
-                <div className="flex items-center gap-3">
-                  <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                  <div>
-                    <h3 className="font-semibold text-blue-900">Provisioning in Progress</h3>
-                    <p className="text-sm text-blue-700 mt-1">
-                      A cluster provisioning operation is currently running. Please wait for it to complete before starting a new provision.
-                    </p>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                    <div>
+                      <h3 className="font-semibold text-blue-900">Provisioning in Progress</h3>
+                      <p className="text-sm text-blue-700 mt-1">
+                        Loading playbook output...
+                      </p>
+                    </div>
                   </div>
+                  {provisionJobId && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await fetch(buildApiUrl(`/api/jobs/${provisionJobId}/cancel`), { method: 'POST' });
+                          setIsProvisioning(false);
+                          setProvisionJobId(null);
+                          setProvisionResults({ success: false, timestamp: new Date().toISOString(), output: 'Provisioning cancelled by user', isRunning: false });
+                          if (provisionOpId) updateRecentOperationStatus(provisionOpId, '🚫 Cancelled by user');
+                        } catch (e) { console.error('Cancel failed:', e); }
+                      }}
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -1791,6 +1828,7 @@ const CAPADashboardContent = () => {
                   }
 
                   const provisionId = `provision-rosa-${Date.now()}`;
+                  setProvisionOpId(provisionId);
 
                   // Check if this is from Feature Test Dashboard
                   const testSuite = yamlEditorData?.testSuite;
@@ -1804,6 +1842,7 @@ const CAPADashboardContent = () => {
                       success: true,
                       timestamp: new Date().toISOString(),
                       output: `🚀 Starting provisioning for ${config.clusterName}...\n\nInitializing ROSA HCP cluster provisioning...\nCluster: ${config.clusterName}\nVersion: ${config.openShiftVersion}\nRegion: ${config.awsRegion}\n\nConnecting to backend...`,
+                      isRunning: true,
                     });
 
                     addToRecent({
@@ -1835,6 +1874,7 @@ const CAPADashboardContent = () => {
                     }
 
                     const jobId = result.job_id;
+                    setProvisionJobId(jobId);
                     console.log(`🔍 Polling job status for job_id: ${jobId}`);
 
                     // Close YAML editor immediately
@@ -1853,10 +1893,15 @@ const CAPADashboardContent = () => {
                         const jobData = await jobResponse.json();
                         console.log(`📋 Job status:`, jobData);
 
-                        // Fetch logs regardless of status to show real-time output
-                        const logsResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}/logs`));
+                        // Fetch logs and agent stats
+                        const [logsResponse, agentResponse] = await Promise.all([
+                          fetch(buildApiUrl(`/api/jobs/${jobId}/logs`)),
+                          fetch(buildApiUrl(`/api/jobs/${jobId}/agent-stats`)).catch(() => null),
+                        ]);
                         const logsData = await logsResponse.json();
                         const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
+                        const agentData = agentResponse ? await agentResponse.json().catch(() => null) : null;
+                        const agentStats = agentData?.agent_stats || null;
 
                         if (jobData.status === 'completed') {
                           // Success - update with final logs
@@ -1867,10 +1912,13 @@ const CAPADashboardContent = () => {
                             success: true,
                             timestamp: new Date().toISOString(),
                             output,
+                            isRunning: false,
+                            agentStats,
                           };
                           console.log('✅ Setting provision results (success):', successResults);
                           setProvisionResults(successResults);
                           setIsProvisioning(false);
+                          setProvisionJobId(null);
                           await refreshAllStatus();
                           return;
                         } else if (jobData.status === 'failed') {
@@ -1882,26 +1930,30 @@ const CAPADashboardContent = () => {
                             success: false,
                             timestamp: new Date().toISOString(),
                             output,
+                            isRunning: false,
+                            agentStats,
                           };
                           console.log('❌ Setting provision results (failure):', failureResults);
                           setProvisionResults(failureResults);
                           setIsProvisioning(false);
+                          setProvisionJobId(null);
                           return;
                         }
 
-                        // Still running - update with current logs every 5 seconds
-                        if (attempts % 5 === 0 && currentOutput) {
+                        // Still running - update with current logs every poll
+                        if (currentOutput) {
                           updateRecentOperationStatus(provisionId, '🚀 Provisioning...', currentOutput);
-                          // Also update the inline display
                           setProvisionResults({
                             success: true,
                             timestamp: new Date().toISOString(),
                             output: currentOutput,
+                            isRunning: true,
+                            agentStats,
                           });
                         }
 
                         // Wait and poll again
-                        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second
+                        await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds
                       }
 
                       // Timeout
@@ -1918,11 +1970,13 @@ const CAPADashboardContent = () => {
                       success: false,
                       timestamp: new Date().toISOString(),
                       output: errorMsg,
+                      isRunning: false,
                     });
                     // Close YAML editor and show error output
                     setProvisionViewMode('form');
                   } finally {
                     setIsProvisioning(false);
+                    setProvisionJobId(null);
                   }
                 }}
               />
@@ -1932,17 +1986,64 @@ const CAPADashboardContent = () => {
 
             {/* Provision Results Display - Inline Playbook Output */}
             {provisionResults && (
-              <div className={`mt-6 rounded-lg border-2 p-6 ${provisionResults.success ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
-                <div className="flex items-center gap-3 mb-4">
-                  {provisionResults.success ? (
-                    <span className="text-2xl">✅</span>
-                  ) : (
-                    <span className="text-xl">❌</span>
+              <div className={`mt-6 rounded-lg border-2 p-6 ${provisionResults.isRunning ? 'bg-blue-50 border-blue-300' : provisionResults.success ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    {provisionResults.isRunning ? (
+                      <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                    ) : provisionResults.success ? (
+                      <span className="text-2xl">✅</span>
+                    ) : (
+                      <span className="text-xl">❌</span>
+                    )}
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {provisionResults.isRunning ? 'Provisioning in Progress' : provisionResults.success ? 'Provisioning Started' : 'Provisioning Failed'}
+                    </h3>
+                  </div>
+                  {provisionResults.isRunning && provisionJobId && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await fetch(buildApiUrl(`/api/jobs/${provisionJobId}/cancel`), { method: 'POST' });
+                          setIsProvisioning(false);
+                          setProvisionJobId(null);
+                          setProvisionResults({ success: false, timestamp: new Date().toISOString(), output: provisionResults.output + '\n\n--- Provisioning cancelled by user ---', isRunning: false });
+                          if (provisionOpId) updateRecentOperationStatus(provisionOpId, '🚫 Cancelled by user');
+                        } catch (e) { console.error('Cancel failed:', e); }
+                      }}
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
+                    >
+                      Cancel Provisioning
+                    </button>
                   )}
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    {provisionResults.success ? 'Provisioning Started' : 'Provisioning Failed'}
-                  </h3>
                 </div>
+
+                {/* AI Agent Status */}
+                {provisionResults.agentStats?.enabled && (
+                  <div className={`mb-4 rounded-lg p-3 text-sm ${
+                    provisionResults.agentStats.issues_detected > 0
+                      ? 'bg-yellow-50 border border-yellow-300'
+                      : 'bg-gray-50 border border-gray-200'
+                  }`}>
+                    <div className="flex items-center gap-4">
+                      <span className="font-medium text-gray-700">
+                        {provisionResults.agentStats.issues_detected > 0 ? '🤖' : '🛡️'} AI Agent
+                        {provisionResults.isRunning ? ': Monitoring' : ': Summary'}
+                      </span>
+                      <span className={`${provisionResults.agentStats.issues_detected > 0 ? 'text-yellow-700' : 'text-gray-500'}`}>
+                        Issues: {provisionResults.agentStats.issues_detected}
+                      </span>
+                      <span className={`${provisionResults.agentStats.interventions > 0 ? 'text-green-700 font-medium' : 'text-gray-500'}`}>
+                        Interventions: {provisionResults.agentStats.interventions}
+                      </span>
+                      {provisionResults.agentStats.interventions > 0 && (
+                        <span className="text-green-700 font-medium">
+                          ✅ Agent auto-fixed {provisionResults.agentStats.interventions} issue(s)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Output Display */}
                 <div>
@@ -1958,7 +2059,9 @@ const CAPADashboardContent = () => {
                       {copySuccess || '📋 Copy'}
                     </button>
                   </div>
-                  <div className="bg-gray-900 text-gray-100 rounded p-4 max-h-96 overflow-y-auto font-mono text-sm">
+                  <div className="bg-gray-900 text-gray-100 rounded p-4 max-h-96 overflow-y-auto font-mono text-sm" ref={el => {
+                    if (el && provisionResults.isRunning) el.scrollTop = el.scrollHeight;
+                  }}>
                     <pre className="whitespace-pre-wrap">
                       {provisionResults.output || 'No output available'}
                     </pre>
