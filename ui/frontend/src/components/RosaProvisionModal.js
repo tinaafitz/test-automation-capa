@@ -922,10 +922,10 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
                   value={config.rolePrefix}
                   onChange={(e) => handleChange('rolePrefix', e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="auto"
+                  placeholder={config.clusterName || 'auto (uses cluster name)'}
                 />
                 <p className="mt-1 text-xs text-gray-500">
-                  Prefix for AWS IAM role names. Defaults to cluster name if not specified.
+                  Prefix for AWS IAM role names. Must be unique per cluster. Defaults to cluster name if not specified.
                 </p>
               </div>
             </div>

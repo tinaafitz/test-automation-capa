@@ -77,6 +77,8 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
 
   // AbortController for canceling polling on unmount
   const deletionAbortController = useRef(null);
+  // Track active delete job ID so we can resume on remount
+  const activeDeleteJobId = useRef(null);
 
   // Cluster section state
   const getClusterSectionCollapsedState = () => {
@@ -238,6 +240,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
       }
 
       const jobId = result.job_id;
+      activeDeleteJobId.current = jobId;
       console.log(`🔍 Polling job status for job_id: ${jobId}`);
 
       // Poll for job completion
@@ -263,12 +266,14 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
             const jobData = await jobResponse.json();
             console.log(`📋 Job status:`, jobData);
 
-            // Fetch logs regardless of status to show real-time output
-            const logsResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}/logs`), {
-              signal: controller.signal
-            });
+            // Fetch logs and agent stats for real-time output
+            const [logsResponse, agentResponse] = await Promise.all([
+              fetch(buildApiUrl(`/api/jobs/${jobId}/logs`), { signal: controller.signal }),
+              fetch(buildApiUrl(`/api/jobs/${jobId}/agent-stats`), { signal: controller.signal }).catch(() => null),
+            ]);
             const logsData = await logsResponse.json();
             const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
+            const agentStats = agentResponse ? await agentResponse.json().catch(() => null) : null;
 
             if (jobData.status === 'completed') {
               // Success - update with final logs
@@ -280,6 +285,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                 timestamp: new Date().toISOString(),
                 clusterName,
                 output,
+                agentStats: agentStats?.agent_stats || null,
               };
               console.log('✅ Setting deletion results (success):', successResults);
               setDeletionResults(successResults);
@@ -298,6 +304,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                 timestamp: new Date().toISOString(),
                 clusterName,
                 output,
+                agentStats: agentStats?.agent_stats || null,
               };
               console.log('❌ Setting deletion results (failure):', failureResults);
               setDeletionResults(failureResults);
@@ -305,15 +312,17 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
               return;
             }
 
-            // Still running - update with current logs every 5 seconds
-            if (attempts % 5 === 0 && currentOutput) {
+            // Still running - update with current logs every poll
+            if (currentOutput) {
               updateRecentOperationStatus(deleteId, '🗑️ Deleting...', currentOutput);
-              // Also update the inline display
+              // Also update the inline display with agent stats
               setDeletionResults({
                 success: true,
                 timestamp: new Date().toISOString(),
                 clusterName,
                 output: currentOutput,
+                agentStats: agentStats?.agent_stats || null,
+                isRunning: true,
               });
             }
 
@@ -358,6 +367,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
       setIsDeleting(false);
     } finally {
       deletionAbortController.current = null;
+      activeDeleteJobId.current = null;
     }
   };
 
@@ -365,6 +375,85 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
   useEffect(() => {
     fetchClusters();
   }, [fetchClusters]);
+
+  // Resume polling for any running delete jobs on mount/remount
+  useEffect(() => {
+    const resumeDeletePolling = async () => {
+      try {
+        const response = await fetch(buildApiUrl('/api/jobs'));
+        const data = await response.json();
+        const jobs = data.jobs || [];
+
+        // Find any running delete job
+        const runningDelete = jobs.find(
+          (j) => j.status === 'running' && j.description && j.description.includes('Delete ROSA HCP')
+        );
+
+        if (runningDelete) {
+          const jobId = runningDelete.id;
+          const clusterName = runningDelete.description.replace('Delete ROSA HCP Cluster: ', '');
+          console.log(`🔄 Resuming delete polling for ${clusterName} (job: ${jobId})`);
+
+          activeDeleteJobId.current = jobId;
+          setIsDeleting(true);
+
+          const controller = new AbortController();
+          deletionAbortController.current = controller;
+
+          // Start polling loop
+          const poll = async () => {
+            while (!controller.signal.aborted) {
+              try {
+                const [logsRes, agentRes, jobRes] = await Promise.all([
+                  fetch(buildApiUrl(`/api/jobs/${jobId}/logs`), { signal: controller.signal }),
+                  fetch(buildApiUrl(`/api/jobs/${jobId}/agent-stats`), { signal: controller.signal }).catch(() => null),
+                  fetch(buildApiUrl(`/api/jobs/${jobId}`), { signal: controller.signal }),
+                ]);
+                const logsData = await logsRes.json();
+                const agentStats = agentRes ? await agentRes.json().catch(() => null) : null;
+                const jobData = await jobRes.json();
+                const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
+
+                const isDone = jobData.status === 'completed' || jobData.status === 'failed';
+
+                setDeletionResults({
+                  success: jobData.status !== 'failed',
+                  timestamp: new Date().toISOString(),
+                  clusterName,
+                  output: currentOutput || 'Waiting for output...',
+                  agentStats: agentStats?.agent_stats || null,
+                  isRunning: !isDone,
+                });
+
+                if (isDone) {
+                  setIsDeleting(false);
+                  activeDeleteJobId.current = null;
+                  deletionAbortController.current = null;
+                  if (jobData.status === 'completed') {
+                    await fetchClusters();
+                  }
+                  return;
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+              } catch (err) {
+                if (err.name === 'AbortError') return;
+                console.error('Resume polling error:', err);
+                return;
+              }
+            }
+          };
+
+          poll();
+        }
+      } catch (err) {
+        console.error('Failed to check for running delete jobs:', err);
+      }
+    };
+
+    resumeDeletePolling();
+    // eslint-disable-next-line
+  }, []);
 
   // Clear clusters when connection is lost
   useEffect(() => {
@@ -571,7 +660,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
       {/* Deletion Results Display - Inline Playbook Output */}
       {deletionResults && (
         <div className="mt-6 space-y-4">
-          <div className={`rounded-lg border-2 p-6 ${deletionResults.success ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+          <div className={`rounded-lg border-2 p-6 ${isDeleting ? 'bg-blue-50 border-blue-300' : deletionResults.success ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
             <div className="flex items-center gap-3 mb-4">
               {deletionResults.success ? (
                 <span className="text-2xl">✅</span>
@@ -582,6 +671,29 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                 {isDeleting ? `Deleting ${deletionResults.clusterName}...` : deletionResults.success ? 'Deletion Completed' : 'Deletion Failed'}
               </h3>
             </div>
+
+            {/* AI Agent Status Badge */}
+            {deletionResults.agentStats?.enabled && (
+              <div className={`mb-4 rounded-lg p-3 text-sm ${
+                deletionResults.agentStats.issues_detected > 0
+                  ? 'bg-yellow-50 border border-yellow-300'
+                  : 'bg-gray-50 border border-gray-200'
+              }`}>
+                <div className="flex items-center gap-4">
+                  <span className="font-medium text-gray-700">
+                    {deletionResults.agentStats.issues_detected > 0 ? '\uD83E\uDD16' : '\uD83D\uDEE1\uFE0F'} AI Agent
+                    {deletionResults.isRunning ? ': Monitoring' : ': Summary'}
+                  </span>
+                  <span>Issues: {deletionResults.agentStats.issues_detected}</span>
+                  <span>Interventions: {deletionResults.agentStats.interventions}</span>
+                  {deletionResults.agentStats.interventions > 0 && (
+                    <span className="text-green-700 font-medium">
+                      Agent auto-fixed {deletionResults.agentStats.interventions} issue(s)
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Output Display */}
             <div>
