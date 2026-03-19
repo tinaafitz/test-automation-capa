@@ -57,7 +57,12 @@ class TrackedIssue:
         )
 
     def should_intervene(self) -> bool:
-        return self.state in (IssueState.DETECTED,) or self.can_retry()
+        if not (self.state in (IssueState.DETECTED,) or self.can_retry()):
+            return False
+        # Throttle re-checks to at most once per 60 seconds
+        if self.attempts > 0 and (time.time() - self.last_updated) < 60:
+            return False
+        return True
 
 
 class MonitoringAgent(BaseAgent):

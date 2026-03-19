@@ -46,6 +46,8 @@ class DiagnosticAgent(BaseAgent):
 
         diagnosis_methods = {
             "rosanetwork_stuck_deletion": self._diagnose_stuck_rosanetwork,
+            "rosacontrolplane_stuck_deletion": self._diagnose_stuck_rosacontrolplane,
+            "rosaroleconfig_stuck_deletion": self._diagnose_stuck_rosaroleconfig,
             "cloudformation_deletion_failure": self._diagnose_cloudformation_failure,
             "ocm_auth_failure": self._diagnose_ocm_auth,
             "capi_not_installed": self._diagnose_capi_missing,
@@ -61,22 +63,22 @@ class DiagnosticAgent(BaseAgent):
 
         return self._diagnose_generic(issue_type, context)
 
-    def _diagnose_stuck_rosanetwork(self, context: Dict) -> Dict:
-        """Diagnose ROSANetwork stuck in deletion state."""
-        self.log("Analyzing ROSANetwork deletion issue...", "debug")
+    def _diagnose_stuck_resource(self, context: Dict, resource_type: str, issue_type: str) -> Dict:
+        """Generic diagnosis for a resource stuck in deletion state."""
+        self.log(f"Analyzing {resource_type} deletion issue...", "debug")
 
-        resource_name, namespace = self._extract_resource_info(context)
-        resource_info = self._get_resource_info("rosanetwork", resource_name, namespace)
+        resource_name, namespace = self._extract_resource_info(context, resource_type)
+        resource_info = self._get_resource_info(resource_type, resource_name, namespace)
 
         diagnosis = {
-            "issue_type": "rosanetwork_stuck_deletion",
-            "root_cause": "ROSANetwork has finalizers preventing deletion",
+            "issue_type": issue_type,
+            "root_cause": f"{resource_type} has finalizers preventing deletion",
             "severity": "high",
             "confidence": 0.9,
             "evidence": [],
             "recommended_fix": "remove_finalizers",
             "fix_parameters": {
-                "resource_type": "rosanetwork",
+                "resource_type": resource_type,
                 "resource_name": resource_name,
                 "namespace": namespace,
             }
@@ -99,10 +101,117 @@ class DiagnosticAgent(BaseAgent):
         else:
             diagnosis["confidence"] = 0.7
             diagnosis["evidence"].append(f"Could not retrieve resource info for {resource_name} in namespace {namespace}")
-            self.log(f"WARNING: Could not get resource info for rosanetwork/{resource_name} in {namespace}", "warning")
+            self.log(f"WARNING: Could not get resource info for {resource_type}/{resource_name} in {namespace}", "warning")
 
         self.log(f"Diagnosis complete. Confidence: {diagnosis['confidence']}", "info")
         return diagnosis
+
+    def _diagnose_stuck_rosanetwork(self, context: Dict) -> Dict:
+        """Diagnose ROSANetwork stuck in deletion state.
+
+        Unlike other resources, ROSANetwork has a backing CloudFormation stack.
+        The CAPA controller will re-add the finalizer as long as the stack exists,
+        so removing finalizers is only appropriate when the stack is already gone.
+        """
+        resource_name, namespace = self._extract_resource_info(context, "rosanetwork")
+        resource_info = self._get_resource_info("rosanetwork", resource_name, namespace)
+
+        # Determine the CloudFormation stack name from the resource spec
+        stack_name = None
+        if resource_info:
+            stack_name = resource_info.get("spec", {}).get("stackName")
+            if not stack_name:
+                # Convention: <cluster-name>-rosa-network-stack
+                stack_name = f"{resource_name.replace('-network', '')}-rosa-network-stack"
+
+        # Check CloudFormation stack status
+        cfn_status = self._get_cloudformation_stack_status(stack_name, resource_info)
+
+        if cfn_status == "DELETE_IN_PROGRESS":
+            # Stack is actively being deleted — don't touch finalizers, just wait.
+            # Return low confidence so the agent callback skips remediation entirely,
+            # leaving the issue in DIAGNOSING state. The state machine will NOT
+            # allow re-intervention (should_intervene returns False for DIAGNOSING),
+            # which is correct — we don't want repeated interventions while AWS
+            # is working. The ansible wait loop will either succeed when the stack
+            # finishes, or time out.
+            self.log(f"CloudFormation stack {stack_name} is DELETE_IN_PROGRESS — no intervention needed", "info")
+            return {
+                "issue_type": "rosanetwork_stuck_deletion",
+                "root_cause": "CloudFormation stack is still being deleted by AWS — no intervention needed",
+                "severity": "low",
+                "confidence": 0.5,
+                "evidence": [f"CloudFormation stack {stack_name} status: DELETE_IN_PROGRESS"],
+                "recommended_fix": "log_and_continue",
+                "fix_parameters": {}
+            }
+        elif cfn_status == "DELETE_FAILED":
+            # Stack failed to delete — retry the CloudFormation deletion
+            self.log(f"CloudFormation stack {stack_name} DELETE_FAILED — retrying", "warning")
+            return {
+                "issue_type": "rosanetwork_stuck_deletion",
+                "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
+                "severity": "high",
+                "confidence": 0.95,
+                "evidence": [f"CloudFormation stack {stack_name} status: DELETE_FAILED"],
+                "recommended_fix": "retry_cloudformation_delete",
+                "fix_parameters": {
+                    "stack_name": stack_name,
+                    "region": resource_info.get("spec", {}).get("region", "us-west-2") if resource_info else "us-west-2",
+                }
+            }
+        elif cfn_status == "GONE":
+            # Stack is fully deleted — safe to remove finalizers
+            self.log(f"CloudFormation stack {stack_name} is gone — removing finalizers", "info")
+            return self._diagnose_stuck_resource(context, "rosanetwork", "rosanetwork_stuck_deletion")
+        else:
+            # Unknown or unexpected status — fall back to generic diagnosis
+            self.log(f"CloudFormation stack {stack_name} status: {cfn_status}", "warning")
+            return self._diagnose_stuck_resource(context, "rosanetwork", "rosanetwork_stuck_deletion")
+
+    def _get_cloudformation_stack_status(self, stack_name: str, resource_info: Dict = None) -> str:
+        """Check CloudFormation stack status.
+
+        Returns one of: DELETE_IN_PROGRESS, DELETE_FAILED, DELETE_COMPLETE, GONE,
+        or the raw stack status string.
+        """
+        if not stack_name:
+            return "UNKNOWN"
+
+        region = "us-west-2"
+        if resource_info:
+            region = resource_info.get("spec", {}).get("region", region)
+
+        try:
+            cmd = [
+                "aws", "cloudformation", "describe-stacks",
+                "--stack-name", stack_name,
+                "--region", region,
+                "--query", "Stacks[0].StackStatus",
+                "--output", "text"
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                return result.stdout.strip()
+            else:
+                # Stack doesn't exist (deleted or never created)
+                if "does not exist" in result.stderr:
+                    return "GONE"
+                return "UNKNOWN"
+        except subprocess.TimeoutExpired:
+            self.log("Timeout checking CloudFormation stack status", "warning")
+            return "UNKNOWN"
+        except Exception as e:
+            self.log(f"Error checking CloudFormation stack: {e}", "error")
+            return "UNKNOWN"
+
+    def _diagnose_stuck_rosacontrolplane(self, context: Dict) -> Dict:
+        """Diagnose ROSAControlPlane stuck in deletion state."""
+        return self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
+
+    def _diagnose_stuck_rosaroleconfig(self, context: Dict) -> Dict:
+        """Diagnose ROSARoleConfig stuck in deletion state."""
+        return self._diagnose_stuck_resource(context, "rosaroleconfig", "rosaroleconfig_stuck_deletion")
 
     def _diagnose_cloudformation_failure(self, context: Dict) -> Dict:
         """Diagnose CloudFormation stack deletion failure."""
@@ -261,13 +370,10 @@ class DiagnosticAgent(BaseAgent):
             return resource_name, namespace
 
         # 2. Parse buffer for oc/kubectl commands
-        #    Commands may appear bare or inside Ansible JSON output like:
-        #    "cmd": "oc get rosanetwork pop-rosa-hcp-network -n ns-rosa-hcp 2>/dev/null\n"
-        #    "_raw_params": "oc get rosanetwork pop-rosa-hcp-network -n ns-rosa-hcp 2>/dev/null\n"
         buffer = context.get("buffer", [])
         for line in buffer:
             oc_match = re.search(
-                rf'(?:oc|kubectl)\s+(?:get|patch|delete)\s+{re.escape(resource_type)}\s+([\w][\w.-]+)\s+-n\s+([\w-]+)',
+                rf'(?:oc|kubectl)\s+(?:get|patch|delete)\s+{re.escape(resource_type)}\s+(\S+)\s+-n\s+(\S+)',
                 line, re.IGNORECASE
             )
             if oc_match:
@@ -287,23 +393,7 @@ class DiagnosticAgent(BaseAgent):
                         self.log(f"Extracted from output table: {resource_name}", "debug")
                         return resource_name, namespace
 
-        # 4. Parse buffer for RETRYING lines that mention the resource explicitly
-        # e.g. "FAILED - RETRYING: ROSANetwork pop-rosa-hcp-network still exists ..."
-        type_pattern_retry = resource_type.replace("rosa", "ROSA", 1) if resource_type.startswith("rosa") else resource_type
-        for line in buffer:
-            retry_match = re.search(
-                rf'(?:RETRYING|retrying).*{type_pattern_retry}\s+(\S+)',
-                line, re.IGNORECASE
-            )
-            if retry_match:
-                candidate = retry_match.group(1)
-                # Filter out generic words that aren't resource names
-                if candidate.lower() not in {"deletion", "delete", "complete", "stuck", "if", "to", "for", "the", "in", "still"} and len(candidate) > 2:
-                    resource_name = candidate
-                    self.log(f"Extracted from RETRYING line: {resource_name}", "debug")
-                    return resource_name, namespace
-
-        # 5. Fallback: task name (least reliable)
+        # 4. Fallback: task name (least reliable)
         # Build a regex for the resource type (e.g., ROSANetwork, ROSAControlPlane)
         type_pattern = resource_type.replace("rosa", "ROSA", 1) if resource_type.startswith("rosa") else resource_type
         current_task = context.get("current_task", "")

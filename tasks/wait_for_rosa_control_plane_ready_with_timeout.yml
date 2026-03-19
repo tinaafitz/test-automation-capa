@@ -75,6 +75,15 @@
           exit 0
         fi
 
+        # Check conditions for fatal errors (AccessDenied, OIDC mismatch, etc.)
+        # These will never self-resolve, so fail fast instead of waiting for timeout
+        CONDITION_MSG=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
+          -o jsonpath='{range .status.conditions[?(@.status=="False")]}{.type}: {.message}{"\n"}{end}' 2>/dev/null || echo "")
+        if echo "$CONDITION_MSG" | grep -qiE "AccessDenied|Not authorized|AssumeRoleWithWebIdentity"; then
+          echo "FATAL_IAM_ERROR|$AGE_MINUTES|$CONDITION_MSG"
+          exit 1
+        fi
+
         # Check if timeout exceeded
         if [ $AGE_MINUTES -ge {{ max_provisioning_minutes }} ]; then
           echo "TIMEOUT|$AGE_MINUTES"
@@ -88,7 +97,7 @@
           echo "PROVISIONING|$AGE_MINUTES"
         fi
       register: cluster_status_check
-      until: cluster_status_check.stdout is search("READY|") or cluster_status_check.stdout is search("TIMEOUT|")
+      until: cluster_status_check.stdout is search("READY|") or cluster_status_check.stdout is search("TIMEOUT|") or cluster_status_check.stdout is search("FATAL_IAM_ERROR|")
       retries: "{{ max_retries }}"
       delay: "{{ check_interval_seconds }}"
       failed_when: false
@@ -98,6 +107,7 @@
       set_fact:
         cluster_state: "{{ cluster_status_check.stdout.split('|')[0] }}"
         elapsed_minutes: "{{ cluster_status_check.stdout.split('|')[1] | default('0') | int }}"
+        fatal_error_detail: "{{ cluster_status_check.stdout.split('|')[2] | default('') }}"
       when: cluster_status_check.stdout is defined and '|' in cluster_status_check.stdout
 
     - name: Display warning if approaching timeout
@@ -295,6 +305,67 @@
               2. Address any permission or configuration issues
               3. Verify AWS account is in good standing
               4. Retry provisioning with corrections
+              ════════════════════════════════════════════════════════════
+
+    - name: Handle fatal IAM error - fail fast with clear message
+      when:
+        - cluster_state is defined
+        - cluster_state == "FATAL_IAM_ERROR"
+      block:
+        - name: Display fatal IAM error
+          debug:
+            msg: |
+              CRITICAL: Fatal IAM/OIDC Error Detected - Failing Fast
+
+              Cluster: {{ cluster_name }}
+              Namespace: {{ capi_namespace }}
+              Elapsed Time: {{ elapsed_minutes }} minutes
+
+              This error will NEVER self-resolve. The cluster cannot provision
+              because the IAM roles have an OIDC trust policy mismatch.
+
+              Error Detail:
+              {{ fatal_error_detail }}
+
+        - name: Force delete cluster with fatal IAM error
+          shell: |
+            oc delete rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
+              --force --grace-period=0 2>&1 || echo "Already deleted or error"
+          register: fatal_force_delete_result
+          changed_when: "'deleted' in fatal_force_delete_result.stdout"
+          failed_when: false
+
+        - name: Fail the playbook with IAM error details
+          fail:
+            msg: |
+              ════════════════════════════════════════════════════════════
+              FATAL IAM/OIDC ERROR - FAST FAIL
+              ════════════════════════════════════════════════════════════
+
+              CLUSTER INFORMATION:
+              - Name: {{ cluster_name }}
+              - Namespace: {{ capi_namespace }}
+              - Elapsed Time: {{ elapsed_minutes }} minutes
+              - Fast-Failed: Yes (unrecoverable IAM error)
+
+              ERROR DETAIL:
+              {{ fatal_error_detail }}
+
+              CLEANUP:
+              - Cluster force-deleted: {{ 'Yes' if 'deleted' in fatal_force_delete_result.stdout else 'Already deleted' }}
+
+              ROOT CAUSE:
+              The IAM roles used by this cluster have an OIDC provider trust
+              policy that doesn't match this cluster's OIDC provider URL.
+              This typically happens when:
+              - Multiple clusters share the same role_prefix
+              - Roles were created for a different cluster
+              - The OIDC provider was recreated
+
+              FIX:
+              1. Use a unique role_prefix per cluster (or leave blank to auto-generate)
+              2. Delete the old IAM roles if they belong to a deleted cluster
+              3. Re-provision with corrected configuration
               ════════════════════════════════════════════════════════════
 
     - name: Display success message

@@ -140,8 +140,11 @@ def test_state_machine_prevents_duplicate_intervention():
     # Should only fire callback ONCE (state machine blocks after first)
     assert callback_count == 1, f"Expected 1 callback, got {callback_count}"
 
-    # Mark it failed — should allow one more retry
+    # Mark it failed — should allow one more retry after throttle expires
     monitor.mark_issue_failed("rosanetwork_stuck_deletion")
+    # Bypass the 60-second throttle for testing
+    tracked = list(monitor._tracked_issues.values())[0]
+    tracked.last_updated = time.time() - 61
     monitor.process_line(retrying_line)
     assert callback_count == 2, f"Expected 2 callbacks after failure, got {callback_count}"
 
@@ -170,9 +173,11 @@ def test_state_machine_max_attempts():
     monitor.process_line(retrying_line)
     assert callback_count == 1
 
-    # Fail and retry up to max_attempts (3)
+    # Fail and retry up to max_attempts (3), bypassing 60s throttle each time
     for i in range(4):
         monitor.mark_issue_failed("rosanetwork_stuck_deletion")
+        tracked = list(monitor._tracked_issues.values())[0]
+        tracked.last_updated = time.time() - 61  # Bypass throttle
         monitor.process_line(retrying_line)
 
     # Should have capped at 3 attempts
@@ -423,6 +428,119 @@ def test_extract_resource_from_ansible_json_cmd():
     print("PASSED")
 
 
+def test_throttle_blocks_rapid_recheck():
+    """Test that the 60-second throttle prevents rapid re-intervention"""
+    print("\n=== Test 22: Throttle blocks rapid re-check ===")
+    monitor = MonitoringAgent(Path("."), enabled=True, verbose=True)
+
+    callback_count = 0
+    def mock_callback(issue_type, context, issue):
+        nonlocal callback_count
+        callback_count += 1
+
+    monitor.set_issue_callback(mock_callback)
+
+    retrying_line = "FAILED - RETRYING: ROSANetwork test-throttle still exists waiting for deletion (30 retries left)"
+
+    # First detection — should fire
+    monitor.process_line(retrying_line)
+    assert callback_count == 1, f"Expected 1 callback, got {callback_count}"
+
+    # Mark failed but DON'T bypass throttle — immediate retry should be blocked
+    monitor.mark_issue_failed("rosanetwork_stuck_deletion")
+    monitor.process_line(retrying_line)
+    assert callback_count == 1, f"Expected still 1 callback (throttled), got {callback_count}"
+
+    # Now bypass throttle — should fire
+    tracked = list(monitor._tracked_issues.values())[0]
+    tracked.last_updated = time.time() - 61
+    monitor.process_line(retrying_line)
+    assert callback_count == 2, f"Expected 2 callbacks after throttle expired, got {callback_count}"
+    print("PASSED")
+
+
+def test_low_confidence_keeps_throttle_active():
+    """Test that low-confidence resets keep attempts >= 1 so throttle stays active"""
+    print("\n=== Test 23: Low confidence keeps throttle active ===")
+    monitor = MonitoringAgent(Path("."), enabled=True, verbose=True)
+
+    callback_count = 0
+    def mock_callback(issue_type, context, issue):
+        nonlocal callback_count
+        callback_count += 1
+
+    monitor.set_issue_callback(mock_callback)
+
+    retrying_line = "FAILED - RETRYING: ROSANetwork test-low-conf still exists waiting for deletion (30 retries left)"
+
+    # First detection
+    monitor.process_line(retrying_line)
+    assert callback_count == 1
+
+    # Simulate what app.py does for low confidence: reset state to DETECTED,
+    # but keep attempts >= 1 (the fix)
+    tracked = list(monitor._tracked_issues.values())[0]
+    tracked.state = IssueState.DETECTED
+    # This is what the fixed code does — keep attempts >= 1
+    if tracked.attempts > 1:
+        tracked.attempts -= 1
+    # attempts should still be 1
+    assert tracked.attempts >= 1, f"Expected attempts >= 1, got {tracked.attempts}"
+
+    # Immediate re-process should be throttled (attempts > 0 and < 60s elapsed)
+    monitor.process_line(retrying_line)
+    assert callback_count == 1, f"Expected still 1 (throttled), got {callback_count}"
+
+    # After 60s, should re-fire
+    tracked.last_updated = time.time() - 61
+    monitor.process_line(retrying_line)
+    assert callback_count == 2, f"Expected 2 after throttle expired, got {callback_count}"
+    print("PASSED")
+
+
+def test_low_confidence_log_throttle():
+    """Test that low-confidence checks only log every 5th time"""
+    print("\n=== Test 24: Low confidence log throttle ===")
+    monitor = MonitoringAgent(Path("."), enabled=True, verbose=True)
+
+    # Create a TrackedIssue and simulate the log throttle logic from app.py
+    from agents.monitoring_agent import TrackedIssue
+    tracked = TrackedIssue("rosanetwork_stuck_deletion", "ns/test", {})
+    tracked.attempts = 1
+
+    logged_times = []
+    for i in range(20):
+        low_conf_count = getattr(tracked, '_low_conf_count', 0) + 1
+        tracked._low_conf_count = low_conf_count
+        should_log = (low_conf_count == 1 or low_conf_count % 5 == 0)
+        if should_log:
+            logged_times.append(low_conf_count)
+
+    # Should log at: 1, 5, 10, 15, 20
+    assert logged_times == [1, 5, 10, 15, 20], f"Expected [1, 5, 10, 15, 20], got {logged_times}"
+    print("PASSED")
+
+
+def test_retry_cloudformation_delete_in_remediation():
+    """Test that retry_cloudformation_delete is a valid fix method"""
+    print("\n=== Test 25: retry_cloudformation_delete fix method exists ===")
+    from agents.remediation_agent import RemediationAgent
+    agent = RemediationAgent(Path("."), enabled=True, verbose=True, dry_run=True)
+    diagnosis = {
+        "issue_type": "rosanetwork_stuck_deletion",
+        "recommended_fix": "retry_cloudformation_delete",
+        "fix_parameters": {
+            "stack_name": "test-stack",
+            "region": "us-west-2",
+        }
+    }
+    success, message = agent.remediate(diagnosis)
+    assert success, f"Dry run should succeed, got: {message}"
+    assert "retry_cloudformation_delete" in message or "DRY RUN" in message, \
+        f"Expected dry run message, got: {message}"
+    print("PASSED")
+
+
 def main():
     """Run all tests"""
     print("=" * 70)
@@ -451,6 +569,10 @@ def main():
         test_extract_resource_from_retrying_line,
         test_no_false_positive_on_display_banner,
         test_extract_resource_from_ansible_json_cmd,
+        test_throttle_blocks_rapid_recheck,
+        test_low_confidence_keeps_throttle_active,
+        test_low_confidence_log_throttle,
+        test_retry_cloudformation_delete_in_remediation,
     ]
 
     passed = 0

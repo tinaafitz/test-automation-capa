@@ -88,6 +88,25 @@
       ]
     },
     {
+      "type": "rosacontrolplane_stuck_deletion",
+      "pattern": "FAILED - RETRYING.*(?:rosacontrolplane|ROSAControlPlane).*(?:delet|still exists)|FAILED - RETRYING.*(?:delet).*(?:rosacontrolplane|ROSAControlPlane)",
+      "severity": "high",
+      "auto_fix": true,
+      "description": "ROSAControlPlane stuck in deletion state due to finalizers or AWS resource cleanup",
+      "symptoms": [
+        "ROSAControlPlane has deletionTimestamp but won't delete",
+        "Ansible retrying ROSAControlPlane deletion continuously",
+        "Finalizers preventing resource deletion",
+        "ROSA cluster still deprovisioning in AWS"
+      ],
+      "common_causes": [
+        "Finalizers blocking deletion",
+        "ROSA cluster still deprovisioning in AWS",
+        "OCM API slow to respond",
+        "Controller unable to clean up resources"
+      ]
+    },
+    {
       "type": "rosanetwork_stuck_deletion",
       "pattern": "FAILED - RETRYING.*(?:rosanetwork|ROSANetwork).*(?:delet|still exists)|FAILED - RETRYING.*(?:delet).*(?:rosanetwork|ROSANetwork)",
       "severity": "high",
@@ -103,6 +122,24 @@
         "Finalizers blocking deletion",
         "Underlying CloudFormation stack stuck",
         "VPC has orphaned dependencies",
+        "Controller unable to clean up resources"
+      ]
+    },
+    {
+      "type": "rosaroleconfig_stuck_deletion",
+      "pattern": "FAILED - RETRYING.*(?:rosaroleconfig|ROSARoleConfig).*(?:delet|still exists)|FAILED - RETRYING.*(?:delet).*(?:rosaroleconfig|ROSARoleConfig)",
+      "severity": "high",
+      "auto_fix": true,
+      "description": "ROSARoleConfig stuck in deletion state due to finalizers or IAM cleanup",
+      "symptoms": [
+        "ROSARoleConfig has deletionTimestamp but won't delete",
+        "Ansible retrying ROSARoleConfig deletion continuously",
+        "Finalizers preventing resource deletion",
+        "IAM roles still being cleaned up"
+      ],
+      "common_causes": [
+        "Finalizers blocking deletion",
+        "IAM roles still in use",
         "Controller unable to clean up resources"
       ]
     },
