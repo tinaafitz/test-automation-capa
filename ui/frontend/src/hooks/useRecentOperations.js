@@ -53,7 +53,7 @@ export const useRecentOperations = () => {
   }, []);
 
   // Update operation status
-  const updateRecentOperationStatus = useCallback((operationId, newStatus, newOutput) => {
+  const updateRecentOperationStatus = useCallback((operationId, newStatus, newOutput, extraFields) => {
     setRecentOperations((prev) =>
       prev.map((op) =>
         op.id === operationId
@@ -62,6 +62,7 @@ export const useRecentOperations = () => {
               status: newStatus,
               output: newOutput !== undefined ? newOutput : op.output,
               completedAt: new Date().toISOString(),
+              ...(extraFields || {}),
             }
           : op
       )

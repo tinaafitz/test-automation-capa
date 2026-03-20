@@ -279,7 +279,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
               // Success - update with final logs
               const output = currentOutput || 'Deletion completed successfully';
 
-              updateRecentOperationStatus(deleteId, '✅ Cluster deleted successfully!', output);
+              updateRecentOperationStatus(deleteId, '✅ Cluster deleted successfully!', output, { agentStats: agentStats?.agent_stats || null });
               const successResults = {
                 success: true,
                 timestamp: new Date().toISOString(),
@@ -298,7 +298,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
               // Failure - update with error logs
               const output = currentOutput || (jobData.error || jobData.message || 'Deletion failed');
 
-              updateRecentOperationStatus(deleteId, '❌ Deletion failed', output);
+              updateRecentOperationStatus(deleteId, '❌ Deletion failed', output, { agentStats: agentStats?.agent_stats || null });
               const failureResults = {
                 success: false,
                 timestamp: new Date().toISOString(),
@@ -672,14 +672,14 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
               </h3>
             </div>
 
-            {/* AI Agent Status Badge */}
+            {/* AI Agent Summary */}
             {deletionResults.agentStats?.enabled && (
               <div className={`mb-4 rounded-lg p-3 text-sm ${
                 deletionResults.agentStats.issues_detected > 0
                   ? 'bg-yellow-50 border border-yellow-300'
                   : 'bg-gray-50 border border-gray-200'
               }`}>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 mb-2">
                   <span className="font-medium text-gray-700">
                     {deletionResults.agentStats.issues_detected > 0 ? '\uD83E\uDD16' : '\uD83D\uDEE1\uFE0F'} AI Agent
                     {deletionResults.isRunning ? ': Monitoring' : ': Summary'}
@@ -692,6 +692,31 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                     </span>
                   )}
                 </div>
+                {/* Per-resource agent activity details */}
+                {deletionResults.agentStats.resource_details?.length > 0 && !deletionResults.isRunning && (
+                  <div className="mt-2 pt-2 border-t border-yellow-200 space-y-1">
+                    {deletionResults.agentStats.resource_details.map((detail, idx) => {
+                      const statusIcon = detail.status === 'resolved' ? '\u2705'
+                        : detail.status === 'failed' ? '\u26A0\uFE0F'
+                        : detail.status === 'detected' ? '\uD83D\uDD0D'
+                        : '\u2139\uFE0F';
+                      const issueLabel = detail.issue_type?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
+                      return (
+                        <div key={idx} className="flex items-start gap-2 text-xs text-gray-600">
+                          <span className="flex-shrink-0">{statusIcon}</span>
+                          <div>
+                            <span className="font-medium text-gray-700">{detail.resource_key}</span>
+                            <span className="mx-1">&mdash;</span>
+                            <span>{issueLabel}</span>
+                            {detail.diagnosis && (
+                              <span className="text-gray-500 ml-1">({detail.diagnosis})</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 

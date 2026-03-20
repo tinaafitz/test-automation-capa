@@ -2066,6 +2066,48 @@ const MinikubeDashboardContent = () => {
                         )}
                       </div>
 
+                      {/* AI Agent Summary */}
+                      {task.agentStats?.enabled && task.agentStats.issues_detected > 0 && (
+                        <div className="mt-3 rounded-lg p-3 text-sm bg-yellow-50 border border-yellow-300">
+                          <div className="flex items-center gap-4 mb-2">
+                            <span className="font-medium text-gray-700">
+                              🤖 AI Agent: Summary
+                            </span>
+                            <span>Issues: {task.agentStats.issues_detected}</span>
+                            <span>Interventions: {task.agentStats.interventions}</span>
+                            {task.agentStats.interventions > 0 && (
+                              <span className="text-green-700 font-medium">
+                                Agent auto-fixed {task.agentStats.interventions} issue(s)
+                              </span>
+                            )}
+                          </div>
+                          {task.agentStats.resource_details?.length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-yellow-200 space-y-1">
+                              {task.agentStats.resource_details.map((detail, idx) => {
+                                const statusIcon = detail.status === 'resolved' ? '✅'
+                                  : detail.status === 'failed' ? '⚠️'
+                                  : detail.status === 'detected' ? '🔍'
+                                  : 'ℹ️';
+                                const issueLabel = detail.issue_type?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
+                                return (
+                                  <div key={idx} className="flex items-start gap-2 text-xs text-gray-600">
+                                    <span className="flex-shrink-0">{statusIcon}</span>
+                                    <div>
+                                      <span className="font-medium text-gray-700">{detail.resource_key}</span>
+                                      <span className="mx-1">&mdash;</span>
+                                      <span>{issueLabel}</span>
+                                      {detail.diagnosis && (
+                                        <span className="text-gray-500 ml-1">({detail.diagnosis})</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Task Output */}
                       {task.output && (
                         <div className="mt-3">

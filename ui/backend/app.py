@@ -156,10 +156,32 @@ def get_agent_stats(job_id: str) -> dict:
 
     monitor = session["monitor"]
     remediation = session["remediation"]
+
+    # Build per-resource event details
+    events = jobs.get(job_id, {}).get("agent_events", [])
+    # Deduplicate by resource_key, keeping the latest event per resource
+    resource_details = {}
+    for event in events:
+        rk = event.get("resource_key", "unknown")
+        resource_details[rk] = {
+            "resource_key": rk,
+            "issue_type": event.get("issue_type", ""),
+            "diagnosis": event.get("diagnosis", ""),
+            "fix_applied": event.get("fix_applied", ""),
+        }
+
+    # Add resolution status from tracked issues
+    for key, tracked in monitor._tracked_issues.items():
+        rk = tracked.resource_key
+        if rk in resource_details:
+            resource_details[rk]["status"] = tracked.state.value
+            resource_details[rk]["attempts"] = tracked.attempts
+
     return {
         "enabled": True,
         "issues_detected": len(monitor.patterns_detected),
         "interventions": len(remediation.interventions),
+        "resource_details": list(resource_details.values()),
     }
 
 # Cache for expensive operations (TTL: 30 seconds)
