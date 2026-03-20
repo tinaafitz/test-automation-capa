@@ -108,6 +108,9 @@
   shell: |
     oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} 2>/dev/null
   register: final_rcp_check
+  until: final_rcp_check.rc != 0
+  retries: 18
+  delay: 10
   failed_when: false
   changed_when: false
   when:
@@ -191,6 +194,9 @@
   shell: |
     oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} 2>/dev/null
   register: final_rn_check
+  until: final_rn_check.rc != 0
+  retries: 18
+  delay: 10
   failed_when: false
   changed_when: false
   when:
@@ -251,6 +257,9 @@
   shell: |
     oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} 2>/dev/null
   register: final_rrc_check
+  until: final_rrc_check.rc != 0
+  retries: 18
+  delay: 10
   failed_when: false
   changed_when: false
   when:

@@ -577,8 +577,15 @@ def test_deletion_task_final_check_pattern():
 
         # Verify the final check task exists right after the wait
         final_idx = task_names.index(final_task)
+        final_t = tasks[final_idx]
         assert final_idx > wait_idx, \
             f"{final_task} should come after {wait_task}"
+
+        # Verify the final check has its own retry loop (not just a single check)
+        assert final_t.get("retries", 0) > 0, \
+            f"{final_task} should have retries for grace period, got: {final_t.get('retries')}"
+        assert final_t.get("until") is not None, \
+            f"{final_task} should have an until condition"
 
         # Verify the fail task references the final check register variable
         fail_idx = task_names.index(fail_task)
