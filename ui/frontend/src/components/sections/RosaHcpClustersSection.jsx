@@ -245,7 +245,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
 
       // Poll for job completion
       const pollJobStatus = async () => {
-        const maxAttempts = 2100; // 35 minutes max (20 min RCP + 15 min Network)
+        const maxAttempts = 4800; // 80 minutes max (23 min RCP + 33 min Network + 13 min RoleConfig + overhead)
         let attempts = 0;
 
         while (attempts < maxAttempts) {
@@ -345,7 +345,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         }
 
         // Timeout
-        throw new Error('Deletion timed out after 35 minutes');
+        throw new Error('Deletion timed out after 80 minutes');
       };
 
       await pollJobStatus();
