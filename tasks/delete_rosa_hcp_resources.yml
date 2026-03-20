@@ -99,15 +99,26 @@
   until: wait_rcp.rc != 0
   retries: "{{ (rosacontrolplane_timeout | default(deletion_timeout) | int / 10) | int }}"
   delay: 10
-  failed_when: wait_rcp.rc == 0
+  failed_when: false
   when:
     - wait_for_deletion | bool
     - "'not-found' not in rcp_exists.stdout"
 
+- name: Final check - verify ROSAControlPlane is actually gone
+  shell: |
+    oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} 2>/dev/null
+  register: final_rcp_check
+  failed_when: false
+  changed_when: false
+  when:
+    - wait_for_deletion | bool
+    - "'not-found' not in rcp_exists.stdout"
+    - wait_rcp.rc == 0
+
 - name: Display ROSAControlPlane deletion result
   debug:
     msg: |
-      {% if wait_rcp.rc != 0 %}
+      {% if wait_rcp.rc != 0 or (final_rcp_check.rc | default(1)) != 0 %}
       ✅ ROSAControlPlane successfully deleted: {{ cluster_name }}
       {% else %}
       ⚠️  ROSAControlPlane still exists (may still be deleting): {{ cluster_name }}
@@ -116,6 +127,18 @@
   when:
     - wait_for_deletion | bool
     - "'not-found' not in rcp_exists.stdout"
+
+- name: Fail if ROSAControlPlane still exists after all retries
+  fail:
+    msg: |
+      ROSAControlPlane {{ cluster_name }} still exists after timeout.
+      The ROSA cluster may need manual cleanup.
+      Check: oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }}
+  when:
+    - wait_for_deletion | bool
+    - "'not-found' not in rcp_exists.stdout"
+    - wait_rcp.rc == 0
+    - (final_rcp_check.rc | default(1)) == 0
 
 - name: Delete ROSANetwork (after ROSAControlPlane deletion completes)
   shell: |
@@ -158,16 +181,28 @@
   until: wait_rn.rc != 0
   retries: "{{ (rosanetwork_timeout | default(deletion_timeout) | int / 10) | int }}"
   delay: 10
-  failed_when: wait_rn.rc == 0
+  failed_when: false
   when:
     - wait_for_deletion | bool
     - delete_network | bool
     - "'not-found' not in rn_exists.stdout"
 
+- name: Final check - verify ROSANetwork is actually gone
+  shell: |
+    oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} 2>/dev/null
+  register: final_rn_check
+  failed_when: false
+  changed_when: false
+  when:
+    - wait_for_deletion | bool
+    - delete_network | bool
+    - "'not-found' not in rn_exists.stdout"
+    - wait_rn.rc == 0
+
 - name: Display ROSANetwork deletion result
   debug:
     msg: |
-      {% if wait_rn.rc != 0 %}
+      {% if wait_rn.rc != 0 or (final_rn_check.rc | default(1)) != 0 %}
       ✅ ROSANetwork successfully deleted: {{ rosa_network_name }}
       {% else %}
       ⚠️  ROSANetwork still exists (CloudFormation stack may still be deleting)
@@ -177,6 +212,19 @@
     - wait_for_deletion | bool
     - delete_network | bool
     - "'not-found' not in rn_exists.stdout"
+
+- name: Fail if ROSANetwork still exists after all retries
+  fail:
+    msg: |
+      ROSANetwork {{ rosa_network_name }} still exists after timeout.
+      CloudFormation stack may need manual cleanup.
+      Check: aws cloudformation describe-stacks --stack-name {{ cluster_name }}-rosa-network-stack
+  when:
+    - wait_for_deletion | bool
+    - delete_network | bool
+    - "'not-found' not in rn_exists.stdout"
+    - wait_rn.rc == 0
+    - (final_rn_check.rc | default(1)) == 0
 
 - name: Emit agent context for ROSARoleConfig deletion wait
   debug:
@@ -193,16 +241,28 @@
   until: wait_rrc.rc != 0
   retries: "{{ (deletion_timeout | int / 10) | int }}"
   delay: 10
-  failed_when: wait_rrc.rc == 0
+  failed_when: false
   when:
     - wait_for_deletion | bool
     - delete_roles | bool
     - "'not-found' not in rrc_exists.stdout"
 
+- name: Final check - verify ROSARoleConfig is actually gone
+  shell: |
+    oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} 2>/dev/null
+  register: final_rrc_check
+  failed_when: false
+  changed_when: false
+  when:
+    - wait_for_deletion | bool
+    - delete_roles | bool
+    - "'not-found' not in rrc_exists.stdout"
+    - wait_rrc.rc == 0
+
 - name: Display ROSARoleConfig deletion result
   debug:
     msg: |
-      {% if wait_rrc.rc != 0 %}
+      {% if wait_rrc.rc != 0 or (final_rrc_check.rc | default(1)) != 0 %}
       ✅ ROSARoleConfig successfully deleted: {{ rosa_role_config_name }}
       {% else %}
       ⚠️  ROSARoleConfig still exists (IAM roles may still be deleting)
@@ -220,16 +280,16 @@
       • Core Cluster: {{ '✅ Deleted' if delete_all is defined and delete_all.rc == 0 else '⏳ Deletion initiated' }}
       {% endif %}
       {% if 'not-found' not in rcp_exists.stdout %}
-      • ROSAControlPlane: {{ '✅ Deleted' if (wait_for_deletion and wait_rcp.rc != 0) else '⏳ Deletion initiated' }}
+      • ROSAControlPlane: {{ '✅ Deleted' if (wait_for_deletion and (wait_rcp.rc != 0 or (final_rcp_check.rc | default(1)) != 0)) else '⏳ Deletion initiated' }}
       {% endif %}
       {% if 'not-found' not in rmp_exists.stdout %}
       • ROSAMachinePool: ✅ Auto-deleted (cascade)
       {% endif %}
       {% if delete_network | bool and 'not-found' not in rn_exists.stdout %}
-      • ROSANetwork: {{ '✅ Deleted' if (wait_for_deletion and wait_rn.rc != 0) else '⏳ Deletion initiated' }}
+      • ROSANetwork: {{ '✅ Deleted' if (wait_for_deletion and (wait_rn.rc != 0 or (final_rn_check.rc | default(1)) != 0)) else '⏳ Deletion initiated' }}
       {% endif %}
       {% if delete_roles | bool and 'not-found' not in rrc_exists.stdout %}
-      • ROSARoleConfig: {{ '✅ Deleted' if (wait_for_deletion and wait_rrc.rc != 0) else '⏳ Deletion initiated' }}
+      • ROSARoleConfig: {{ '✅ Deleted' if (wait_for_deletion and (wait_rrc.rc != 0 or (final_rrc_check.rc | default(1)) != 0)) else '⏳ Deletion initiated' }}
       {% endif %}
 
 - name: Display deletion summary
