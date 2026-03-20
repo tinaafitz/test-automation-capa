@@ -541,6 +541,69 @@ def test_retry_cloudformation_delete_in_remediation():
     print("PASSED")
 
 
+def test_deletion_task_final_check_pattern():
+    """Test 26: Deletion task file has final-check pattern for all resources.
+
+    PR #60 fix: after retry loop expires, do one more 'oc get' to verify
+    the resource is actually gone before declaring failure. This prevents
+    false 'Deletion Failed' when the resource disappears between retries.
+    """
+    print("\n=== Test 26: Deletion task file has final-check pattern ===")
+    import yaml
+
+    task_file = Path(__file__).parent.parent / "tasks" / "delete_rosa_hcp_resources.yml"
+    assert task_file.exists(), f"Task file not found: {task_file}"
+
+    with open(task_file) as f:
+        tasks = yaml.safe_load(f)
+
+    task_names = [t.get("name", "") for t in tasks]
+
+    # Critical resources must have: Wait -> Final check -> Fail if still exists
+    for resource in ["ROSAControlPlane", "ROSANetwork"]:
+        wait_task = f"Wait for {resource} deletion to complete"
+        final_task = f"Final check - verify {resource} is actually gone"
+        fail_task = f"Fail if {resource} still exists after all retries"
+
+        assert wait_task in task_names, f"Missing task: {wait_task}"
+        assert final_task in task_names, f"Missing task: {final_task}"
+        assert fail_task in task_names, f"Missing task: {fail_task}"
+
+        # Verify the wait task uses failed_when: false (not failed_when: wait_*.rc == 0)
+        wait_idx = task_names.index(wait_task)
+        wait_t = tasks[wait_idx]
+        assert wait_t.get("failed_when") is False, \
+            f"{wait_task} should have failed_when: false, got: {wait_t.get('failed_when')}"
+
+        # Verify the final check task exists right after the wait
+        final_idx = task_names.index(final_task)
+        assert final_idx > wait_idx, \
+            f"{final_task} should come after {wait_task}"
+
+        # Verify the fail task references the final check register variable
+        fail_idx = task_names.index(fail_task)
+        fail_t = tasks[fail_idx]
+        fail_when = fail_t.get("when", [])
+        fail_when_str = str(fail_when)
+        assert "final_" in fail_when_str and "_check" in fail_when_str, \
+            f"{fail_task} should reference final check variable in when conditions"
+
+    # ROSARoleConfig should also have Wait + Final check (but no hard fail)
+    for resource in ["ROSARoleConfig"]:
+        wait_task = f"Wait for {resource} deletion to complete"
+        final_task = f"Final check - verify {resource} is actually gone"
+
+        assert wait_task in task_names, f"Missing task: {wait_task}"
+        assert final_task in task_names, f"Missing task: {final_task}"
+
+        wait_idx = task_names.index(wait_task)
+        wait_t = tasks[wait_idx]
+        assert wait_t.get("failed_when") is False, \
+            f"{wait_task} should have failed_when: false, got: {wait_t.get('failed_when')}"
+
+    print("PASSED")
+
+
 def main():
     """Run all tests"""
     print("=" * 70)
@@ -573,6 +636,7 @@ def main():
         test_low_confidence_keeps_throttle_active,
         test_low_confidence_log_throttle,
         test_retry_cloudformation_delete_in_remediation,
+        test_deletion_task_final_check_pattern,
     ]
 
     passed = 0
