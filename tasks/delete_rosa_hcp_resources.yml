@@ -245,7 +245,7 @@
     oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} 2>/dev/null
   register: wait_rrc
   until: wait_rrc.rc != 0
-  retries: "{{ (deletion_timeout | int / 10) | int }}"
+  retries: "{{ (rosaroleconfig_timeout | default(deletion_timeout) | int / 10) | int }}"
   delay: 10
   failed_when: false
   when:

@@ -1075,7 +1075,7 @@ async def cancel_job(job_id: str):
 
 def check_and_timeout_stuck_jobs():
     """Check for stuck jobs and mark them as failed if they've been running too long"""
-    TIMEOUT_MINUTES = 60  # Timeout after 60 minutes (allows for long ROSA operations like delete/provision)
+    TIMEOUT_MINUTES = 90  # Timeout after 90 minutes (allows for long ROSA operations like delete/provision)
 
     current_time = datetime.now()
     stuck_jobs = []
