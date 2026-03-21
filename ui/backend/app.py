@@ -3449,6 +3449,15 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
             ("rosacluster", cluster_name),
         ]
 
+        # Resources that need wait loops so the agent can detect and fix issues
+        # (e.g., CloudFormation DELETE_FAILED blocking ROSANetwork deletion)
+        wait_timeouts = {
+            "rosanetwork": 1800,    # 30 minutes — CloudFormation stack deletion
+            "rosaroleconfig": 600,  # 10 minutes — IAM role cleanup
+        }
+
+        # Phase 1: Initiate deletion for all resources
+        resources_to_wait = []
         for i, (resource_type, resource_name) in enumerate(cleanup_resources):
             try:
                 check_result = subprocess.run(
@@ -3489,7 +3498,10 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
 
                     if result.returncode == 0:
                         deleted_resources.append(f"{resource_type}/{resource_name}")
-                        log_delete(f"✅ Cleaned up {resource_type}/{resource_name}")
+                        log_delete(f"✅ Deletion initiated for {resource_type}/{resource_name}")
+                        # Track resources that need wait loops
+                        if resource_type in wait_timeouts:
+                            resources_to_wait.append((resource_type, resource_name))
                     else:
                         log_delete(f"⚠️ Failed to delete {resource_type}/{resource_name}: {result.stderr}")
                 else:
@@ -3498,7 +3510,69 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
             except Exception as e:
                 log_delete(f"⚠️ Error cleaning up {resource_type}/{resource_name}: {str(e)}")
 
-            jobs[job_id]["progress"] = 75 + int((i + 1) / len(cleanup_resources) * 20)
+        # Phase 2: Wait for critical resources with agent monitoring
+        # This allows the agent to detect DELETE_FAILED CloudFormation stacks
+        # and trigger VPC dependency cleanup (orphaned security groups, ENIs, etc.)
+        for resource_type, resource_name in resources_to_wait:
+            max_wait = wait_timeouts[resource_type]
+            check_interval = 15
+            elapsed = 0
+
+            log_delete(f"")
+            log_delete(f"⏳ Waiting for {resource_type}/{resource_name} deletion...")
+            jobs[job_id]["message"] = f"Waiting for {resource_type}/{resource_name} deletion..."
+
+            # Feed agent context so it knows which resource we're monitoring
+            agent_session = ai_agent_sessions.get(job_id)
+            if agent_session and agent_session.get("monitor"):
+                try:
+                    agent_session["monitor"].process_line(
+                        f"#AGENT_CONTEXT: resource_name={resource_name} namespace={namespace} resource_type={resource_type}"
+                    )
+                except Exception:
+                    pass
+
+            while elapsed < max_wait:
+                _time.sleep(check_interval)
+                elapsed += check_interval
+
+                check_result = subprocess.run(
+                    ["oc", "get", resource_type, resource_name, "-n", namespace],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+
+                if check_result.returncode != 0:
+                    # Resource is gone
+                    log_delete(f"✅ {resource_type}/{resource_name} successfully deleted after {elapsed}s")
+                    break
+
+                # Resource still exists — feed status to agent for issue detection
+                status_output = check_result.stdout.strip()
+                status_line = f"FAILED - RETRYING: {resource_type}/{resource_name} deletion still pending ({elapsed}s) {status_output}"
+
+                # Log to UI every 60s, but always feed to agent
+                if elapsed % 60 == 0:
+                    log_delete(f"⏳ Still waiting for {resource_type}/{resource_name} deletion... ({elapsed}s elapsed)")
+
+                agent_session = ai_agent_sessions.get(job_id)
+                if agent_session and agent_session.get("monitor"):
+                    try:
+                        agent_session["monitor"].process_line(status_line)
+                    except Exception:
+                        pass
+
+                # Update progress within this wait phase
+                base_progress = 80
+                progress_range = 15  # 80-95% for wait phase
+                wait_progress = min(int(elapsed / max_wait * progress_range), progress_range)
+                jobs[job_id]["progress"] = base_progress + wait_progress
+
+            else:
+                # Timeout — resource still exists
+                log_delete(f"⚠️ {resource_type}/{resource_name} still exists after {max_wait}s timeout")
+                errors.append(f"{resource_type}/{resource_name} deletion timed out after {max_wait}s")
 
         # Final status
         jobs[job_id]["progress"] = 100
