@@ -57,6 +57,13 @@ class TrackedIssue:
         )
 
     def should_intervene(self) -> bool:
+        # Allow re-intervention for RESOLVED issues if the resource is still
+        # stuck (e.g., CF stack was fixed but K8s finalizer still needs removal).
+        # Use a longer cooldown (120s) to avoid thrashing.
+        if self.state == IssueState.RESOLVED:
+            if self.attempts < self.max_attempts and (time.time() - self.last_updated) >= 120:
+                return True
+            return False
         if not (self.state in (IssueState.DETECTED,) or self.can_retry()):
             return False
         # Throttle re-checks to at most once per 60 seconds

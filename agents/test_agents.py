@@ -581,11 +581,12 @@ def test_deletion_task_final_check_pattern():
         assert final_idx > wait_idx, \
             f"{final_task} should come after {wait_task}"
 
-        # Verify the final check has its own retry loop (not just a single check)
-        assert final_t.get("retries", 0) > 0, \
-            f"{final_task} should have retries for grace period, got: {final_t.get('retries')}"
-        assert final_t.get("until") is not None, \
-            f"{final_task} should have an until condition"
+        # Verify the final check has a retry loop (either Ansible until/retries or shell for loop)
+        has_ansible_retries = final_t.get("retries", 0) > 0
+        shell_cmd = final_t.get("shell", "")
+        has_shell_loop = "for " in shell_cmd and "seq" in shell_cmd
+        assert has_ansible_retries or has_shell_loop, \
+            f"{final_task} should have retries (Ansible or shell loop), got neither"
 
         # Verify the fail task references the final check register variable
         fail_idx = task_names.index(fail_task)
@@ -607,6 +608,143 @@ def test_deletion_task_final_check_pattern():
         wait_t = tasks[wait_idx]
         assert wait_t.get("failed_when") is False, \
             f"{wait_task} should have failed_when: false, got: {wait_t.get('failed_when')}"
+
+    print("PASSED")
+
+
+def test_resolved_issue_allows_reintervention():
+    """Test 27: Resolved issues allow re-intervention after cooldown.
+
+    When the agent resolves an issue (e.g., retries CF stack deletion) but the
+    K8s resource is still stuck (e.g., finalizer not yet removed), the agent
+    should re-evaluate after 120s cooldown and potentially apply a different fix.
+    """
+    print("\n=== Test 27: Resolved issues allow re-intervention ===")
+    from agents.monitoring_agent import MonitoringAgent, IssueState, TrackedIssue
+
+    monitor = MonitoringAgent(Path(__file__).parent, enabled=True)
+
+    # Simulate a tracked issue that was resolved
+    tracked = TrackedIssue("rosanetwork_stuck_deletion", "ns/test-network", {})
+    tracked.state = IssueState.RESOLVED
+    tracked.attempts = 1
+    tracked.last_updated = time.time()
+
+    # Should NOT intervene immediately (120s cooldown)
+    assert not tracked.should_intervene(), \
+        "Resolved issue should not allow immediate re-intervention"
+
+    # Should intervene after cooldown
+    tracked.last_updated = time.time() - 130  # 130s ago
+    assert tracked.should_intervene(), \
+        "Resolved issue should allow re-intervention after 120s cooldown"
+
+    # Should NOT intervene if max attempts exceeded
+    tracked.attempts = 3  # max_attempts is 3
+    tracked.last_updated = time.time() - 130
+    assert not tracked.should_intervene(), \
+        "Resolved issue should not re-intervene after max attempts"
+
+    print("PASSED")
+
+
+def test_shell_loop_output_matches_agent_patterns():
+    """Test 28: Wait loop retry output matches agent detection patterns.
+
+    Both the Ansible shell loops AND the Python wait loops in app.py produce
+    FAILED - RETRYING lines. These must match the known_issues.json patterns
+    so the agent can detect stuck deletions.
+    """
+    print("\n=== Test 28: Wait loop output matches agent patterns ===")
+    from agents.monitoring_agent import MonitoringAgent
+
+    monitor = MonitoringAgent(Path(__file__).parent.parent, enabled=True)
+
+    # These lines are produced by both:
+    # 1. Ansible shell for-loops (tasks/delete_rosa_hcp_resources.yml)
+    # 2. Python _wait_for_resource_deletion() in app.py
+    # Format: "FAILED - RETRYING: [localhost]: Wait for {type} {name} deletion to complete ({N} retries left)."
+    test_lines = [
+        ("FAILED - RETRYING: [localhost]: Wait for rosacontrolplane my-cluster deletion to complete (99 retries left).",
+         "rosacontrolplane_stuck_deletion"),
+        ("FAILED - RETRYING: [localhost]: Wait for rosanetwork my-network deletion to complete (50 retries left).",
+         "rosanetwork_stuck_deletion"),
+        ("FAILED - RETRYING: [localhost]: Wait for rosaroleconfig my-roles deletion to complete (30 retries left).",
+         "rosaroleconfig_stuck_deletion"),
+        ("FAILED - RETRYING: [localhost]: Final check rosanetwork my-network deletion (10 retries left).",
+         "rosanetwork_stuck_deletion"),
+        ("FAILED - RETRYING: [localhost]: Final check rosacontrolplane my-cluster deletion (5 retries left).",
+         "rosacontrolplane_stuck_deletion"),
+        ("FAILED - RETRYING: [localhost]: Final check rosaroleconfig my-roles deletion (3 retries left).",
+         "rosaroleconfig_stuck_deletion"),
+    ]
+
+    for line, expected_type in test_lines:
+        issue = monitor._detect_issue(line)
+        assert issue is not None, \
+            f"Agent should detect issue from: {line}"
+        assert issue["type"] == expected_type, \
+            f"Expected type '{expected_type}', got '{issue['type']}' for: {line}"
+
+    print("PASSED")
+
+
+def test_shell_loop_no_false_positive_on_success():
+    """Test 29: Shell loop success messages don't trigger agent detection."""
+    print("\n=== Test 29: Shell loop success messages don't trigger agent ===")
+    from agents.monitoring_agent import MonitoringAgent
+
+    monitor = MonitoringAgent(Path(__file__).parent.parent, enabled=True)
+
+    success_lines = [
+        "ROSAControlPlane deleted successfully",
+        "ROSANetwork deleted successfully",
+        "ROSARoleConfig deleted successfully",
+        "ROSAControlPlane confirmed deleted",
+        "ROSANetwork confirmed deleted",
+        "ROSARoleConfig confirmed deleted",
+    ]
+
+    for line in success_lines:
+        issue = monitor._detect_issue(line)
+        assert issue is None, \
+            f"Agent should NOT detect issue from success message: {line}"
+
+    print("PASSED")
+
+
+def test_shell_loop_task_file_has_streaming_output():
+    """Test 30: Deletion task file uses shell loops with echo for real-time streaming.
+
+    Verifies that wait tasks use shell for-loops with echo (streams immediately)
+    instead of Ansible until/retries/delay (buffers until task completes).
+    """
+    print("\n=== Test 30: Deletion task uses shell loops for streaming ===")
+    import yaml
+
+    task_file = Path(__file__).parent.parent / "tasks" / "delete_rosa_hcp_resources.yml"
+    with open(task_file) as f:
+        tasks = yaml.safe_load(f)
+
+    for resource in ["ROSAControlPlane", "ROSANetwork", "ROSARoleConfig"]:
+        wait_task_name = f"Wait for {resource} deletion to complete"
+        wait_tasks = [t for t in tasks if t.get("name") == wait_task_name]
+        assert len(wait_tasks) == 1, f"Expected 1 task named '{wait_task_name}', found {len(wait_tasks)}"
+
+        wait_t = wait_tasks[0]
+        shell_cmd = wait_t.get("shell", "")
+
+        # Must use shell for-loop, not Ansible until/retries
+        assert "until" not in wait_t, \
+            f"{wait_task_name} should use shell loop, not Ansible until"
+        assert "retries" not in wait_t, \
+            f"{wait_task_name} should use shell loop, not Ansible retries"
+        assert "for " in shell_cmd and "seq" in shell_cmd, \
+            f"{wait_task_name} should have a shell for/seq loop"
+        assert "FAILED - RETRYING" in shell_cmd, \
+            f"{wait_task_name} should echo FAILED - RETRYING for agent detection"
+        assert resource.lower() in shell_cmd.lower(), \
+            f"{wait_task_name} should include resource type in echo for pattern matching"
 
     print("PASSED")
 
@@ -644,6 +782,10 @@ def main():
         test_low_confidence_log_throttle,
         test_retry_cloudformation_delete_in_remediation,
         test_deletion_task_final_check_pattern,
+        test_resolved_issue_allows_reintervention,
+        test_shell_loop_output_matches_agent_patterns,
+        test_shell_loop_no_false_positive_on_success,
+        test_shell_loop_task_file_has_streaming_output,
     ]
 
     passed = 0

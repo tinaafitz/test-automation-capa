@@ -39,7 +39,6 @@ const CapaSidebar = ({
   onTestSuiteDashboardClick,
   onTestAutomationClick,
   onAIAssistantClick,
-  onHelmChartMatrixClick,
   onTerminalClick,
   onNotificationsClick,
   onRecentTasksClick,
@@ -149,12 +148,6 @@ const CapaSidebar = ({
       icon: <span className="text-lg">🧪</span>,
       onClick: onTestSuiteDashboardClick,
       showInEnvironments: ['mce'] // Only show in MCE, not minikube
-    },
-    {
-      id: 'helm-chart-matrix',
-      label: 'Helm Chart Test Matrix',
-      icon: <span className="text-lg">📊</span>,
-      onClick: onHelmChartMatrixClick
     },
     {
       id: 'terminal',

@@ -12,7 +12,6 @@ import { YamlEditorModal } from '../components/YamlEditorModal';
 import { RosaProvisionModal } from '../components/RosaProvisionModal';
 import TestSuiteDashboard from '../components/sections/TestSuiteDashboard';
 import TestSuiteSection from '../components/sections/TestSuiteSection';
-import HelmChartTestDashboard from '../components/sections/HelmChartTestDashboard';
 import ResourcesViewer from '../components/ResourcesViewer';
 import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import {
@@ -1467,7 +1466,6 @@ const CAPADashboardContent = () => {
     onTestSuiteDashboardClick: () => setActiveSection('test-suite-dashboard'),
     onTestAutomationClick: () => setActiveSection('test-automation'),
     onAIAssistantClick: () => setActiveSection('ai-assistant'),
-    onHelmChartMatrixClick: () => setActiveSection('helm-chart-matrix'),
     onTerminalClick: () => setActiveSection('terminal'),
     onNotificationsClick: () => setActiveSection('notifications'),
     onRecentTasksClick: () => setActiveSection('recent-tasks'),
@@ -1997,7 +1995,7 @@ const CAPADashboardContent = () => {
                       <span className="text-xl">❌</span>
                     )}
                     <h3 className="text-lg font-semibold text-gray-900">
-                      {provisionResults.isRunning ? 'Provisioning in Progress' : provisionResults.success ? 'Provisioning Started' : 'Provisioning Failed'}
+                      {provisionResults.isRunning ? 'Provisioning in Progress' : provisionResults.success ? 'Provisioning Completed' : 'Provisioning Failed'}
                     </h3>
                   </div>
                   {provisionResults.isRunning && provisionJobId && (
@@ -2294,8 +2292,6 @@ const CAPADashboardContent = () => {
           </div>
         );
 
-      case 'helm-chart-matrix':
-        return <HelmChartTestDashboard theme="mce" />;
 
       case 'terminal':
         return (
@@ -2388,11 +2384,11 @@ const CAPADashboardContent = () => {
                       </div>
 
                       {/* AI Agent Summary */}
-                      {task.agentStats?.enabled && task.agentStats.issues_detected > 0 && (
-                        <div className="mt-3 rounded-lg p-3 text-sm bg-yellow-50 border border-yellow-300">
+                      {task.agentStats?.enabled && (
+                        <div className={`mt-3 rounded-lg p-3 text-sm ${task.agentStats.issues_detected > 0 ? 'bg-yellow-50 border border-yellow-300' : 'bg-blue-50 border border-blue-200'}`}>
                           <div className="flex items-center gap-4 mb-2">
                             <span className="font-medium text-gray-700">
-                              🤖 AI Agent: Summary
+                              {task.agentStats.issues_detected > 0 ? '🤖' : '🛡️'} AI Agent: {task.agentStats.issues_detected > 0 ? 'Summary' : 'Monitoring'}
                             </span>
                             <span>Issues: {task.agentStats.issues_detected}</span>
                             <span>Interventions: {task.agentStats.interventions}</span>
@@ -2400,6 +2396,9 @@ const CAPADashboardContent = () => {
                               <span className="text-green-700 font-medium">
                                 Agent auto-fixed {task.agentStats.interventions} issue(s)
                               </span>
+                            )}
+                            {task.agentStats.issues_detected === 0 && (
+                              <span className="text-blue-600">No issues detected</span>
                             )}
                           </div>
                           {task.agentStats.resource_details?.length > 0 && (

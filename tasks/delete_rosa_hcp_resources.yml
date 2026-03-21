@@ -94,11 +94,23 @@
 
 - name: Wait for ROSAControlPlane deletion to complete
   shell: |
-    oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} 2>/dev/null
+    RETRIES={{ (rosacontrolplane_timeout | default(deletion_timeout) | int / 10) | int }}
+    for i in $(seq 1 $RETRIES); do
+      OUTPUT=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} 2>&1)
+      RC=$?
+      if [ $RC -ne 0 ]; then
+        if echo "$OUTPUT" | grep -qi "not found\|NotFound\|no resources found"; then
+          echo "ROSAControlPlane deleted successfully"
+          exit 0
+        fi
+        echo "WARNING: oc get failed unexpectedly (rc=$RC): $OUTPUT"
+      fi
+      echo "FAILED - RETRYING: [localhost]: Wait for rosacontrolplane {{ cluster_name }} deletion to complete ($((RETRIES - i)) retries left)."
+      sleep 10
+    done
+    echo "Timed out waiting for ROSAControlPlane deletion"
+    exit 1
   register: wait_rcp
-  until: wait_rcp.rc != 0
-  retries: "{{ (rosacontrolplane_timeout | default(deletion_timeout) | int / 10) | int }}"
-  delay: 10
   failed_when: false
   when:
     - wait_for_deletion | bool
@@ -106,22 +118,33 @@
 
 - name: Final check - verify ROSAControlPlane is actually gone
   shell: |
-    oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} 2>/dev/null
+    for i in $(seq 1 18); do
+      OUTPUT=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} 2>&1)
+      RC=$?
+      if [ $RC -ne 0 ]; then
+        if echo "$OUTPUT" | grep -qi "not found\|NotFound\|no resources found"; then
+          echo "ROSAControlPlane confirmed deleted"
+          exit 0
+        fi
+        echo "WARNING: oc get failed unexpectedly (rc=$RC): $OUTPUT"
+      fi
+      echo "FAILED - RETRYING: [localhost]: Final check rosacontrolplane {{ cluster_name }} deletion ($((18 - i)) retries left)."
+      sleep 10
+    done
+    echo "ROSAControlPlane still exists after final check"
+    exit 1
   register: final_rcp_check
-  until: final_rcp_check.rc != 0
-  retries: 18
-  delay: 10
   failed_when: false
   changed_when: false
   when:
     - wait_for_deletion | bool
     - "'not-found' not in rcp_exists.stdout"
-    - wait_rcp.rc == 0
+    - wait_rcp.rc != 0
 
 - name: Display ROSAControlPlane deletion result
   debug:
     msg: |
-      {% if wait_rcp.rc != 0 or (final_rcp_check.rc | default(1)) != 0 %}
+      {% if wait_rcp.rc == 0 or (final_rcp_check.rc | default(1)) == 0 %}
       ✅ ROSAControlPlane successfully deleted: {{ cluster_name }}
       {% else %}
       ⚠️  ROSAControlPlane still exists (may still be deleting): {{ cluster_name }}
@@ -140,8 +163,8 @@
   when:
     - wait_for_deletion | bool
     - "'not-found' not in rcp_exists.stdout"
-    - wait_rcp.rc == 0
-    - (final_rcp_check.rc | default(1)) == 0
+    - wait_rcp.rc != 0
+    - (final_rcp_check.rc | default(1)) != 0
 
 - name: Delete ROSANetwork (after ROSAControlPlane deletion completes)
   shell: |
@@ -179,11 +202,23 @@
 
 - name: Wait for ROSANetwork deletion to complete
   shell: |
-    oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} 2>/dev/null
+    RETRIES={{ (rosanetwork_timeout | default(deletion_timeout) | int / 10) | int }}
+    for i in $(seq 1 $RETRIES); do
+      OUTPUT=$(oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} 2>&1)
+      RC=$?
+      if [ $RC -ne 0 ]; then
+        if echo "$OUTPUT" | grep -qi "not found\|NotFound\|no resources found"; then
+          echo "ROSANetwork deleted successfully"
+          exit 0
+        fi
+        echo "WARNING: oc get failed unexpectedly (rc=$RC): $OUTPUT"
+      fi
+      echo "FAILED - RETRYING: [localhost]: Wait for rosanetwork {{ rosa_network_name }} deletion to complete ($((RETRIES - i)) retries left)."
+      sleep 10
+    done
+    echo "Timed out waiting for ROSANetwork deletion"
+    exit 1
   register: wait_rn
-  until: wait_rn.rc != 0
-  retries: "{{ (rosanetwork_timeout | default(deletion_timeout) | int / 10) | int }}"
-  delay: 10
   failed_when: false
   when:
     - wait_for_deletion | bool
@@ -192,23 +227,34 @@
 
 - name: Final check - verify ROSANetwork is actually gone
   shell: |
-    oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} 2>/dev/null
+    for i in $(seq 1 36); do
+      OUTPUT=$(oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} 2>&1)
+      RC=$?
+      if [ $RC -ne 0 ]; then
+        if echo "$OUTPUT" | grep -qi "not found\|NotFound\|no resources found"; then
+          echo "ROSANetwork confirmed deleted"
+          exit 0
+        fi
+        echo "WARNING: oc get failed unexpectedly (rc=$RC): $OUTPUT"
+      fi
+      echo "FAILED - RETRYING: [localhost]: Final check rosanetwork {{ rosa_network_name }} deletion ($((36 - i)) retries left)."
+      sleep 10
+    done
+    echo "ROSANetwork still exists after final check"
+    exit 1
   register: final_rn_check
-  until: final_rn_check.rc != 0
-  retries: 18
-  delay: 10
   failed_when: false
   changed_when: false
   when:
     - wait_for_deletion | bool
     - delete_network | bool
     - "'not-found' not in rn_exists.stdout"
-    - wait_rn.rc == 0
+    - wait_rn.rc != 0
 
 - name: Display ROSANetwork deletion result
   debug:
     msg: |
-      {% if wait_rn.rc != 0 or (final_rn_check.rc | default(1)) != 0 %}
+      {% if wait_rn.rc == 0 or (final_rn_check.rc | default(1)) == 0 %}
       ✅ ROSANetwork successfully deleted: {{ rosa_network_name }}
       {% else %}
       ⚠️  ROSANetwork still exists (CloudFormation stack may still be deleting)
@@ -229,8 +275,8 @@
     - wait_for_deletion | bool
     - delete_network | bool
     - "'not-found' not in rn_exists.stdout"
-    - wait_rn.rc == 0
-    - (final_rn_check.rc | default(1)) == 0
+    - wait_rn.rc != 0
+    - (final_rn_check.rc | default(1)) != 0
 
 - name: Emit agent context for ROSARoleConfig deletion wait
   debug:
@@ -242,11 +288,23 @@
 
 - name: Wait for ROSARoleConfig deletion to complete
   shell: |
-    oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} 2>/dev/null
+    RETRIES={{ (rosaroleconfig_timeout | default(deletion_timeout) | int / 10) | int }}
+    for i in $(seq 1 $RETRIES); do
+      OUTPUT=$(oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} 2>&1)
+      RC=$?
+      if [ $RC -ne 0 ]; then
+        if echo "$OUTPUT" | grep -qi "not found\|NotFound\|no resources found"; then
+          echo "ROSARoleConfig deleted successfully"
+          exit 0
+        fi
+        echo "WARNING: oc get failed unexpectedly (rc=$RC): $OUTPUT"
+      fi
+      echo "FAILED - RETRYING: [localhost]: Wait for rosaroleconfig {{ rosa_role_config_name }} deletion to complete ($((RETRIES - i)) retries left)."
+      sleep 10
+    done
+    echo "Timed out waiting for ROSARoleConfig deletion"
+    exit 1
   register: wait_rrc
-  until: wait_rrc.rc != 0
-  retries: "{{ (rosaroleconfig_timeout | default(deletion_timeout) | int / 10) | int }}"
-  delay: 10
   failed_when: false
   when:
     - wait_for_deletion | bool
@@ -255,23 +313,34 @@
 
 - name: Final check - verify ROSARoleConfig is actually gone
   shell: |
-    oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} 2>/dev/null
+    for i in $(seq 1 18); do
+      OUTPUT=$(oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} 2>&1)
+      RC=$?
+      if [ $RC -ne 0 ]; then
+        if echo "$OUTPUT" | grep -qi "not found\|NotFound\|no resources found"; then
+          echo "ROSARoleConfig confirmed deleted"
+          exit 0
+        fi
+        echo "WARNING: oc get failed unexpectedly (rc=$RC): $OUTPUT"
+      fi
+      echo "FAILED - RETRYING: [localhost]: Final check rosaroleconfig {{ rosa_role_config_name }} deletion ($((18 - i)) retries left)."
+      sleep 10
+    done
+    echo "ROSARoleConfig still exists after final check"
+    exit 1
   register: final_rrc_check
-  until: final_rrc_check.rc != 0
-  retries: 18
-  delay: 10
   failed_when: false
   changed_when: false
   when:
     - wait_for_deletion | bool
     - delete_roles | bool
     - "'not-found' not in rrc_exists.stdout"
-    - wait_rrc.rc == 0
+    - wait_rrc.rc != 0
 
 - name: Display ROSARoleConfig deletion result
   debug:
     msg: |
-      {% if wait_rrc.rc != 0 or (final_rrc_check.rc | default(1)) != 0 %}
+      {% if wait_rrc.rc == 0 or (final_rrc_check.rc | default(1)) == 0 %}
       ✅ ROSARoleConfig successfully deleted: {{ rosa_role_config_name }}
       {% else %}
       ⚠️  ROSARoleConfig still exists (IAM roles may still be deleting)
@@ -289,16 +358,16 @@
       • Core Cluster: {{ '✅ Deleted' if delete_all is defined and delete_all.rc == 0 else '⏳ Deletion initiated' }}
       {% endif %}
       {% if 'not-found' not in rcp_exists.stdout %}
-      • ROSAControlPlane: {{ '✅ Deleted' if (wait_for_deletion and (wait_rcp.rc != 0 or (final_rcp_check.rc | default(1)) != 0)) else '⏳ Deletion initiated' }}
+      • ROSAControlPlane: {{ '✅ Deleted' if (wait_for_deletion and (wait_rcp.rc == 0 or (final_rcp_check.rc | default(1)) == 0)) else '⏳ Deletion initiated' }}
       {% endif %}
       {% if 'not-found' not in rmp_exists.stdout %}
       • ROSAMachinePool: ✅ Auto-deleted (cascade)
       {% endif %}
       {% if delete_network | bool and 'not-found' not in rn_exists.stdout %}
-      • ROSANetwork: {{ '✅ Deleted' if (wait_for_deletion and (wait_rn.rc != 0 or (final_rn_check.rc | default(1)) != 0)) else '⏳ Deletion initiated' }}
+      • ROSANetwork: {{ '✅ Deleted' if (wait_for_deletion and (wait_rn.rc == 0 or (final_rn_check.rc | default(1)) == 0)) else '⏳ Deletion initiated' }}
       {% endif %}
       {% if delete_roles | bool and 'not-found' not in rrc_exists.stdout %}
-      • ROSARoleConfig: {{ '✅ Deleted' if (wait_for_deletion and (wait_rrc.rc != 0 or (final_rrc_check.rc | default(1)) != 0)) else '⏳ Deletion initiated' }}
+      • ROSARoleConfig: {{ '✅ Deleted' if (wait_for_deletion and (wait_rrc.rc == 0 or (final_rrc_check.rc | default(1)) == 0)) else '⏳ Deletion initiated' }}
       {% endif %}
 
 - name: Display deletion summary

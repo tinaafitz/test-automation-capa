@@ -81,8 +81,16 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
         remediation = RemediationAgent(base_dir=base_dir, dry_run=dry_run)
 
         def on_issue_detected(issue_type, context, issue):
-            diagnosis = diagnostic.diagnose(issue_type, context)
             resource_key = context.get("resource_key", "")
+            try:
+                diagnosis = diagnostic.diagnose(issue_type, context)
+            except Exception as e:
+                monitor.mark_issue_failed(issue_type, resource_key)
+                if job_id in jobs:
+                    jobs[job_id].setdefault("logs", []).append(
+                        f"🤖 Agent diagnosis error for {issue_type} ({resource_key}): {e}"
+                    )
+                return
             if diagnosis and diagnosis.get("confidence", 0) >= 0.7:
                 success, message = remediation.remediate(diagnosis)
                 if success:
@@ -505,6 +513,127 @@ def run_minikube_init_playbook(
         jobs[job_id]["completed_at"] = datetime.now()
 
 
+def _wait_for_resource_deletion(
+    resource_type: str, resource_name: str, namespace: str,
+    job_id: str, timeout_seconds: int = 1200, poll_interval: int = 10,
+):
+    """Poll for K8s resource deletion with real-time agent monitoring.
+
+    Unlike Ansible shell tasks (which buffer stdout), this runs directly in Python
+    so every poll result is immediately fed to the AI agent for detection.
+
+    Returns True if the resource was deleted, False if timed out.
+    """
+    import time as _time
+
+    retries = timeout_seconds // poll_interval
+    log_prefix = f"[DELETE-WAIT] {resource_type}/{resource_name}"
+
+    def log_and_feed(msg):
+        """Log to job, console, and feed to agent."""
+        jobs[job_id].setdefault("logs", []).append(msg)
+        print(msg)
+        agent_session = ai_agent_sessions.get(job_id)
+        if agent_session and agent_session.get("monitor"):
+            try:
+                agent_session["monitor"].process_line(msg)
+            except Exception:
+                pass
+
+    # Emit agent context so the agent knows which resource we're watching
+    context_line = f'#AGENT_CONTEXT: resource_name={resource_name} namespace={namespace} resource_type={resource_type}'
+    log_and_feed(context_line)
+
+    for i in range(retries):
+        try:
+            result = subprocess.run(
+                ["oc", "get", resource_type, resource_name, "-n", namespace],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode != 0:
+                output = result.stderr + result.stdout
+                if any(s in output.lower() for s in ["not found", "notfound", "no resources found"]):
+                    msg = f"{resource_type} {resource_name} deleted successfully"
+                    log_and_feed(msg)
+                    return True
+                # Connection error or other failure — warn but keep retrying
+                msg = f"WARNING: oc get failed unexpectedly (rc={result.returncode}): {output.strip()}"
+                log_and_feed(msg)
+            else:
+                # Resource still exists
+                retries_left = retries - i - 1
+                msg = f"FAILED - RETRYING: [localhost]: Wait for {resource_type} {resource_name} deletion to complete ({retries_left} retries left)."
+                log_and_feed(msg)
+        except subprocess.TimeoutExpired:
+            log_and_feed(f"WARNING: oc get timed out for {resource_type}/{resource_name}")
+        except Exception as e:
+            log_and_feed(f"WARNING: Error checking {resource_type}/{resource_name}: {e}")
+
+        _time.sleep(poll_interval)
+
+    log_and_feed(f"Timed out waiting for {resource_type} {resource_name} deletion after {timeout_seconds}s")
+    return False
+
+
+def _run_deletion_wait_loops(job_id: str, cluster_name: str, namespace: str,
+                             delete_network: bool = True, delete_roles: bool = True):
+    """Run Python-native wait loops for deletion with real-time agent monitoring.
+
+    Called after the Ansible playbook initiates deletions (with wait_for_deletion=false).
+    Runs the same wait sequence as the Ansible task file but in Python so each poll
+    is immediately visible to the AI agent.
+    """
+    import time as _time
+
+    network_name = f"{cluster_name}-network"
+    role_config_name = f"{cluster_name}-roles"
+
+    def log_msg(msg):
+        jobs[job_id].setdefault("logs", []).append(msg)
+        print(f"[DELETE-WAIT] {msg}")
+
+    # Phase 1: Wait for ROSAControlPlane deletion (20 min)
+    log_msg(f"Waiting for ROSAControlPlane {cluster_name} deletion...")
+    rcp_deleted = _wait_for_resource_deletion(
+        "rosacontrolplane", cluster_name, namespace, job_id,
+        timeout_seconds=1200, poll_interval=10,
+    )
+    if rcp_deleted:
+        log_msg(f"ROSAControlPlane successfully deleted: {cluster_name}")
+    else:
+        log_msg(f"ROSAControlPlane {cluster_name} still exists after timeout — failing")
+        return False
+
+    # Phase 2: Wait for ROSANetwork and ROSARoleConfig in parallel-ish
+    # (Network first since it takes longer, RoleConfig after)
+    results = {}
+
+    if delete_network:
+        log_msg(f"Waiting for ROSANetwork {network_name} deletion...")
+        results["network"] = _wait_for_resource_deletion(
+            "rosanetwork", network_name, namespace, job_id,
+            timeout_seconds=1800, poll_interval=10,
+        )
+        if results["network"]:
+            log_msg(f"ROSANetwork successfully deleted: {network_name}")
+        else:
+            log_msg(f"ROSANetwork {network_name} still exists after timeout — failing")
+            return False
+
+    if delete_roles:
+        log_msg(f"Waiting for ROSARoleConfig {role_config_name} deletion...")
+        results["roles"] = _wait_for_resource_deletion(
+            "rosaroleconfig", role_config_name, namespace, job_id,
+            timeout_seconds=600, poll_interval=10,
+        )
+        if results["roles"]:
+            log_msg(f"ROSARoleConfig successfully deleted: {role_config_name}")
+        else:
+            log_msg(f"ROSARoleConfig {role_config_name} timed out (non-fatal)")
+
+    return True
+
+
 def run_ansible_playbook(playbook: str, config: dict, job_id: str):
     """Run ansible playbook synchronously (called via asyncio.to_thread to avoid blocking event loop)"""
     try:
@@ -581,6 +710,12 @@ def run_ansible_playbook(playbook: str, config: dict, job_id: str):
             if config.get("kms_provider_arn"):
                 cmd.extend(["-e", f"manual_kms_provider_arn={config['kms_provider_arn']}"])
 
+        # For deletion playbooks, tell Ansible to skip wait loops —
+        # we'll run them in Python below for real-time agent monitoring.
+        is_deletion = "delete" in playbook.lower()
+        if is_deletion:
+            cmd.extend(["-e", "wait_for_deletion=false"])
+
         jobs[job_id]["progress"] = 30
         jobs[job_id]["message"] = "Executing ansible playbook"
 
@@ -629,13 +764,40 @@ def run_ansible_playbook(playbook: str, config: dict, job_id: str):
 
         returncode = process.wait(timeout=3600)
 
-        if returncode == 0:
+        if returncode != 0:
+            jobs[job_id]["status"] = "failed"
+            jobs[job_id]["message"] = f"Playbook failed with exit code {returncode}"
+            jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
+            jobs[job_id]["completed_at"] = datetime.now()
+            return
+
+        # For deletion playbooks: Ansible only initiated the deletes.
+        # Now run Python wait loops with real-time agent monitoring.
+        if is_deletion:
+            jobs[job_id]["progress"] = 50
+            jobs[job_id]["message"] = "Waiting for resource deletion (agent monitoring active)..."
+            cluster_name = config.get("name", "")
+            namespace = "ns-rosa-hcp"
+
+            wait_success = _run_deletion_wait_loops(
+                job_id=job_id,
+                cluster_name=cluster_name,
+                namespace=namespace,
+                delete_network=True,
+                delete_roles=True,
+            )
+
+            if wait_success:
+                jobs[job_id]["status"] = "completed"
+                jobs[job_id]["progress"] = 100
+                jobs[job_id]["message"] = "Cluster deletion completed successfully"
+            else:
+                jobs[job_id]["status"] = "failed"
+                jobs[job_id]["message"] = "Cluster deletion timed out — resources may need manual cleanup"
+        else:
             jobs[job_id]["status"] = "completed"
             jobs[job_id]["progress"] = 100
             jobs[job_id]["message"] = "Cluster creation completed successfully"
-        else:
-            jobs[job_id]["status"] = "failed"
-            jobs[job_id]["message"] = f"Playbook failed with exit code {returncode}"
 
         jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
         jobs[job_id]["completed_at"] = datetime.now()
@@ -666,7 +828,12 @@ async def health_check():
 
 @app.get("/api/versions")
 async def get_supported_versions():
-    """Get supported OpenShift versions by calling rosa list versions"""
+    """Get supported OpenShift versions — offloads to thread pool."""
+    return await asyncio.to_thread(_get_supported_versions_sync)
+
+
+def _get_supported_versions_sync():
+    """Get supported OpenShift versions by calling rosa list versions (sync)."""
     try:
         # Call rosa list versions to get the actual available versions
         result = subprocess.run(
@@ -1603,7 +1770,12 @@ async def get_environment_overview():
 
 @app.get("/api/rosa/status")
 async def get_rosa_status():
-    """Check ROSA CLI authentication status"""
+    """Check ROSA CLI authentication status — offloads to thread pool."""
+    return await asyncio.to_thread(_get_rosa_status_sync)
+
+
+def _get_rosa_status_sync():
+    """Check ROSA CLI authentication status (sync)."""
     import time
 
     # Check if we have cached data that's still valid
@@ -1882,7 +2054,12 @@ async def save_credentials(update: CredentialsUpdate):
 
 @app.get("/api/ocp/connection-status")
 async def get_ocp_connection_status():
-    """Test OpenShift Hub connection using OCP_HUB variables from user_vars.yml"""
+    """Test OpenShift Hub connection — offloads to thread pool."""
+    return await asyncio.to_thread(_get_ocp_connection_status_sync)
+
+
+def _get_ocp_connection_status_sync():
+    """Test OpenShift Hub connection using OCP_HUB variables from user_vars.yml (sync)."""
     import time
 
     # Check if we have cached data that's still valid
@@ -2918,7 +3095,12 @@ async def run_ansible_task(request: dict, background_tasks: BackgroundTasks):
 
 @app.get("/api/mce/features")
 async def get_mce_features():
-    """Get all MCE features and their enablement status"""
+    """Get all MCE features — offloads to thread pool."""
+    return await asyncio.to_thread(_get_mce_features_sync)
+
+
+def _get_mce_features_sync():
+    """Get all MCE features and their enablement status (sync)."""
     try:
         # Run oc command to get MCE resource
         result = subprocess.run(
@@ -3070,12 +3252,12 @@ async def get_mce_yaml():
 
 @app.get("/api/rosa/clusters")
 async def get_rosa_clusters(context: str = None):
-    """Get actual ROSA HCP clusters using rosa CLI
+    """Get actual ROSA HCP clusters — offloads to thread pool so subprocess calls don't block the event loop."""
+    return await asyncio.to_thread(_get_rosa_clusters_sync, context)
 
-    Args:
-        context: Optional kubectl context to filter clusters (e.g., 'sat-minikube-test')
-                 If provided, only returns ROSA clusters that exist as CAPI clusters in that context
-    """
+
+def _get_rosa_clusters_sync(context: str = None):
+    """Get actual ROSA HCP clusters (sync — runs in thread pool to avoid blocking event loop)."""
     import json
 
     # Always get CAPI cluster names from the current hub to filter ROSA CLI output.

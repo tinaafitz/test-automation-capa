@@ -10,7 +10,6 @@ import { YamlEditorModal } from '../components/YamlEditorModal';
 import { RosaProvisionModal } from '../components/RosaProvisionModal';
 import TestSuiteDashboard from '../components/sections/TestSuiteDashboard';
 import TestSuiteSection from '../components/sections/TestSuiteSection';
-import HelmChartTestDashboard from '../components/sections/HelmChartTestDashboard';
 import ResourcesViewer from '../components/ResourcesViewer';
 import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import {
@@ -1334,7 +1333,6 @@ const MinikubeDashboardContent = () => {
     onTestSuiteDashboardClick: () => setActiveSection('test-suite-dashboard'),
     onTestAutomationClick: () => setActiveSection('test-automation'),
     onAIAssistantClick: () => setActiveSection('ai-assistant'),
-    onHelmChartMatrixClick: () => setActiveSection('helm-chart-matrix'),
     onTerminalClick: () => setActiveSection('terminal'),
     onNotificationsClick: () => setActiveSection('notifications'),
     onRecentTasksClick: () => setActiveSection('recent-tasks'),
@@ -1689,12 +1687,12 @@ const MinikubeDashboardContent = () => {
               {/* Title */}
               <h2 className="text-2xl font-bold text-purple-900">Provision ROSA HCP Cluster</h2>
 
-              {/* Provisioning Started Message */}
+              {/* Provisioning Completed Message */}
               <div className="bg-green-50 border-2 border-green-300 rounded-lg p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">✅</span>
-                    <h3 className="text-lg font-semibold text-gray-900">Provisioning Started</h3>
+                    <h3 className="text-lg font-semibold text-gray-900">Provisioning Completed</h3>
                   </div>
                   <button
                     onClick={() => {
@@ -1973,8 +1971,6 @@ const MinikubeDashboardContent = () => {
           </div>
         );
 
-      case 'helm-chart-matrix':
-        return <HelmChartTestDashboard theme="minikube" />;
 
       case 'terminal':
         return (
@@ -2067,11 +2063,11 @@ const MinikubeDashboardContent = () => {
                       </div>
 
                       {/* AI Agent Summary */}
-                      {task.agentStats?.enabled && task.agentStats.issues_detected > 0 && (
-                        <div className="mt-3 rounded-lg p-3 text-sm bg-yellow-50 border border-yellow-300">
+                      {task.agentStats?.enabled && (
+                        <div className={`mt-3 rounded-lg p-3 text-sm ${task.agentStats.issues_detected > 0 ? 'bg-yellow-50 border border-yellow-300' : 'bg-blue-50 border border-blue-200'}`}>
                           <div className="flex items-center gap-4 mb-2">
                             <span className="font-medium text-gray-700">
-                              🤖 AI Agent: Summary
+                              {task.agentStats.issues_detected > 0 ? '🤖' : '🛡️'} AI Agent: {task.agentStats.issues_detected > 0 ? 'Summary' : 'Monitoring'}
                             </span>
                             <span>Issues: {task.agentStats.issues_detected}</span>
                             <span>Interventions: {task.agentStats.interventions}</span>
@@ -2079,6 +2075,9 @@ const MinikubeDashboardContent = () => {
                               <span className="text-green-700 font-medium">
                                 Agent auto-fixed {task.agentStats.interventions} issue(s)
                               </span>
+                            )}
+                            {task.agentStats.issues_detected === 0 && (
+                              <span className="text-blue-600">No issues detected</span>
                             )}
                           </div>
                           {task.agentStats.resource_details?.length > 0 && (
