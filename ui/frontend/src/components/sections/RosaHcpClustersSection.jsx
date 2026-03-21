@@ -314,7 +314,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
 
             // Still running - update with current logs every poll
             if (currentOutput) {
-              updateRecentOperationStatus(deleteId, '🗑️ Deleting...', currentOutput);
+              updateRecentOperationStatus(deleteId, '🗑️ Deleting...', currentOutput, { agentStats: agentStats?.agent_stats || null });
               // Also update the inline display with agent stats
               setDeletionResults({
                 success: true,
@@ -401,8 +401,17 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
           deletionAbortController.current = controller;
 
           // Start polling loop
+          // Find the matching recent operation for this deletion
+          const matchingOp = (recentOps.recentOperations || []).find(
+            (op) => op.title && op.title.includes(clusterName) && op.title.includes('Delete')
+          );
+          const resumeDeleteId = matchingOp?.id;
+
           const poll = async () => {
-            while (!controller.signal.aborted) {
+            let resumeAttempts = 0;
+            const maxResumeAttempts = 4800; // 80 minutes max
+            while (!controller.signal.aborted && resumeAttempts < maxResumeAttempts) {
+              resumeAttempts++;
               try {
                 const [logsRes, agentRes, jobRes] = await Promise.all([
                   fetch(buildApiUrl(`/api/jobs/${jobId}/logs`), { signal: controller.signal }),
@@ -415,15 +424,24 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                 const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
 
                 const isDone = jobData.status === 'completed' || jobData.status === 'failed';
+                const stats = agentStats?.agent_stats || null;
 
                 setDeletionResults({
                   success: jobData.status !== 'failed',
                   timestamp: new Date().toISOString(),
                   clusterName,
                   output: currentOutput || 'Waiting for output...',
-                  agentStats: agentStats?.agent_stats || null,
+                  agentStats: stats,
                   isRunning: !isDone,
                 });
+
+                // Update Task Summary with agent stats
+                if (resumeDeleteId) {
+                  const status = isDone
+                    ? (jobData.status === 'completed' ? '✅ Cluster deleted successfully!' : '❌ Deletion failed')
+                    : '🗑️ Deleting...';
+                  updateRecentOperationStatus(resumeDeleteId, status, currentOutput, { agentStats: stats });
+                }
 
                 if (isDone) {
                   setIsDeleting(false);

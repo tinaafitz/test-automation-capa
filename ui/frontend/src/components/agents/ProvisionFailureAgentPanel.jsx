@@ -38,6 +38,8 @@ const ProvisionFailureAgentPanel = ({
   onClose = null,
   addToRecentOperations = null  // Function to add AI actions to task log
 }) => {
+  const isDeletion = /delet/i.test(errorMessage);
+  const actionLabel = isDeletion ? 'Deletion' : 'Provisioning';
   const {
     spawnExploreAgent,
     spawnGeneralAgent,
@@ -90,9 +92,9 @@ const ProvisionFailureAgentPanel = ({
     if (addToRecentOperations) {
       addToRecentOperations({
         id: `ai-analysis-${Date.now()}`,
-        title: `🤖 AI Analyzing Failure: ${clusterName}`,
+        title: `🤖 ${actionLabel} Failed: ${clusterName}`,
         color: 'bg-purple-600',
-        status: '🔍 AI investigating failure...',
+        status: `🔍 AI investigating ${actionLabel.toLowerCase()} failure...`,
         environment: 'mce',
         output: `AI Agent started analyzing failure for: ${clusterName}\n\nError: ${errorMessage}\n\nAI is searching codebase for similar issues and generating fixes...`,
       });
@@ -135,9 +137,9 @@ const ProvisionFailureAgentPanel = ({
       if (addToRecentOperations) {
         addToRecentOperations({
           id: `ai-analysis-failed-${Date.now()}`,
-          title: `❌ AI Analysis Failed: ${clusterName}`,
+          title: `❌ ${actionLabel} Failed: ${clusterName}`,
           color: 'bg-red-600',
-          status: '❌ AI agent encountered an error',
+          status: `❌ ${actionLabel} failed - AI agent encountered an error`,
           environment: 'mce',
           output: `AI Analysis Error:\n\n${err.message || 'Unknown error occurred'}`,
         });
