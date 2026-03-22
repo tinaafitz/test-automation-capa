@@ -723,6 +723,9 @@ def run_ansible_playbook(playbook: str, config: dict, job_id: str):
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
         # Execute playbook with real-time output streaming
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
         process = subprocess.Popen(
             cmd,
             cwd=project_root,
@@ -730,6 +733,7 @@ def run_ansible_playbook(playbook: str, config: dict, job_id: str):
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            env=env,
         )
 
         # Stream output in real-time and update job logs incrementally
@@ -1149,7 +1153,7 @@ async def delete_cluster(cluster_id: str, background_tasks: BackgroundTasks):
 
     # Start deletion task (use asyncio.to_thread to avoid blocking event loop)
     asyncio.create_task(asyncio.to_thread(
-        run_ansible_playbook, "delete_rosa_hcp_cluster.yaml", cluster["config"], job_id
+        run_ansible_playbook, "delete_rosa_hcp_cluster.yml", cluster["config"], job_id
     ))
 
     return {"job_id": job_id, "message": "Cluster deletion started"}
@@ -3564,7 +3568,7 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
                 log_delete(f"⏳ Waiting for cluster deletion to complete...")
                 jobs[job_id]["message"] = "Waiting for cluster deletion..."
 
-                max_wait_time = 600
+                max_wait_time = 1200
                 check_interval = 10
                 elapsed_time = 0
 
@@ -3783,6 +3787,7 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
             log_delete(f"")
             log_delete(message)
             jobs[job_id]["message"] = f"✅ Cluster {cluster_name} deleted"
+            jobs[job_id]["completed_at"] = datetime.now().isoformat()
         else:
             message = f"❌ Failed to delete cluster {cluster_name}"
             if errors:
@@ -3792,6 +3797,7 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
             jobs[job_id]["return_code"] = 1
             log_delete(message)
             jobs[job_id]["message"] = f"❌ Failed to delete {cluster_name}"
+            jobs[job_id]["completed_at"] = datetime.now().isoformat()
 
     except Exception as e:
         import traceback
@@ -3804,6 +3810,7 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
         jobs[job_id].setdefault("logs", []).append(f"❌ Error: {str(e)}")
         jobs[job_id]["progress"] = 100
         jobs[job_id]["message"] = f"❌ Error deleting {cluster_name}"
+        jobs[job_id]["completed_at"] = datetime.now().isoformat()
 
 
 @app.delete("/api/rosa/clusters/{cluster_name}")
@@ -3831,7 +3838,7 @@ async def delete_rosa_cluster(
             "status": "running",
             "progress": 0,
             "message": f"Deleting cluster {cluster_name}...",
-            "created_at": time.time(),
+            "created_at": datetime.now(),
             "task_file": None,
             "playbook_file": None,
             "stdout": "",
@@ -4213,6 +4220,7 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
         env = os.environ.copy()
         if "KUBECONFIG" not in env:
             env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
+        env["PYTHONUNBUFFERED"] = "1"
 
         process = subprocess.Popen(
             cmd, cwd=project_root,
@@ -4244,7 +4252,7 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             if line_count % 5 == 0:
                 _time.sleep(0.001)
 
-        returncode = process.wait(timeout=3600)
+        returncode = process.wait(timeout=5400)
         print(f"[Playbook] Completed with return code: {returncode}")
 
         if returncode == 0:
@@ -4253,26 +4261,31 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             jobs[job_id]["message"] = "Playbook completed successfully"
         else:
             jobs[job_id]["status"] = "failed"
+            jobs[job_id]["progress"] = 100
             jobs[job_id]["message"] = f"Playbook failed with return code {returncode}"
 
         jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
-        jobs[job_id]["completed_at"] = datetime.now()
+        jobs[job_id]["completed_at"] = datetime.now().isoformat()
         jobs[job_id]["return_code"] = returncode
 
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait()
         jobs[job_id]["status"] = "failed"
-        jobs[job_id]["message"] = "Playbook timed out after 60 minutes"
-        jobs[job_id]["logs"].append("ERROR: Process timed out after 60 minutes")
+        jobs[job_id]["progress"] = 100
+        jobs[job_id]["return_code"] = 1
+        jobs[job_id]["message"] = "Playbook timed out after 90 minutes"
+        jobs[job_id]["logs"].append("ERROR: Process timed out after 90 minutes")
         jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
-        jobs[job_id]["completed_at"] = datetime.now()
+        jobs[job_id]["completed_at"] = datetime.now().isoformat()
     except Exception as e:
         jobs[job_id]["status"] = "failed"
+        jobs[job_id]["progress"] = 100
+        jobs[job_id]["return_code"] = 1
         jobs[job_id]["message"] = f"Error: {str(e)}"
         jobs[job_id]["logs"].append(f"ERROR: {str(e)}")
         jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
-        jobs[job_id]["completed_at"] = datetime.now()
+        jobs[job_id]["completed_at"] = datetime.now().isoformat()
 
 
 async def run_playbook_background(playbook: str, extra_vars: dict, job_id: str, description: str):

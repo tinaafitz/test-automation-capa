@@ -154,17 +154,22 @@
     - wait_for_deletion | bool
     - "'not-found' not in rcp_exists.stdout"
 
-- name: Fail if ROSAControlPlane still exists after all retries
-  fail:
-    msg: |
-      ROSAControlPlane {{ cluster_name }} still exists after timeout.
-      The ROSA cluster may need manual cleanup.
-      Check: oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }}
+- name: Warn if ROSAControlPlane still exists after all retries
+  set_fact:
+    rcp_deletion_failed: true
   when:
     - wait_for_deletion | bool
     - "'not-found' not in rcp_exists.stdout"
     - wait_rcp.rc != 0
     - (final_rcp_check.rc | default(1)) != 0
+
+- name: Display ROSAControlPlane timeout warning
+  debug:
+    msg: |
+      ⚠️  ROSAControlPlane {{ cluster_name }} still exists after timeout.
+      Continuing with remaining resource cleanup...
+      Check: oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }}
+  when: rcp_deletion_failed | default(false) | bool
 
 - name: Delete ROSANetwork (after ROSAControlPlane deletion completes)
   shell: |
@@ -265,18 +270,24 @@
     - delete_network | bool
     - "'not-found' not in rn_exists.stdout"
 
-- name: Fail if ROSANetwork still exists after all retries
-  fail:
-    msg: |
-      ROSANetwork {{ rosa_network_name }} still exists after timeout.
-      CloudFormation stack may need manual cleanup.
-      Check: aws cloudformation describe-stacks --stack-name {{ cluster_name }}-rosa-network-stack
+- name: Warn if ROSANetwork still exists after all retries
+  set_fact:
+    rosanetwork_deletion_failed: true
   when:
     - wait_for_deletion | bool
     - delete_network | bool
     - "'not-found' not in rn_exists.stdout"
     - wait_rn.rc != 0
     - (final_rn_check.rc | default(1)) != 0
+
+- name: Display ROSANetwork timeout warning
+  debug:
+    msg: |
+      ⚠️  ROSANetwork {{ rosa_network_name }} still exists after timeout.
+      Continuing with remaining resource cleanup...
+      CloudFormation stack may need manual cleanup.
+      Check: aws cloudformation describe-stacks --stack-name {{ cluster_name }}-rosa-network-stack
+  when: rosanetwork_deletion_failed | default(false) | bool
 
 - name: Emit agent context for ROSARoleConfig deletion wait
   debug:
@@ -376,3 +387,11 @@
 
       Deletion Summary:
       {{ deletion_summary }}
+
+- name: Fail if any resource deletion timed out
+  fail:
+    msg: |
+      One or more resources failed to delete within the timeout period.
+      {{ '⚠️  ROSAControlPlane timed out' if (rcp_deletion_failed | default(false)) else '' }}
+      {{ '⚠️  ROSANetwork timed out' if (rosanetwork_deletion_failed | default(false)) else '' }}
+  when: (rcp_deletion_failed | default(false)) or (rosanetwork_deletion_failed | default(false))
