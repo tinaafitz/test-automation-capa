@@ -128,14 +128,43 @@ class DiagnosticAgent(BaseAgent):
         cfn_status = self._get_cloudformation_stack_status(stack_name, resource_info)
 
         if cfn_status == "DELETE_IN_PROGRESS":
-            # Stack is actively being deleted — don't touch finalizers, just wait.
-            # Return low confidence so the agent callback skips remediation entirely,
-            # leaving the issue in DIAGNOSING state. The state machine will NOT
-            # allow re-intervention (should_intervene returns False for DIAGNOSING),
-            # which is correct — we don't want repeated interventions while AWS
-            # is working. The ansible wait loop will either succeed when the stack
-            # finishes, or time out.
-            self.log(f"CloudFormation stack {stack_name} is DELETE_IN_PROGRESS — no intervention needed", "info")
+            # Stack is actively being deleted. Check for blocking VPC
+            # dependencies (ROSA-created SGs like *-vpce-private-router)
+            # that CloudFormation can't remove on its own.
+            # Only intervene if resources are truly stuck — not if they're
+            # still actively transitioning (e.g., endpoints in 'deleting' state).
+            vpc_id = self._get_stack_vpc_id(stack_name, resource_info)
+            blockers, still_transitioning = self._check_vpc_blocking_dependencies(vpc_id, resource_info) if vpc_id else ([], True)
+
+            if blockers and not still_transitioning:
+                # Found blocking dependencies — escalate to CF retry which
+                # cleans up VPC endpoints, ENIs, SGs, then retries deletion
+                self.log(
+                    f"CloudFormation stack {stack_name} DELETE_IN_PROGRESS with "
+                    f"blocking VPC dependencies: {blockers}", "warning"
+                )
+                return {
+                    "issue_type": "rosanetwork_stuck_deletion",
+                    "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
+                    "severity": "high",
+                    "confidence": 0.95,
+                    "evidence": [
+                        f"CloudFormation stack {stack_name} status: DELETE_IN_PROGRESS",
+                        f"Blocking VPC dependencies found: {', '.join(blockers)}",
+                    ],
+                    "recommended_fix": "retry_cloudformation_delete",
+                    "fix_parameters": {
+                        "stack_name": stack_name,
+                        "region": resource_info.get("spec", {}).get("region", "us-west-2") if resource_info else "us-west-2",
+                        "resource_name": resource_name,
+                        "namespace": namespace,
+                    }
+                }
+
+            # No stuck blockers — either no deps at all, or resources are still
+            # actively transitioning (e.g., endpoints in 'deleting' state). Wait.
+            reason = "resources still transitioning" if still_transitioning else "no blocking dependencies"
+            self.log(f"CloudFormation stack {stack_name} is DELETE_IN_PROGRESS — {reason}", "info")
             return {
                 "issue_type": "rosanetwork_stuck_deletion",
                 "root_cause": "CloudFormation stack is still being deleted by AWS — no intervention needed",
@@ -158,6 +187,8 @@ class DiagnosticAgent(BaseAgent):
                 "fix_parameters": {
                     "stack_name": stack_name,
                     "region": resource_info.get("spec", {}).get("region", "us-west-2") if resource_info else "us-west-2",
+                    "resource_name": resource_name,
+                    "namespace": namespace,
                 }
             }
         elif cfn_status == "GONE":
@@ -205,9 +236,150 @@ class DiagnosticAgent(BaseAgent):
             self.log(f"Error checking CloudFormation stack: {e}", "error")
             return "UNKNOWN"
 
+    def _get_stack_vpc_id(self, stack_name: str, resource_info: Dict = None) -> Optional[str]:
+        """Get the VPC ID from a CloudFormation stack."""
+        region = "us-west-2"
+        if resource_info:
+            region = resource_info.get("spec", {}).get("region", region)
+        try:
+            cmd = [
+                "aws", "cloudformation", "list-stack-resources",
+                "--stack-name", stack_name,
+                "--region", region,
+                "--query", "StackResourceSummaries[?ResourceType=='AWS::EC2::VPC'].PhysicalResourceId",
+                "--output", "text"
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            vpc_id = result.stdout.strip() if result.returncode == 0 else None
+            if vpc_id and vpc_id.startswith("vpc-"):
+                return vpc_id
+            return None
+        except Exception as e:
+            self.log(f"Error getting VPC ID from stack: {e}", "error")
+            return None
+
+    def _check_vpc_blocking_dependencies(self, vpc_id: str, resource_info: Dict = None) -> tuple:
+        """Check for VPC dependencies that block CloudFormation deletion.
+
+        Returns (blockers, still_transitioning):
+          - blockers: list of human-readable descriptions of blocking resources
+          - still_transitioning: True if any resources are actively being cleaned
+            up (e.g., VPC endpoints in 'deleting' state). When True, the caller
+            should wait rather than intervene even if blockers are present,
+            because the CAPA controller is still working.
+        """
+        region = "us-west-2"
+        if resource_info:
+            region = resource_info.get("spec", {}).get("region", region)
+
+        blockers = []
+        still_transitioning = False
+        try:
+            # Check for non-default security groups (ROSA creates *-vpce-private-router)
+            sg_cmd = [
+                "aws", "ec2", "describe-security-groups",
+                "--region", region,
+                "--filters", f"Name=vpc-id,Values={vpc_id}",
+                "--query", "SecurityGroups[?GroupName!='default'].[GroupId,GroupName]",
+                "--output", "text"
+            ]
+            sg_result = subprocess.run(sg_cmd, capture_output=True, text=True, timeout=10)
+            if sg_result.returncode == 0 and sg_result.stdout.strip():
+                for line in sg_result.stdout.strip().split('\n'):
+                    parts = line.split('\t')
+                    sg_id = parts[0] if parts else "unknown"
+                    sg_name = parts[1] if len(parts) > 1 else "unknown"
+                    blockers.append(f"SG {sg_id} ({sg_name})")
+
+            # Check for non-deleted VPC endpoints and track their state
+            vpce_cmd = [
+                "aws", "ec2", "describe-vpc-endpoints",
+                "--region", region,
+                "--filters", f"Name=vpc-id,Values={vpc_id}",
+                "--query", "VpcEndpoints[?State!='deleted'].[VpcEndpointId,State]",
+                "--output", "text"
+            ]
+            vpce_result = subprocess.run(vpce_cmd, capture_output=True, text=True, timeout=10)
+            if vpce_result.returncode == 0 and vpce_result.stdout.strip():
+                for line in vpce_result.stdout.strip().split('\n'):
+                    parts = line.split('\t')
+                    vpce_id = parts[0] if parts else "unknown"
+                    vpce_state = parts[1] if len(parts) > 1 else "unknown"
+                    blockers.append(f"VPC endpoint {vpce_id} ({vpce_state})")
+                    # 'deleting' or 'pending' means CAPA is still working
+                    if vpce_state in ("deleting", "pending"):
+                        still_transitioning = True
+
+        except Exception as e:
+            self.log(f"Error checking VPC dependencies: {e}", "error")
+
+        return blockers, still_transitioning
+
     def _diagnose_stuck_rosacontrolplane(self, context: Dict) -> Dict:
-        """Diagnose ROSAControlPlane stuck in deletion state."""
-        return self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
+        """Diagnose ROSAControlPlane stuck in deletion state.
+
+        Unlike other resources, removing ROSAControlPlane finalizers is dangerous
+        because the CAPA controller's finalizer handler calls `rosa delete cluster`
+        and waits for the HCP control plane to fully tear down. If we remove the
+        finalizer prematurely, the K8s resource disappears but the ROSA cluster's
+        control-plane-operator keeps running and recreates VPC resources (endpoints,
+        security groups), which blocks the subsequent ROSANetwork/CloudFormation
+        deletion.
+
+        Only recommend finalizer removal if the ROSA cluster is fully gone.
+        """
+        resource_name, namespace = self._extract_resource_info(context, "rosacontrolplane")
+
+        # Check if the ROSA cluster is still known to ROSA/OCM
+        rosa_status = self._get_rosa_cluster_status(resource_name)
+
+        if rosa_status == "gone":
+            # Cluster fully deleted in ROSA — safe to remove finalizers
+            self.log(f"ROSA cluster {resource_name} is fully gone — safe to remove finalizers", "info")
+            return self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
+        elif rosa_status in ("uninstalling", "error"):
+            # Cluster still tearing down — do NOT remove finalizers
+            self.log(
+                f"ROSA cluster {resource_name} is still {rosa_status} — "
+                f"waiting for ROSA to finish before removing finalizers", "info"
+            )
+            return {
+                "issue_type": "rosacontrolplane_stuck_deletion",
+                "root_cause": f"ROSA cluster is still {rosa_status} — control plane operator is still running",
+                "severity": "low",
+                "confidence": 0.5,
+                "evidence": [f"rosa describe cluster shows state: {rosa_status}"],
+                "recommended_fix": "log_and_continue",
+                "fix_parameters": {}
+            }
+        else:
+            # Unknown status or couldn't check — fall back to generic but with lower confidence
+            self.log(f"ROSA cluster {resource_name} status: {rosa_status}", "warning")
+            return self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
+
+    def _get_rosa_cluster_status(self, cluster_name: str) -> str:
+        """Check ROSA cluster status via rosa CLI.
+
+        Returns: 'gone', 'uninstalling', 'error', 'ready', 'installing', or 'unknown'.
+        """
+        try:
+            cmd = ["rosa", "describe", "cluster", "--cluster", cluster_name, "-o", "json"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if result.returncode != 0:
+                stderr = result.stderr.lower()
+                if "not found" in stderr or "there is no cluster" in stderr:
+                    return "gone"
+                return "unknown"
+            import json as _json
+            cluster_info = _json.loads(result.stdout)
+            state = cluster_info.get("status", {}).get("state", "unknown")
+            return state
+        except subprocess.TimeoutExpired:
+            self.log("Timeout checking ROSA cluster status", "warning")
+            return "unknown"
+        except Exception as e:
+            self.log(f"Error checking ROSA cluster status: {e}", "error")
+            return "unknown"
 
     def _diagnose_stuck_rosaroleconfig(self, context: Dict) -> Dict:
         """Diagnose ROSARoleConfig stuck in deletion state."""

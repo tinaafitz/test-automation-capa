@@ -82,6 +82,7 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
 
         def on_issue_detected(issue_type, context, issue):
             resource_key = context.get("resource_key", "")
+            remediation_msg = ""
             try:
                 diagnosis = diagnostic.diagnose(issue_type, context)
             except Exception as e:
@@ -93,6 +94,7 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
                 return
             if diagnosis and diagnosis.get("confidence", 0) >= 0.7:
                 success, message = remediation.remediate(diagnosis)
+                remediation_msg = message
                 if success:
                     monitor.mark_issue_resolved(issue_type, resource_key)
                 else:
@@ -138,6 +140,8 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
                     "resource_key": resource_key,
                     "diagnosis": diagnosis.get("root_cause", "") if diagnosis else "",
                     "fix_applied": diagnosis.get("recommended_fix", "") if diagnosis else "",
+                    "remediation_result": remediation_msg,
+                    "confidence": diagnosis.get("confidence", 0) if diagnosis else 0,
                     "timestamp": datetime.now().isoformat(),
                 })
 
@@ -165,18 +169,30 @@ def get_agent_stats(job_id: str) -> dict:
     monitor = session["monitor"]
     remediation = session["remediation"]
 
-    # Build per-resource event details
+    # Build per-resource event details with full timeline
     events = jobs.get(job_id, {}).get("agent_events", [])
-    # Deduplicate by resource_key, keeping the latest event per resource
     resource_details = {}
     for event in events:
         rk = event.get("resource_key", "unknown")
-        resource_details[rk] = {
-            "resource_key": rk,
-            "issue_type": event.get("issue_type", ""),
-            "diagnosis": event.get("diagnosis", ""),
-            "fix_applied": event.get("fix_applied", ""),
-        }
+        if rk not in resource_details:
+            resource_details[rk] = {
+                "resource_key": rk,
+                "issue_type": event.get("issue_type", ""),
+                "diagnosis": event.get("diagnosis", ""),
+                "fix_applied": event.get("fix_applied", ""),
+                "timeline": [],
+            }
+        # Update latest diagnosis/fix
+        resource_details[rk]["diagnosis"] = event.get("diagnosis", "")
+        resource_details[rk]["fix_applied"] = event.get("fix_applied", "")
+        # Add to timeline
+        resource_details[rk]["timeline"].append({
+            "time": event.get("timestamp", ""),
+            "action": event.get("fix_applied", ""),
+            "detail": event.get("diagnosis", ""),
+            "result": event.get("remediation_result", ""),
+            "confidence": event.get("confidence", 0),
+        })
 
     # Add resolution status from tracked issues
     for key, tracked in monitor._tracked_issues.items():
@@ -185,10 +201,19 @@ def get_agent_stats(job_id: str) -> dict:
             resource_details[rk]["status"] = tracked.state.value
             resource_details[rk]["attempts"] = tracked.attempts
 
+    # Count unique issues (by resource) instead of raw pattern matches
+    unique_issues = len(resource_details)
+    # Count meaningful interventions (exclude log_and_continue)
+    meaningful_interventions = sum(
+        1 for i in remediation.interventions
+        if i.get("action") not in ("log_and_continue",)
+    )
+
     return {
         "enabled": True,
-        "issues_detected": len(monitor.patterns_detected),
-        "interventions": len(remediation.interventions),
+        "issues_detected": unique_issues,
+        "interventions": meaningful_interventions,
+        "total_checks": len(monitor.patterns_detected),
         "resource_details": list(resource_details.values()),
     }
 
@@ -634,184 +659,7 @@ def _run_deletion_wait_loops(job_id: str, cluster_name: str, namespace: str,
     return True
 
 
-def run_ansible_playbook(playbook: str, config: dict, job_id: str):
-    """Run ansible playbook synchronously (called via asyncio.to_thread to avoid blocking event loop)"""
-    try:
-        jobs[job_id]["status"] = "running"
-        jobs[job_id]["progress"] = 10
-        jobs[job_id]["message"] = f"Starting {playbook} execution"
-
-        # Prepare ansible command
-        cmd = [
-            "ansible-playbook",
-            playbook,
-            "-e",
-            f"cluster_name={config['name']}",
-            "-e",
-            f"openshift_version={config['version']}",
-            "-e",
-            f"aws_region={config['region']}",
-            "-e",
-            "skip_ansible_runner=true",
-        ]
-
-        # Add network automation flag or manual network values
-        if config.get("network_automation"):
-            cmd.extend(["-e", "enable_network_automation=true"])
-        else:
-            # Pass manual network configuration
-            if config.get("subnets"):
-                subnets_str = ",".join(config["subnets"])
-                cmd.extend(["-e", f"manual_subnets={subnets_str}"])
-            if config.get("vpc_id"):
-                cmd.extend(["-e", f"manual_vpc_id={config['vpc_id']}"])
-
-        # Add role automation flag or manual role values
-        if config.get("role_automation"):
-            cmd.extend(["-e", "enable_role_automation=true"])
-        else:
-            # Pass manual IAM role configuration
-            if config.get("installer_role_arn"):
-                cmd.extend(["-e", f"manual_installer_role_arn={config['installer_role_arn']}"])
-            if config.get("support_role_arn"):
-                cmd.extend(["-e", f"manual_support_role_arn={config['support_role_arn']}"])
-            if config.get("worker_role_arn"):
-                cmd.extend(["-e", f"manual_worker_role_arn={config['worker_role_arn']}"])
-            if config.get("oidc_id"):
-                cmd.extend(["-e", f"manual_oidc_id={config['oidc_id']}"])
-
-            # Pass operator role ARNs
-            if config.get("ingress_arn"):
-                cmd.extend(["-e", f"manual_ingress_arn={config['ingress_arn']}"])
-            if config.get("image_registry_arn"):
-                cmd.extend(["-e", f"manual_image_registry_arn={config['image_registry_arn']}"])
-            if config.get("storage_arn"):
-                cmd.extend(["-e", f"manual_storage_arn={config['storage_arn']}"])
-            if config.get("network_arn"):
-                cmd.extend(["-e", f"manual_network_arn={config['network_arn']}"])
-            if config.get("kube_cloud_controller_arn"):
-                cmd.extend(
-                    [
-                        "-e",
-                        f"manual_kube_cloud_controller_arn={config['kube_cloud_controller_arn']}",
-                    ]
-                )
-            if config.get("node_pool_management_arn"):
-                cmd.extend(
-                    ["-e", f"manual_node_pool_management_arn={config['node_pool_management_arn']}"]
-                )
-            if config.get("control_plane_operator_arn"):
-                cmd.extend(
-                    [
-                        "-e",
-                        f"manual_control_plane_operator_arn={config['control_plane_operator_arn']}",
-                    ]
-                )
-            if config.get("kms_provider_arn"):
-                cmd.extend(["-e", f"manual_kms_provider_arn={config['kms_provider_arn']}"])
-
-        # For deletion playbooks, tell Ansible to skip wait loops —
-        # we'll run them in Python below for real-time agent monitoring.
-        is_deletion = "delete" in playbook.lower()
-        if is_deletion:
-            cmd.extend(["-e", "wait_for_deletion=false"])
-
-        jobs[job_id]["progress"] = 30
-        jobs[job_id]["message"] = "Executing ansible playbook"
-
-        # Run the command (use parent directory of ui/ as working directory)
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-        # Execute playbook with real-time output streaming
-        process = subprocess.Popen(
-            cmd,
-            cwd=project_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-
-        # Stream output in real-time and update job logs incrementally
-        import time as _time
-        line_count = 0
-        for line in process.stdout:
-            line_str = line.rstrip()
-            # Append to job logs immediately (visible in UI)
-            jobs[job_id]["logs"].append(line_str)
-
-            # AI Agent: Process each line for real-time issue detection
-            agent_session = ai_agent_sessions.get(job_id)
-            if agent_session and agent_session.get("monitor"):
-                try:
-                    agent_session["monitor"].process_line(line_str)
-                except Exception:
-                    pass
-
-            # Update progress based on log output
-            line_count += 1
-            if line_count % 10 == 0:  # Update every 10 lines
-                # Progress from 30% to 95% during execution
-                current_progress = min(30 + (line_count // 10), 95)
-                jobs[job_id]["progress"] = current_progress
-
-            # Also print to console for debugging
-            print(line_str)
-
-            # Yield the GIL periodically so the event loop can process requests
-            if line_count % 5 == 0:
-                _time.sleep(0.001)
-
-        returncode = process.wait(timeout=3600)
-
-        if returncode != 0:
-            jobs[job_id]["status"] = "failed"
-            jobs[job_id]["message"] = f"Playbook failed with exit code {returncode}"
-            jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
-            jobs[job_id]["completed_at"] = datetime.now()
-            return
-
-        # For deletion playbooks: Ansible only initiated the deletes.
-        # Now run Python wait loops with real-time agent monitoring.
-        if is_deletion:
-            jobs[job_id]["progress"] = 50
-            jobs[job_id]["message"] = "Waiting for resource deletion (agent monitoring active)..."
-            cluster_name = config.get("name", "")
-            namespace = "ns-rosa-hcp"
-
-            wait_success = _run_deletion_wait_loops(
-                job_id=job_id,
-                cluster_name=cluster_name,
-                namespace=namespace,
-                delete_network=True,
-                delete_roles=True,
-            )
-
-            if wait_success:
-                jobs[job_id]["status"] = "completed"
-                jobs[job_id]["progress"] = 100
-                jobs[job_id]["message"] = "Cluster deletion completed successfully"
-            else:
-                jobs[job_id]["status"] = "failed"
-                jobs[job_id]["message"] = "Cluster deletion timed out — resources may need manual cleanup"
-        else:
-            jobs[job_id]["status"] = "completed"
-            jobs[job_id]["progress"] = 100
-            jobs[job_id]["message"] = "Cluster creation completed successfully"
-
-        jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
-        jobs[job_id]["completed_at"] = datetime.now()
-
-    except subprocess.TimeoutExpired:
-        jobs[job_id]["status"] = "failed"
-        jobs[job_id]["message"] = "Job timed out after 60 minutes"
-        jobs[job_id]["logs"].append("ERROR: Process timed out after 60 minutes")
-        jobs[job_id]["completed_at"] = datetime.now()
-    except Exception as e:
-        jobs[job_id]["status"] = "failed"
-        jobs[job_id]["message"] = f"Error: {str(e)}"
-        jobs[job_id]["logs"].append(f"ERROR: {str(e)}")
-        jobs[job_id]["completed_at"] = datetime.now()
+# run_ansible_playbook() removed — consolidated into _run_playbook_in_thread()
 
 
 # API Routes
@@ -1085,7 +933,7 @@ async def create_cluster(config: ClusterConfig, background_tasks: BackgroundTask
     }
 
     # Use the new automated ROSA HCP playbook
-    playbook = "create_rosa_hcp_automated.yaml"
+    playbook = "playbooks/create_rosa_hcp_automated.yaml"
 
     # Map frontend config to playbook extra_vars
     extra_vars = {
@@ -1101,8 +949,10 @@ async def create_cluster(config: ClusterConfig, background_tasks: BackgroundTask
     # Initialize AI agents for provisioning monitoring
     init_ai_agents(job_id)
 
-    # Start background task (use asyncio.to_thread to avoid blocking event loop)
-    asyncio.create_task(asyncio.to_thread(run_ansible_playbook, playbook, extra_vars, job_id))
+    # Start background task
+    asyncio.create_task(
+        run_playbook_background(playbook, extra_vars, job_id, "Create ROSA HCP Cluster")
+    )
 
     return {
         "cluster_id": cluster_id,
@@ -1147,10 +997,15 @@ async def delete_cluster(cluster_id: str, background_tasks: BackgroundTasks):
         "logs": [],
     }
 
-    # Start deletion task (use asyncio.to_thread to avoid blocking event loop)
-    asyncio.create_task(asyncio.to_thread(
-        run_ansible_playbook, "delete_rosa_hcp_cluster.yaml", cluster["config"], job_id
-    ))
+    # Start deletion task
+    delete_vars = {
+        "cluster_name": cluster["config"].get("name", ""),
+        "capi_namespace": cluster["config"].get("capi_namespace", "ns-rosa-hcp"),
+    }
+    init_ai_agents(job_id)
+    asyncio.create_task(
+        run_playbook_background("playbooks/delete_rosa_hcp_cluster.yml", delete_vars, job_id, "Delete ROSA HCP Cluster")
+    )
 
     return {"job_id": job_id, "message": "Cluster deletion started"}
 
@@ -3564,7 +3419,7 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
                 log_delete(f"⏳ Waiting for cluster deletion to complete...")
                 jobs[job_id]["message"] = "Waiting for cluster deletion..."
 
-                max_wait_time = 600
+                max_wait_time = 1200
                 check_interval = 10
                 elapsed_time = 0
 
@@ -3783,6 +3638,7 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
             log_delete(f"")
             log_delete(message)
             jobs[job_id]["message"] = f"✅ Cluster {cluster_name} deleted"
+            jobs[job_id]["completed_at"] = datetime.now().isoformat()
         else:
             message = f"❌ Failed to delete cluster {cluster_name}"
             if errors:
@@ -3792,6 +3648,7 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
             jobs[job_id]["return_code"] = 1
             log_delete(message)
             jobs[job_id]["message"] = f"❌ Failed to delete {cluster_name}"
+            jobs[job_id]["completed_at"] = datetime.now().isoformat()
 
     except Exception as e:
         import traceback
@@ -3804,6 +3661,7 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
         jobs[job_id].setdefault("logs", []).append(f"❌ Error: {str(e)}")
         jobs[job_id]["progress"] = 100
         jobs[job_id]["message"] = f"❌ Error deleting {cluster_name}"
+        jobs[job_id]["completed_at"] = datetime.now().isoformat()
 
 
 @app.delete("/api/rosa/clusters/{cluster_name}")
@@ -3831,7 +3689,7 @@ async def delete_rosa_cluster(
             "status": "running",
             "progress": 0,
             "message": f"Deleting cluster {cluster_name}...",
-            "created_at": time.time(),
+            "created_at": datetime.now(),
             "task_file": None,
             "playbook_file": None,
             "stdout": "",
@@ -4182,6 +4040,7 @@ async def run_ansible_role(request: dict):
 def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, description: str):
     """Run ansible playbook in a thread (called via asyncio.to_thread to avoid blocking event loop)"""
     import re
+    import threading
 
     try:
         jobs[job_id]["status"] = "running"
@@ -4190,6 +4049,49 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
 
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         playbook_path = os.path.join(project_root, playbook)
+
+        # For deletion playbooks, start a sidecar file tailer for real-time agent monitoring.
+        # Ansible shell wait loops buffer stdout, but they also write to a sidecar log file
+        # via tee. This thread tails that file and feeds lines to the agent immediately.
+        is_deletion = "delete" in playbook.lower()
+        sidecar_stop = threading.Event()
+        sidecar_thread = None
+
+        if is_deletion:
+            cluster_name = extra_vars.get("cluster_name", extra_vars.get("clusterName", ""))
+            sidecar_logfile = f"/tmp/deletion-agent-{cluster_name}.log"
+
+            def _tail_sidecar():
+                """Tail the sidecar log file and feed lines to the AI agent in real-time."""
+                import time as _sidecar_time
+                last_pos = 0
+                while not sidecar_stop.is_set():
+                    try:
+                        if os.path.exists(sidecar_logfile):
+                            with open(sidecar_logfile, 'r') as f:
+                                f.seek(last_pos)
+                                new_lines = f.readlines()
+                                if new_lines:
+                                    for line in new_lines:
+                                        line = line.strip()
+                                        if line:
+                                            # Feed to agent
+                                            agent_session = ai_agent_sessions.get(job_id)
+                                            if agent_session and agent_session.get("monitor"):
+                                                try:
+                                                    agent_session["monitor"].process_line(line)
+                                                except Exception:
+                                                    pass
+                                            # Also add to job logs so UI sees it in real-time
+                                            jobs[job_id]["logs"].append(f"[AGENT-SIDECAR] {line}")
+                                            print(f"[SIDECAR] {line}")
+                                last_pos = f.tell()
+                    except Exception:
+                        pass
+                    _sidecar_time.sleep(2)  # Poll every 2 seconds
+
+            sidecar_thread = threading.Thread(target=_tail_sidecar, daemon=True)
+            sidecar_thread.start()
 
         cmd = ["ansible-playbook", playbook_path, "-v"]
 
@@ -4213,6 +4115,7 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
         env = os.environ.copy()
         if "KUBECONFIG" not in env:
             env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
+        env["PYTHONUNBUFFERED"] = "1"
 
         process = subprocess.Popen(
             cmd, cwd=project_root,
@@ -4244,35 +4147,47 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             if line_count % 5 == 0:
                 _time.sleep(0.001)
 
-        returncode = process.wait(timeout=3600)
+        returncode = process.wait(timeout=5400)
         print(f"[Playbook] Completed with return code: {returncode}")
 
         if returncode == 0:
             jobs[job_id]["status"] = "completed"
             jobs[job_id]["progress"] = 100
+            jobs[job_id]["return_code"] = 0
             jobs[job_id]["message"] = "Playbook completed successfully"
         else:
             jobs[job_id]["status"] = "failed"
+            jobs[job_id]["progress"] = 100
+            jobs[job_id]["return_code"] = returncode
             jobs[job_id]["message"] = f"Playbook failed with return code {returncode}"
 
         jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
-        jobs[job_id]["completed_at"] = datetime.now()
-        jobs[job_id]["return_code"] = returncode
+        jobs[job_id]["completed_at"] = datetime.now().isoformat()
 
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait()
         jobs[job_id]["status"] = "failed"
-        jobs[job_id]["message"] = "Playbook timed out after 60 minutes"
-        jobs[job_id]["logs"].append("ERROR: Process timed out after 60 minutes")
+        jobs[job_id]["progress"] = 100
+        jobs[job_id]["return_code"] = 1
+        jobs[job_id]["message"] = "Playbook timed out after 90 minutes"
+        jobs[job_id]["logs"].append("ERROR: Process timed out after 90 minutes")
         jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
-        jobs[job_id]["completed_at"] = datetime.now()
+        jobs[job_id]["completed_at"] = datetime.now().isoformat()
     except Exception as e:
         jobs[job_id]["status"] = "failed"
+        jobs[job_id]["progress"] = 100
+        jobs[job_id]["return_code"] = 1
         jobs[job_id]["message"] = f"Error: {str(e)}"
         jobs[job_id]["logs"].append(f"ERROR: {str(e)}")
         jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
-        jobs[job_id]["completed_at"] = datetime.now()
+        jobs[job_id]["completed_at"] = datetime.now().isoformat()
+    finally:
+        # Stop the sidecar tailer thread
+        if sidecar_stop is not None:
+            sidecar_stop.set()
+        if sidecar_thread is not None:
+            sidecar_thread.join(timeout=5)
 
 
 async def run_playbook_background(playbook: str, extra_vars: dict, job_id: str, description: str):
