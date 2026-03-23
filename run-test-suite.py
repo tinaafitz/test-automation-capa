@@ -814,23 +814,106 @@ class TestSuiteRunner:
 
         # Print AI Agent statistics if enabled
         if self.ai_agent_enabled and self.monitor_agent:
-            print(f"\n{Colors.BOLD}AI AGENT STATISTICS:{Colors.ENDC}")
+            print(f"\n{Colors.BOLD}🤖 AI AGENT SUMMARY:{Colors.ENDC}")
 
             monitor_stats = self.monitor_agent.get_statistics()
-            print(f"   Issues Detected: {monitor_stats.get('patterns_detected', 0)}")
-            print(f"   Interventions: {monitor_stats.get('interventions_performed', 0)}")
+            issues_detected = monitor_stats.get('patterns_detected', 0)
+
+            # Count meaningful interventions from remediation agent
+            meaningful_fixes = 0
+            confirmations = 0
+            failed_fixes = 0
+            fix_details = []
 
             if self.remediation_agent:
-                success_rates = self.remediation_agent.get_success_rate()
-                if success_rates:
-                    print(f"\n{Colors.CYAN}   Fix Success Rates:{Colors.ENDC}")
-                    for fix_name, stats in success_rates.items():
-                        print(f"      {fix_name}: {stats['success_rate']} ({stats['successes']}/{stats['total_attempts']})")
+                for intervention in self.remediation_agent.interventions:
+                    fix_type = intervention.get("type", "")
+                    details = intervention.get("details", {})
+                    success = details.get("success", False)
+                    message = details.get("message", "")
+                    issue_type = details.get("issue_type", "")
+                    params = details.get("parameters", {})
 
-                self.results['ai_agent_statistics'] = {
-                    'monitor_stats': monitor_stats,
-                    'fix_success_rates': success_rates
+                    # Skip log_and_continue — not a real intervention
+                    if fix_type == "log_and_continue":
+                        continue
+
+                    resource_name = params.get("resource_name", params.get("stack_name", "unknown"))
+
+                    if not success:
+                        failed_fixes += 1
+                        fix_details.append({
+                            "action": fix_type, "resource": resource_name,
+                            "status": "failed", "message": message
+                        })
+                    elif "already deleted" in message:
+                        confirmations += 1
+                        fix_details.append({
+                            "action": "confirmed_deleted", "resource": resource_name,
+                            "status": "ok", "message": message
+                        })
+                    else:
+                        meaningful_fixes += 1
+                        fix_details.append({
+                            "action": fix_type, "resource": resource_name,
+                            "status": "fixed", "message": message
+                        })
+
+            # Print summary line
+            if meaningful_fixes > 0:
+                print(f"   {Colors.GREEN}Agent auto-fixed {meaningful_fixes} issue(s){Colors.ENDC}")
+            elif issues_detected > 0:
+                print(f"   {Colors.CYAN}Agent monitored {issues_detected} resource(s) — all deleted cleanly{Colors.ENDC}")
+            else:
+                print(f"   {Colors.CYAN}No issues detected — clean run{Colors.ENDC}")
+
+            # Print details
+            if fix_details:
+                print(f"\n   {Colors.BOLD}Actions:{Colors.ENDC}")
+                action_labels = {
+                    "remove_finalizers": "Removed finalizers",
+                    "retry_cloudformation_delete": "Retried CF stack delete",
+                    "cleanup_vpc_dependencies": "Cleaned VPC dependencies",
+                    "backoff_and_retry": "Applied backoff",
+                    "refresh_ocm_token": "Refreshed OCM token",
+                    "confirmed_deleted": "Confirmed deleted",
                 }
+                for detail in fix_details:
+                    label = action_labels.get(detail["action"], detail["action"])
+                    resource = detail["resource"]
+                    if detail["status"] == "fixed":
+                        print(f"   {Colors.GREEN}  ✓ {label}: {resource}{Colors.ENDC}")
+                    elif detail["status"] == "ok":
+                        print(f"   {Colors.CYAN}  ✓ {label}: {resource}{Colors.ENDC}")
+                    else:
+                        print(f"   {Colors.RED}  ✗ {label} (failed): {resource}{Colors.ENDC}")
+                        if self.verbosity > 0:
+                            print(f"      {detail['message']}")
+
+            if confirmations > 0:
+                print(f"\n   Confirmations: {confirmations} resource(s) verified already deleted")
+            if failed_fixes > 0:
+                print(f"   {Colors.YELLOW}Failed fixes: {failed_fixes}{Colors.ENDC}")
+
+            # Print tracked issues state
+            tracked = monitor_stats.get('tracked_issues', {})
+            if tracked and self.verbosity > 0:
+                print(f"\n   {Colors.BOLD}Tracked Issues:{Colors.ENDC}")
+                for key, info in tracked.items():
+                    state = info.get('state', '?')
+                    attempts = info.get('attempts', 0)
+                    state_color = Colors.GREEN if state == 'resolved' else Colors.YELLOW if state == 'failed' else Colors.CYAN
+                    print(f"   {state_color}  {key}: {state} ({attempts} attempt(s)){Colors.ENDC}")
+
+            # Store stats for results
+            success_rates = self.remediation_agent.get_success_rate() if self.remediation_agent else {}
+            self.results['ai_agent_statistics'] = {
+                'monitor_stats': monitor_stats,
+                'fix_success_rates': success_rates,
+                'meaningful_fixes': meaningful_fixes,
+                'confirmations': confirmations,
+                'failed_fixes': failed_fixes,
+            }
 
         print("\n" + "=" * 80 + "\n")
 
