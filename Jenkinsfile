@@ -171,7 +171,7 @@ pipeline {
                                 cd capa
                                 # Execute the ROSA HCP provisioning test suite with maximum verbosity
                                 # Pass Jenkins parameters and credentials as Ansible extra vars
-                                ./run-test-suite.py 20-rosa-hcp-provision --format junit -vvv \
+                                ./run-test-suite.py 20-rosa-hcp-provision --format junit -vvv --ai-agent \
                                   -e OCP_HUB_API_URL="${OCP_HUB_API_URL}" \
                                   -e OCP_HUB_CLUSTER_USER="${OCP_HUB_CLUSTER_USER}" \
                                   -e OCP_HUB_CLUSTER_PASSWORD="${OCP_HUB_CLUSTER_PASSWORD}" \
@@ -216,13 +216,13 @@ pipeline {
                             string(credentialsId: 'CAPI_OCM_CLIENT_ID', variable: 'OCM_CLIENT_ID'),
                             string(credentialsId: 'CAPI_OCM_CLIENT_SECRET', variable: 'OCM_CLIENT_SECRET')
                         ]) {
-                            // Add timeout for deletion (can take 30-50 minutes)
-                            timeout(time: 60, unit: 'MINUTES') {
+                            // Add timeout for deletion (can take 30-50 minutes, longer with agent remediation)
+                            timeout(time: 90, unit: 'MINUTES') {
                                 sh '''
                                     cd capa
                                     # Execute the ROSA HCP deletion test suite
                                     # Pass all required credentials and parameters (same as provisioning)
-                                    ./run-test-suite.py 30-rosa-hcp-delete --format junit -vvv \
+                                    ./run-test-suite.py 30-rosa-hcp-delete --format junit -vvv --ai-agent \
                                       -e OCP_HUB_API_URL="${OCP_HUB_API_URL}" \
                                       -e OCP_HUB_CLUSTER_USER="${OCP_HUB_CLUSTER_USER}" \
                                       -e OCP_HUB_CLUSTER_PASSWORD="${OCP_HUB_CLUSTER_PASSWORD}" \
