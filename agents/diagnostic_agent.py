@@ -131,6 +131,25 @@ class DiagnosticAgent(BaseAgent):
             # Stack is actively being deleted. Check for blocking VPC
             # dependencies (ROSA-created SGs like *-vpce-private-router)
             # that CloudFormation can't remove on its own.
+            # But only after 5 minutes — give CF time to progress naturally
+            # before intervening (CAPA controller cleans up endpoints/SGs
+            # in the first few minutes).
+            deletion_age_minutes = self._get_deletion_age_minutes(resource_info)
+            if deletion_age_minutes < 5:
+                self.log(
+                    f"CloudFormation stack {stack_name} DELETE_IN_PROGRESS for "
+                    f"{deletion_age_minutes:.0f}m — too early to check for blockers", "info"
+                )
+                return {
+                    "issue_type": "rosanetwork_stuck_deletion",
+                    "root_cause": "CloudFormation stack is still being deleted by AWS — no intervention needed",
+                    "severity": "low",
+                    "confidence": 0.5,
+                    "evidence": [f"CloudFormation stack {stack_name} status: DELETE_IN_PROGRESS ({deletion_age_minutes:.0f}m elapsed)"],
+                    "recommended_fix": "log_and_continue",
+                    "fix_parameters": {}
+                }
+
             vpc_id = self._get_stack_vpc_id(stack_name, resource_info)
             blocking_deps = self._check_vpc_blocking_dependencies(vpc_id, resource_info) if vpc_id else []
 
@@ -227,6 +246,22 @@ class DiagnosticAgent(BaseAgent):
         except Exception as e:
             self.log(f"Error checking CloudFormation stack: {e}", "error")
             return "UNKNOWN"
+
+    def _get_deletion_age_minutes(self, resource_info: Dict = None) -> float:
+        """Get how long ago the resource's deletionTimestamp was set, in minutes."""
+        if not resource_info:
+            return 999  # Unknown — assume old enough to check
+        deletion_ts = resource_info.get("metadata", {}).get("deletionTimestamp")
+        if not deletion_ts:
+            return 999
+        try:
+            from datetime import datetime, timezone
+            # K8s timestamps are ISO 8601 UTC, e.g. "2026-03-22T15:15:06Z"
+            dt = datetime.fromisoformat(deletion_ts.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            return (now - dt).total_seconds() / 60.0
+        except Exception:
+            return 999  # Parse error — assume old enough
 
     def _get_stack_vpc_id(self, stack_name: str, resource_info: Dict = None) -> Optional[str]:
         """Get the VPC ID from a CloudFormation stack."""
