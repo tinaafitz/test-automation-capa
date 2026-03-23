@@ -277,16 +277,22 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
             const agentStats = agentResponse ? await agentResponse.json().catch(() => null) : null;
 
             if (jobData.status === 'completed') {
-              // Success - update with final logs
+              // Success - re-fetch agent stats after a short delay to ensure
+              // any in-flight remediation has finished recording its results
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              const finalAgentResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}/agent-stats`)).catch(() => null);
+              const finalAgentStats = finalAgentResponse ? await finalAgentResponse.json().catch(() => null) : null;
+              const finalStats = finalAgentStats?.agent_stats || agentStats?.agent_stats || null;
+
               const output = currentOutput || 'Deletion completed successfully';
 
-              updateRecentOperationStatus(deleteId, '✅ Cluster deleted successfully!', output, { agentStats: agentStats?.agent_stats || null });
+              updateRecentOperationStatus(deleteId, '✅ Cluster deleted successfully!', output, { agentStats: finalStats });
               const successResults = {
                 success: true,
                 timestamp: new Date().toISOString(),
                 clusterName,
                 output,
-                agentStats: agentStats?.agent_stats || null,
+                agentStats: finalStats,
               };
               console.log('✅ Setting deletion results (success):', successResults);
               setDeletionResults(successResults);
