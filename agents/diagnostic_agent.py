@@ -339,25 +339,23 @@ class DiagnosticAgent(BaseAgent):
             result = self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
             result["root_cause"] = "ROSA cluster fully removed — cleaning up remaining K8s resource"
             return result
-        elif rosa_status in ("uninstalling", "error"):
-            # Cluster still tearing down — do NOT remove finalizers
+        else:
+            # Cluster still exists (ready, installing, uninstalling, error, unknown) —
+            # do NOT remove finalizers. The CAPA controller needs its finalizer to
+            # properly orchestrate cluster deletion via OCM.
             self.log(
                 f"ROSA cluster {resource_name} is still {rosa_status} — "
                 f"waiting for ROSA to finish before removing finalizers", "info"
             )
             return {
                 "issue_type": "rosacontrolplane_stuck_deletion",
-                "root_cause": f"ROSA cluster is still {rosa_status} — control plane operator is still running",
+                "root_cause": f"ROSA cluster is still {rosa_status} — waiting for full removal",
                 "severity": "low",
                 "confidence": 0.5,
                 "evidence": [f"rosa describe cluster shows state: {rosa_status}"],
                 "recommended_fix": "log_and_continue",
                 "fix_parameters": {}
             }
-        else:
-            # Unknown status or couldn't check — fall back to generic but with lower confidence
-            self.log(f"ROSA cluster {resource_name} status: {rosa_status}", "warning")
-            return self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
 
     def _get_rosa_cluster_status(self, cluster_name: str) -> str:
         """Check ROSA cluster status via rosa CLI.
