@@ -436,11 +436,15 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                 });
 
                 // Update Task Summary with agent stats
-                if (resumeDeleteId) {
+                // Re-lookup the operation each poll in case it wasn't available at resume start
+                const opId = resumeDeleteId || (recentOps.recentOperations || []).find(
+                  (op) => op.title && op.title.includes(clusterName) && op.title.includes('Delete')
+                )?.id;
+                if (opId) {
                   const status = isDone
                     ? (jobData.status === 'completed' ? '✅ Cluster deleted successfully!' : '❌ Deletion failed')
                     : '🗑️ Deleting...';
-                  updateRecentOperationStatus(resumeDeleteId, status, currentOutput, { agentStats: stats });
+                  updateRecentOperationStatus(opId, status, currentOutput, { agentStats: stats });
                 }
 
                 if (isDone) {
