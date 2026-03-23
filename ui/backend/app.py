@@ -203,10 +203,11 @@ def get_agent_stats(job_id: str) -> dict:
 
     # Count unique issues (by resource) instead of raw pattern matches
     unique_issues = len(resource_details)
-    # Count meaningful interventions (exclude log_and_continue)
+    # Count meaningful interventions (exclude log_and_continue and already-deleted confirmations)
     meaningful_interventions = sum(
         1 for i in remediation.interventions
-        if i.get("action") not in ("log_and_continue",)
+        if i.get("type") not in ("log_and_continue",)
+        and "already deleted" not in i.get("details", {}).get("message", "")
     )
 
     return {
@@ -3168,12 +3169,10 @@ def _get_rosa_clusters_sync(context: str = None):
                         "created": cluster.get("creation_timestamp"),
                         "version": cluster.get("openshift_version", "N/A"),
                         "namespace": "ns-rosa-hcp",  # CAPI clusters are in ns-rosa-hcp
-                        "progress": 100 if cluster.get("state") == "ready" else 0,
+                        "progress": 100 if cluster.get("state") == "ready" else 50 if cluster.get("state") == "installing" else 0,
                     }
 
-                    # Only include ready clusters
-                    if cluster.get("state") == "ready":
-                        clusters.append(cluster_info)
+                    clusters.append(cluster_info)
 
                 return {
                     "success": True,
