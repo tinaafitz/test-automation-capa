@@ -370,16 +370,25 @@ def test_rosanetwork_deletion_task_retrying_matches():
 
 
 def test_extract_resource_from_retrying_line():
-    """Test resource name extraction from RETRYING lines with explicit resource names"""
-    print("\n=== Test 19: Extract resource from RETRYING line ===")
+    """Test resource name extraction via structured context (the real extraction path).
+
+    In practice, the Ansible task emits #AGENT_CONTEXT markers before each
+    wait loop, and the monitoring agent parses them into structured context
+    fields that are passed to the diagnostic agent.
+    """
+    print("\n=== Test 19: Extract resource from structured context ===")
     agent = DiagnosticAgent(Path("."), enabled=True, verbose=True)
     context = {
+        "resource_name": "pop-rosa-hcp-network",
+        "namespace": "ns-rosa-hcp",
+        "resource_type": "rosanetwork",
         "buffer": [
-            "FAILED - RETRYING: ROSANetwork pop-rosa-hcp-network still exists waiting for deletion (35 retries left)"
+            "FAILED - RETRYING: [localhost]: Wait for rosanetwork pop-rosa-hcp-network deletion to complete (35 retries left)."
         ]
     }
     resource_name, namespace = agent._extract_resource_info(context)
     assert resource_name == "pop-rosa-hcp-network", f"Expected 'pop-rosa-hcp-network', got '{resource_name}'"
+    assert namespace == "ns-rosa-hcp", f"Expected 'ns-rosa-hcp', got '{namespace}'"
     print("PASSED")
 
 
@@ -559,55 +568,40 @@ def test_deletion_task_final_check_pattern():
 
     task_names = [t.get("name", "") for t in tasks]
 
-    # Critical resources must have: Wait -> Final check -> Fail if still exists
-    for resource in ["ROSAControlPlane", "ROSANetwork"]:
+    # Critical resources must have: Wait -> Final check -> Warn if still exists
+    for resource in ["ROSAControlPlane", "ROSANetwork", "ROSARoleConfig"]:
         wait_task = f"Wait for {resource} deletion to complete"
         final_task = f"Final check - verify {resource} is actually gone"
-        fail_task = f"Fail if {resource} still exists after all retries"
 
         assert wait_task in task_names, f"Missing task: {wait_task}"
         assert final_task in task_names, f"Missing task: {final_task}"
-        assert fail_task in task_names, f"Missing task: {fail_task}"
 
-        # Verify the wait task uses failed_when: false (not failed_when: wait_*.rc == 0)
+        # Verify the wait task uses failed_when: false
         wait_idx = task_names.index(wait_task)
         wait_t = tasks[wait_idx]
         assert wait_t.get("failed_when") is False, \
             f"{wait_task} should have failed_when: false, got: {wait_t.get('failed_when')}"
 
-        # Verify the final check task exists right after the wait
+        # Verify the final check task exists after the wait
         final_idx = task_names.index(final_task)
         final_t = tasks[final_idx]
         assert final_idx > wait_idx, \
             f"{final_task} should come after {wait_task}"
 
-        # Verify the final check has a retry loop (either Ansible until/retries or shell for loop)
-        has_ansible_retries = final_t.get("retries", 0) > 0
+        # Verify the final check has a retry loop (shell for loop)
         shell_cmd = final_t.get("shell", "")
         has_shell_loop = "for " in shell_cmd and "seq" in shell_cmd
-        assert has_ansible_retries or has_shell_loop, \
-            f"{final_task} should have retries (Ansible or shell loop), got neither"
+        assert has_shell_loop, \
+            f"{final_task} should have a shell retry loop"
 
-        # Verify the fail task references the final check register variable
-        fail_idx = task_names.index(fail_task)
-        fail_t = tasks[fail_idx]
-        fail_when = fail_t.get("when", [])
-        fail_when_str = str(fail_when)
-        assert "final_" in fail_when_str and "_check" in fail_when_str, \
-            f"{fail_task} should reference final check variable in when conditions"
+    # ROSAControlPlane and ROSANetwork should have warn tasks (not hard fail per-resource)
+    for resource in ["ROSAControlPlane", "ROSANetwork"]:
+        warn_task = f"Warn if {resource} still exists after all retries"
+        assert warn_task in task_names, f"Missing task: {warn_task}"
 
-    # ROSARoleConfig should also have Wait + Final check (but no hard fail)
-    for resource in ["ROSARoleConfig"]:
-        wait_task = f"Wait for {resource} deletion to complete"
-        final_task = f"Final check - verify {resource} is actually gone"
-
-        assert wait_task in task_names, f"Missing task: {wait_task}"
-        assert final_task in task_names, f"Missing task: {final_task}"
-
-        wait_idx = task_names.index(wait_task)
-        wait_t = tasks[wait_idx]
-        assert wait_t.get("failed_when") is False, \
-            f"{wait_task} should have failed_when: false, got: {wait_t.get('failed_when')}"
+    # There should be a single aggregate fail task at the end
+    fail_task = "Fail if any resource deletion timed out"
+    assert fail_task in task_names, f"Missing task: {fail_task}"
 
     print("PASSED")
 
