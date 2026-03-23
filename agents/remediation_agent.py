@@ -348,12 +348,11 @@ class RemediationAgent(BaseAgent):
 
             stack_status = status_result.stdout.strip()
 
-            if stack_status == "DELETE_IN_PROGRESS":
-                return True, f"Stack {stack_name} is already DELETE_IN_PROGRESS"
-
-            if stack_status != "DELETE_FAILED":
+            if stack_status not in ("DELETE_IN_PROGRESS", "DELETE_FAILED"):
                 return False, f"Stack {stack_name} in unexpected state: {stack_status}"
 
+            # For both DELETE_IN_PROGRESS (stuck on VPC deps) and DELETE_FAILED,
+            # clean up VPC dependencies then retry/let CF continue.
             # Get the VPC ID from the stack to clean up dependencies
             vpc_cmd = [
                 "aws", "cloudformation", "list-stack-resources",
@@ -513,26 +512,29 @@ class RemediationAgent(BaseAgent):
                 if cleanup_errors:
                     self.log(f"VPC cleanup errors: {'; '.join(cleanup_errors)}", "warning")
 
-            # Retry the stack deletion
-            delete_cmd = [
-                "aws", "cloudformation", "delete-stack",
-                "--stack-name", stack_name,
-                "--region", region
-            ]
-            delete_result = subprocess.run(delete_cmd, capture_output=True, text=True, timeout=10)
+            if stack_status == "DELETE_FAILED":
+                # Retry the stack deletion (only needed for DELETE_FAILED;
+                # DELETE_IN_PROGRESS will continue on its own after deps are removed)
+                delete_cmd = [
+                    "aws", "cloudformation", "delete-stack",
+                    "--stack-name", stack_name,
+                    "--region", region
+                ]
+                delete_result = subprocess.run(delete_cmd, capture_output=True, text=True, timeout=10)
 
-            if delete_result.returncode != 0:
-                return False, f"Failed to retry stack deletion: {delete_result.stderr}"
+                if delete_result.returncode != 0:
+                    return False, f"Failed to retry stack deletion: {delete_result.stderr}"
 
-            # Verify the stack transitioned to DELETE_IN_PROGRESS (delete-stack is async
-            # and always returns rc=0, so we must check the actual status)
-            time.sleep(5)
-            recheck = subprocess.run(status_cmd, capture_output=True, text=True, timeout=10)
-            if recheck.returncode == 0 and "DELETE_FAILED" in recheck.stdout:
-                self.log(f"Stack {stack_name} immediately re-entered DELETE_FAILED after retry", "warning")
-                return False, f"Stack {stack_name} re-entered DELETE_FAILED — dependencies may still exist"
+                # Verify the stack transitioned to DELETE_IN_PROGRESS (delete-stack is async
+                # and always returns rc=0, so we must check the actual status)
+                time.sleep(5)
+                recheck = subprocess.run(status_cmd, capture_output=True, text=True, timeout=10)
+                if recheck.returncode == 0 and "DELETE_FAILED" in recheck.stdout:
+                    self.log(f"Stack {stack_name} immediately re-entered DELETE_FAILED after retry", "warning")
+                    return False, f"Stack {stack_name} re-entered DELETE_FAILED — dependencies may still exist"
 
-            return True, f"Retried CloudFormation stack deletion for {stack_name}"
+            cleanup_summary = f"; {'; '.join(cleanup_details)}" if vpc_id and cleanup_details else ""
+            return True, f"Cleaned up VPC dependencies for {stack_name}{cleanup_summary}"
 
         except subprocess.TimeoutExpired:
             return False, "Timeout during CloudFormation retry"
