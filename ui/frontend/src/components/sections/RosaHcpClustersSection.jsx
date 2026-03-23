@@ -74,6 +74,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [copySuccess, setCopySuccess] = useState('');
   const [clusterPendingDeletion, setClusterPendingDeletion] = useState(null);
+  const [expandedAgentRows, setExpandedAgentRows] = useState({});
 
   // AbortController for canceling polling on unmount
   const deletionAbortController = useRef(null);
@@ -706,8 +707,11 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                     {deletionResults.agentStats.issues_detected > 0 ? '\uD83E\uDD16' : '\uD83D\uDEE1\uFE0F'} AI Agent
                     {deletionResults.isRunning ? ': Monitoring' : ': Summary'}
                   </span>
-                  <span>Issues: {deletionResults.agentStats.issues_detected}</span>
-                  <span>Interventions: {deletionResults.agentStats.interventions}</span>
+                  <span>Resources: {deletionResults.agentStats.issues_detected}</span>
+                  <span>Fixes: {deletionResults.agentStats.interventions}</span>
+                  {deletionResults.agentStats.total_checks > 0 && (
+                    <span className="text-gray-500">({deletionResults.agentStats.total_checks} checks)</span>
+                  )}
                   {deletionResults.agentStats.interventions > 0 && (
                     <span className="text-green-700 font-medium">
                       Agent auto-fixed {deletionResults.agentStats.interventions} issue(s)
@@ -723,17 +727,82 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                         : detail.status === 'detected' ? '\uD83D\uDD0D'
                         : '\u2139\uFE0F';
                       const issueLabel = detail.issue_type?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
+                      const timeline = detail.timeline || [];
+                      const actionLabels = {
+                        remove_finalizers: 'Removed finalizers',
+                        retry_cloudformation_delete: 'Cleaned up VPC dependencies',
+                        log_and_continue: 'Monitored (waiting)',
+                      };
+                      // Show meaningful actions (skip repeated log_and_continue)
+                      const meaningfulActions = [];
+                      let waitCount = 0;
+                      for (const entry of timeline) {
+                        if (entry.action === 'log_and_continue') {
+                          waitCount++;
+                        } else {
+                          if (waitCount > 0) {
+                            meaningfulActions.push({ action: 'log_and_continue', count: waitCount });
+                            waitCount = 0;
+                          }
+                          meaningfulActions.push(entry);
+                        }
+                      }
+                      if (waitCount > 0) {
+                        meaningfulActions.push({ action: 'log_and_continue', count: waitCount });
+                      }
+                      const isExpanded = expandedAgentRows[idx];
+                      const fixCount = meaningfulActions.filter(a => a.action !== 'log_and_continue').length;
+                      const totalChecks = timeline.length;
                       return (
-                        <div key={idx} className="flex items-start gap-2 text-xs text-gray-600">
-                          <span className="flex-shrink-0">{statusIcon}</span>
-                          <div>
-                            <span className="font-medium text-gray-700">{detail.resource_key}</span>
-                            <span className="mx-1">&mdash;</span>
-                            <span>{issueLabel}</span>
-                            {detail.diagnosis && (
-                              <span className="text-gray-500 ml-1">({detail.diagnosis})</span>
-                            )}
+                        <div key={idx} className="text-xs text-gray-600">
+                          <div
+                            className="flex items-start gap-2 cursor-pointer hover:bg-yellow-100 rounded px-1 py-0.5 -mx-1"
+                            onClick={() => setExpandedAgentRows(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                          >
+                            <span className="flex-shrink-0 text-gray-400 w-3">{isExpanded ? '\u25BC' : '\u25B6'}</span>
+                            <span className="flex-shrink-0">{statusIcon}</span>
+                            <div className="flex-1">
+                              <span className="font-medium text-gray-700">{detail.resource_key}</span>
+                              <span className="mx-1">&mdash;</span>
+                              <span>{issueLabel}</span>
+                              <span className="ml-2 text-gray-400">
+                                ({totalChecks} check{totalChecks !== 1 ? 's' : ''}{fixCount > 0 ? `, ${fixCount} fix${fixCount !== 1 ? 'es' : ''}` : ''})
+                              </span>
+                            </div>
                           </div>
+                          {isExpanded && (
+                            <div className="ml-7 mt-1 mb-2 space-y-0.5">
+                              {detail.diagnosis && (
+                                <div className="text-gray-500 italic mb-1">Diagnosis: {detail.diagnosis}</div>
+                              )}
+                              {timeline.map((entry, i) => {
+                                const actionLabel = actionLabels[entry.action] || entry.action || 'Check';
+                                const isWait = entry.action === 'log_and_continue';
+                                const timestamp = entry.time ? new Date(entry.time).toLocaleTimeString() : '';
+                                const confidence = entry.confidence ? `${Math.round(entry.confidence * 100)}%` : '';
+                                return (
+                                  <div key={i} className={`flex flex-col ${isWait ? 'text-gray-400' : 'text-gray-600'}`}>
+                                    <div className="flex items-start gap-1">
+                                      <span className="text-gray-300 flex-shrink-0">{'\u2192'}</span>
+                                      {timestamp && <span className="text-gray-400 flex-shrink-0 font-mono">{timestamp}</span>}
+                                      <span className={isWait ? '' : 'text-green-700 font-medium'}>
+                                        {actionLabel}
+                                      </span>
+                                      {confidence && !isWait && (
+                                        <span className="text-gray-400 ml-1">[{confidence}]</span>
+                                      )}
+                                    </div>
+                                    {entry.detail && !entry.detail.includes('no intervention') && (
+                                      <div className="ml-5 text-gray-400 break-all">{entry.detail}</div>
+                                    )}
+                                    {entry.result && (
+                                      <div className="ml-5 text-green-600 break-all">{entry.result}</div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}

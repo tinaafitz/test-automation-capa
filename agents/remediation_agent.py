@@ -353,6 +353,31 @@ class RemediationAgent(BaseAgent):
 
             # For both DELETE_IN_PROGRESS (stuck on VPC deps) and DELETE_FAILED,
             # clean up VPC dependencies then retry/let CF continue.
+            cleanup_details = []
+            cleanup_errors = []
+
+            # Step 0: Remove finalizers from the K8s ROSANetwork resource so the
+            # CAPA controller stops recreating VPC dependencies (endpoints, SGs)
+            # while we're trying to clean them up.
+            rosanetwork_name = params.get("resource_name")
+            rosanetwork_ns = params.get("namespace")
+            if rosanetwork_name and rosanetwork_ns:
+                self.log(f"Removing finalizers from rosanetwork/{rosanetwork_name} to stop CAPA controller", "info")
+                patch_cmd = [
+                    "oc", "patch", "rosanetwork", rosanetwork_name,
+                    "-n", rosanetwork_ns,
+                    "--type=merge",
+                    "-p", '{"metadata":{"finalizers":null}}'
+                ]
+                patch_result = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=30)
+                if patch_result.returncode == 0:
+                    cleanup_details.append(f"Removed finalizers from rosanetwork/{rosanetwork_name}")
+                    self.log(f"Removed finalizers from rosanetwork/{rosanetwork_name}", "info")
+                elif "NotFound" in patch_result.stderr or "not found" in patch_result.stderr.lower():
+                    self.log(f"rosanetwork/{rosanetwork_name} already gone", "info")
+                else:
+                    self.log(f"Failed to remove rosanetwork finalizers: {patch_result.stderr}", "warning")
+
             # Get the VPC ID from the stack to clean up dependencies
             vpc_cmd = [
                 "aws", "cloudformation", "list-stack-resources",
@@ -367,10 +392,8 @@ class RemediationAgent(BaseAgent):
             # If we have a VPC, clean up any lingering dependencies
             if vpc_id and vpc_id.startswith("vpc-"):
                 self.log(f"Cleaning up VPC {vpc_id} dependencies before retry", "info")
-                cleanup_details = []
-                cleanup_errors = []
 
-                # Step 0: Delete VPC endpoints FIRST — they create ela-attach ENIs
+                # Step 1: Delete VPC endpoints FIRST — they create ela-attach ENIs
                 # that cannot be manually detached. Must delete endpoints and wait
                 # for ENIs to release before cleaning SGs.
                 vpce_cmd = [
@@ -533,7 +556,7 @@ class RemediationAgent(BaseAgent):
                     self.log(f"Stack {stack_name} immediately re-entered DELETE_FAILED after retry", "warning")
                     return False, f"Stack {stack_name} re-entered DELETE_FAILED — dependencies may still exist"
 
-            cleanup_summary = f"; {'; '.join(cleanup_details)}" if vpc_id and cleanup_details else ""
+            cleanup_summary = f"; {'; '.join(cleanup_details)}" if cleanup_details else ""
             return True, f"Cleaned up VPC dependencies for {stack_name}{cleanup_summary}"
 
         except subprocess.TimeoutExpired:

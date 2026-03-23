@@ -156,6 +156,8 @@ class DiagnosticAgent(BaseAgent):
                     "fix_parameters": {
                         "stack_name": stack_name,
                         "region": resource_info.get("spec", {}).get("region", "us-west-2") if resource_info else "us-west-2",
+                        "resource_name": resource_name,
+                        "namespace": namespace,
                     }
                 }
 
@@ -185,6 +187,8 @@ class DiagnosticAgent(BaseAgent):
                 "fix_parameters": {
                     "stack_name": stack_name,
                     "region": resource_info.get("spec", {}).get("region", "us-west-2") if resource_info else "us-west-2",
+                    "resource_name": resource_name,
+                    "namespace": namespace,
                 }
             }
         elif cfn_status == "GONE":
@@ -312,8 +316,70 @@ class DiagnosticAgent(BaseAgent):
         return blockers, still_transitioning
 
     def _diagnose_stuck_rosacontrolplane(self, context: Dict) -> Dict:
-        """Diagnose ROSAControlPlane stuck in deletion state."""
-        return self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
+        """Diagnose ROSAControlPlane stuck in deletion state.
+
+        Unlike other resources, removing ROSAControlPlane finalizers is dangerous
+        because the CAPA controller's finalizer handler calls `rosa delete cluster`
+        and waits for the HCP control plane to fully tear down. If we remove the
+        finalizer prematurely, the K8s resource disappears but the ROSA cluster's
+        control-plane-operator keeps running and recreates VPC resources (endpoints,
+        security groups), which blocks the subsequent ROSANetwork/CloudFormation
+        deletion.
+
+        Only recommend finalizer removal if the ROSA cluster is fully gone.
+        """
+        resource_name, namespace = self._extract_resource_info(context, "rosacontrolplane")
+
+        # Check if the ROSA cluster is still known to ROSA/OCM
+        rosa_status = self._get_rosa_cluster_status(resource_name)
+
+        if rosa_status == "gone":
+            # Cluster fully deleted in ROSA — safe to remove finalizers
+            self.log(f"ROSA cluster {resource_name} is fully gone — safe to remove finalizers", "info")
+            return self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
+        elif rosa_status in ("uninstalling", "error"):
+            # Cluster still tearing down — do NOT remove finalizers
+            self.log(
+                f"ROSA cluster {resource_name} is still {rosa_status} — "
+                f"waiting for ROSA to finish before removing finalizers", "info"
+            )
+            return {
+                "issue_type": "rosacontrolplane_stuck_deletion",
+                "root_cause": f"ROSA cluster is still {rosa_status} — control plane operator is still running",
+                "severity": "low",
+                "confidence": 0.5,
+                "evidence": [f"rosa describe cluster shows state: {rosa_status}"],
+                "recommended_fix": "log_and_continue",
+                "fix_parameters": {}
+            }
+        else:
+            # Unknown status or couldn't check — fall back to generic but with lower confidence
+            self.log(f"ROSA cluster {resource_name} status: {rosa_status}", "warning")
+            return self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
+
+    def _get_rosa_cluster_status(self, cluster_name: str) -> str:
+        """Check ROSA cluster status via rosa CLI.
+
+        Returns: 'gone', 'uninstalling', 'error', 'ready', 'installing', or 'unknown'.
+        """
+        try:
+            cmd = ["rosa", "describe", "cluster", "--cluster", cluster_name, "-o", "json"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if result.returncode != 0:
+                stderr = result.stderr.lower()
+                if "not found" in stderr or "there is no cluster" in stderr:
+                    return "gone"
+                return "unknown"
+            import json as _json
+            cluster_info = _json.loads(result.stdout)
+            state = cluster_info.get("status", {}).get("state", "unknown")
+            return state
+        except subprocess.TimeoutExpired:
+            self.log("Timeout checking ROSA cluster status", "warning")
+            return "unknown"
+        except Exception as e:
+            self.log(f"Error checking ROSA cluster status: {e}", "error")
+            return "unknown"
 
     def _diagnose_stuck_rosaroleconfig(self, context: Dict) -> Dict:
         """Diagnose ROSARoleConfig stuck in deletion state."""

@@ -82,6 +82,7 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
 
         def on_issue_detected(issue_type, context, issue):
             resource_key = context.get("resource_key", "")
+            remediation_msg = ""
             try:
                 diagnosis = diagnostic.diagnose(issue_type, context)
             except Exception as e:
@@ -93,6 +94,7 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
                 return
             if diagnosis and diagnosis.get("confidence", 0) >= 0.7:
                 success, message = remediation.remediate(diagnosis)
+                remediation_msg = message
                 if success:
                     monitor.mark_issue_resolved(issue_type, resource_key)
                 else:
@@ -138,6 +140,8 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
                     "resource_key": resource_key,
                     "diagnosis": diagnosis.get("root_cause", "") if diagnosis else "",
                     "fix_applied": diagnosis.get("recommended_fix", "") if diagnosis else "",
+                    "remediation_result": remediation_msg,
+                    "confidence": diagnosis.get("confidence", 0) if diagnosis else 0,
                     "timestamp": datetime.now().isoformat(),
                 })
 
@@ -165,18 +169,30 @@ def get_agent_stats(job_id: str) -> dict:
     monitor = session["monitor"]
     remediation = session["remediation"]
 
-    # Build per-resource event details
+    # Build per-resource event details with full timeline
     events = jobs.get(job_id, {}).get("agent_events", [])
-    # Deduplicate by resource_key, keeping the latest event per resource
     resource_details = {}
     for event in events:
         rk = event.get("resource_key", "unknown")
-        resource_details[rk] = {
-            "resource_key": rk,
-            "issue_type": event.get("issue_type", ""),
-            "diagnosis": event.get("diagnosis", ""),
-            "fix_applied": event.get("fix_applied", ""),
-        }
+        if rk not in resource_details:
+            resource_details[rk] = {
+                "resource_key": rk,
+                "issue_type": event.get("issue_type", ""),
+                "diagnosis": event.get("diagnosis", ""),
+                "fix_applied": event.get("fix_applied", ""),
+                "timeline": [],
+            }
+        # Update latest diagnosis/fix
+        resource_details[rk]["diagnosis"] = event.get("diagnosis", "")
+        resource_details[rk]["fix_applied"] = event.get("fix_applied", "")
+        # Add to timeline
+        resource_details[rk]["timeline"].append({
+            "time": event.get("timestamp", ""),
+            "action": event.get("fix_applied", ""),
+            "detail": event.get("diagnosis", ""),
+            "result": event.get("remediation_result", ""),
+            "confidence": event.get("confidence", 0),
+        })
 
     # Add resolution status from tracked issues
     for key, tracked in monitor._tracked_issues.items():
@@ -185,10 +201,19 @@ def get_agent_stats(job_id: str) -> dict:
             resource_details[rk]["status"] = tracked.state.value
             resource_details[rk]["attempts"] = tracked.attempts
 
+    # Count unique issues (by resource) instead of raw pattern matches
+    unique_issues = len(resource_details)
+    # Count meaningful interventions (exclude log_and_continue)
+    meaningful_interventions = sum(
+        1 for i in remediation.interventions
+        if i.get("action") not in ("log_and_continue",)
+    )
+
     return {
         "enabled": True,
-        "issues_detected": len(monitor.patterns_detected),
-        "interventions": len(remediation.interventions),
+        "issues_detected": unique_issues,
+        "interventions": meaningful_interventions,
+        "total_checks": len(monitor.patterns_detected),
         "resource_details": list(resource_details.values()),
     }
 
