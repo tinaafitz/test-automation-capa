@@ -336,7 +336,9 @@ class DiagnosticAgent(BaseAgent):
         if rosa_status == "gone":
             # Cluster fully deleted in ROSA — safe to remove finalizers
             self.log(f"ROSA cluster {resource_name} is fully gone — safe to remove finalizers", "info")
-            return self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
+            result = self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
+            result["root_cause"] = "ROSA cluster fully removed — cleaning up remaining K8s resource"
+            return result
         elif rosa_status in ("uninstalling", "error"):
             # Cluster still tearing down — do NOT remove finalizers
             self.log(

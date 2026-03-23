@@ -712,11 +712,15 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                   {deletionResults.agentStats.total_checks > 0 && (
                     <span className="text-gray-500">({deletionResults.agentStats.total_checks} checks)</span>
                   )}
-                  {deletionResults.agentStats.interventions > 0 && (
+                  {deletionResults.agentStats.interventions > 0 ? (
                     <span className="text-green-700 font-medium">
                       Agent auto-fixed {deletionResults.agentStats.interventions} issue(s)
                     </span>
-                  )}
+                  ) : deletionResults.agentStats.issues_detected > 0 ? (
+                    <span className="text-green-700 font-medium">
+                      Agent monitored {deletionResults.agentStats.issues_detected} resource(s) — all deleted cleanly
+                    </span>
+                  ) : null}
                 </div>
                 {/* Per-resource agent activity details */}
                 {deletionResults.agentStats.resource_details?.length > 0 && !deletionResults.isRunning && (
@@ -751,7 +755,10 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                         meaningfulActions.push({ action: 'log_and_continue', count: waitCount });
                       }
                       const isExpanded = expandedAgentRows[idx];
-                      const fixCount = meaningfulActions.filter(a => a.action !== 'log_and_continue').length;
+                      const actualFixes = meaningfulActions.filter(a => a.action !== 'log_and_continue' && !(a.result && a.result.includes('already deleted')));
+                      const confirmations = meaningfulActions.filter(a => a.result && a.result.includes('already deleted'));
+                      const fixCount = actualFixes.length;
+                      const confirmCount = confirmations.length;
                       const totalChecks = timeline.length;
                       return (
                         <div key={idx} className="text-xs text-gray-600">
@@ -766,7 +773,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                               <span className="mx-1">&mdash;</span>
                               <span>{issueLabel}</span>
                               <span className="ml-2 text-gray-400">
-                                ({totalChecks} check{totalChecks !== 1 ? 's' : ''}{fixCount > 0 ? `, ${fixCount} fix${fixCount !== 1 ? 'es' : ''}` : ''})
+                                ({totalChecks} check{totalChecks !== 1 ? 's' : ''}{fixCount > 0 ? `, ${fixCount} fix${fixCount !== 1 ? 'es' : ''}` : ''}{confirmCount > 0 && fixCount === 0 ? ', confirmed deleted' : ''})
                               </span>
                             </div>
                           </div>
@@ -776,7 +783,9 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                                 <div className="text-gray-500 italic mb-1">Diagnosis: {detail.diagnosis}</div>
                               )}
                               {timeline.map((entry, i) => {
-                                const actionLabel = actionLabels[entry.action] || entry.action || 'Check';
+                                const isAlreadyDeleted = entry.result && entry.result.includes('already deleted');
+                                const rawLabel = actionLabels[entry.action] || entry.action || 'Check';
+                                const actionLabel = isAlreadyDeleted ? 'Confirmed deleted' : rawLabel;
                                 const isWait = entry.action === 'log_and_continue';
                                 const timestamp = entry.time ? new Date(entry.time).toLocaleTimeString() : '';
                                 const confidence = entry.confidence ? `${Math.round(entry.confidence * 100)}%` : '';
