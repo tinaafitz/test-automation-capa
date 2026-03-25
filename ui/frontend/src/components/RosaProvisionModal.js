@@ -491,8 +491,7 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
                 <select
                   value={config.channelGroup}
                   onChange={(e) => handleChange('channelGroup', e.target.value)}
-                  disabled={!!config.channel}
-                  className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${config.channel ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="stable">Stable (Recommended)</option>
                   <option value="fast">Fast</option>
@@ -502,7 +501,6 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
                 </select>
                 <p className="mt-1 text-xs text-gray-500">
                   Update channel for OpenShift releases. Stable is recommended for production.
-                  {config.channel && ' (Disabled — Channel overrides Channel Group)'}
                 </p>
               </div>
 
@@ -517,7 +515,6 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
                     value={config.channel}
                     onChange={(e) => handleChange('channel', e.target.value)}
                     placeholder="e.g. stable-4.16, eus-4.18"
-                    pattern="^(stable|eus|fast|candidate|nightly)-[0-9]+\.[0-9]+$"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                   />
                   <p className="mt-1 text-xs text-gray-500">

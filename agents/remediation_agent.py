@@ -356,28 +356,6 @@ class RemediationAgent(BaseAgent):
             cleanup_details = []
             cleanup_errors = []
 
-            # Step 0: Remove finalizers from the K8s ROSANetwork resource so the
-            # CAPA controller stops recreating VPC dependencies (endpoints, SGs)
-            # while we're trying to clean them up.
-            rosanetwork_name = params.get("resource_name")
-            rosanetwork_ns = params.get("namespace")
-            if rosanetwork_name and rosanetwork_ns:
-                self.log(f"Removing finalizers from rosanetwork/{rosanetwork_name} to stop CAPA controller", "info")
-                patch_cmd = [
-                    "oc", "patch", "rosanetwork", rosanetwork_name,
-                    "-n", rosanetwork_ns,
-                    "--type=merge",
-                    "-p", '{"metadata":{"finalizers":null}}'
-                ]
-                patch_result = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=30)
-                if patch_result.returncode == 0:
-                    cleanup_details.append(f"Removed finalizers from rosanetwork/{rosanetwork_name}")
-                    self.log(f"Removed finalizers from rosanetwork/{rosanetwork_name}", "info")
-                elif "NotFound" in patch_result.stderr or "not found" in patch_result.stderr.lower():
-                    self.log(f"rosanetwork/{rosanetwork_name} already gone", "info")
-                else:
-                    self.log(f"Failed to remove rosanetwork finalizers: {patch_result.stderr}", "warning")
-
             # Get the VPC ID from the stack to clean up dependencies
             vpc_cmd = [
                 "aws", "cloudformation", "list-stack-resources",
