@@ -4092,6 +4092,44 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             sidecar_thread = threading.Thread(target=_tail_sidecar, daemon=True)
             sidecar_thread.start()
 
+        # If a cluster_context is provided (e.g. Minikube), create an isolated
+        # kubeconfig copy for this job so we don't stomp on the global context.
+        # This prevents context bleeding between concurrent jobs.
+        cluster_context = extra_vars.get("cluster_context", "")
+        job_kubeconfig = None
+
+        if cluster_context:
+            import shutil
+            import tempfile
+            try:
+                src_kubeconfig = os.environ.get("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+                job_kubeconfig = os.path.join(tempfile.gettempdir(), f"kubeconfig-{job_id}")
+                shutil.copy2(src_kubeconfig, job_kubeconfig)
+
+                # Switch context in the isolated copy only
+                ctx_result = subprocess.run(
+                    ["kubectl", "config", "use-context", cluster_context],
+                    capture_output=True, text=True, timeout=10,
+                    env={**os.environ, "KUBECONFIG": job_kubeconfig},
+                )
+                if ctx_result.returncode == 0:
+                    jobs[job_id]["logs"].append(f"Using isolated kubeconfig for context: {cluster_context}")
+                    print(f"[Playbook] Isolated kubeconfig for context: {cluster_context}")
+                    # Tell the playbook to skip OCP login since we're using kubectl context
+                    extra_vars["skip_ocp_login"] = "true"
+                else:
+                    jobs[job_id]["status"] = "failed"
+                    jobs[job_id]["message"] = f"Failed to switch kubectl context to '{cluster_context}'"
+                    jobs[job_id]["logs"].append(f"ERROR: {ctx_result.stderr}")
+                    os.remove(job_kubeconfig)
+                    return
+            except Exception as e:
+                jobs[job_id]["status"] = "failed"
+                jobs[job_id]["message"] = f"Failed to set up isolated kubeconfig: {str(e)}"
+                if job_kubeconfig and os.path.exists(job_kubeconfig):
+                    os.remove(job_kubeconfig)
+                return
+
         cmd = ["ansible-playbook", playbook_path, "-v"]
 
         def camel_to_snake(name):
@@ -4112,8 +4150,8 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
         jobs[job_id]["message"] = "Executing ansible playbook"
 
         env = os.environ.copy()
-        if "KUBECONFIG" not in env:
-            env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
+        # Use the isolated kubeconfig if we created one, otherwise default
+        env["KUBECONFIG"] = job_kubeconfig if job_kubeconfig else os.environ.get("KUBECONFIG", os.path.expanduser("~/.kube/config"))
         env["PYTHONUNBUFFERED"] = "1"
 
         process = subprocess.Popen(
@@ -4187,6 +4225,12 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             sidecar_stop.set()
         if sidecar_thread is not None:
             sidecar_thread.join(timeout=5)
+        # Clean up isolated kubeconfig
+        if job_kubeconfig and os.path.exists(job_kubeconfig):
+            try:
+                os.remove(job_kubeconfig)
+            except Exception:
+                pass
 
 
 async def run_playbook_background(playbook: str, extra_vars: dict, job_id: str, description: str):

@@ -219,17 +219,35 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         output: `Initializing ROSA HCP cluster deletion...\nCluster: ${clusterName}\nNamespace: ${namespace}\n\nConnecting to backend...`,
       });
 
+      // For Minikube, get the cluster context so the delete playbook targets
+      // the correct cluster instead of logging into the MCE hub.
+      let clusterContext = null;
+      if (theme === 'minikube') {
+        try {
+          const credResponse = await fetch(buildApiUrl('/api/credentials'));
+          const credData = await credResponse.json();
+          clusterContext = credData.credentials?.minikubeCluster || credData.credentials?.clusterName || null;
+        } catch (e) {
+          console.warn('Could not fetch minikube cluster context:', e);
+        }
+      }
+
       // Call Ansible playbook endpoint
+      const deleteExtraVars = {
+        cluster_name: clusterName,
+        capi_namespace: namespace || 'ns-rosa-hcp',
+      };
+      if (clusterContext) {
+        deleteExtraVars.cluster_context = clusterContext;
+      }
+
       const response = await fetch(buildApiUrl(API_ENDPOINTS.ANSIBLE_RUN_PLAYBOOK), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           playbook: 'playbooks/delete_rosa_hcp_cluster.yml',
           description: `Delete ROSA HCP Cluster: ${clusterName}`,
-          extra_vars: {
-            cluster_name: clusterName,
-            capi_namespace: namespace || 'ns-rosa-hcp',
-          },
+          extra_vars: deleteExtraVars,
         }),
       });
 
