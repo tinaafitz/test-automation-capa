@@ -707,6 +707,53 @@ def test_shell_loop_no_false_positive_on_success():
     print("PASSED")
 
 
+def test_stale_line_not_misattributed():
+    """Test 31: Stale sidecar lines from a previous resource phase are not misattributed.
+
+    When the structured context switches to rosaroleconfig but the sidecar
+    still delivers old rosanetwork RETRYING lines, the agent should skip
+    the stale rosanetwork issue instead of tagging it with the rosaroleconfig
+    resource key.
+    """
+    print("\n=== Test 31: Stale sidecar lines not misattributed ===")
+    from agents.monitoring_agent import MonitoringAgent
+
+    monitor = MonitoringAgent(Path(__file__).parent.parent, enabled=True)
+
+    detected_issues = []
+    def callback(issue_type, context, issue):
+        detected_issues.append((issue_type, context.get("resource_key", "")))
+
+    monitor.set_issue_callback(callback)
+
+    # Phase 1: context is rosanetwork, rosanetwork line triggers correctly
+    monitor.process_line("#AGENT_CONTEXT: resource_name=my-network namespace=ns-rosa-hcp resource_type=rosanetwork")
+    monitor.process_line("FAILED - RETRYING: [localhost]: Wait for rosanetwork my-network deletion to complete (50 retries left).")
+
+    assert len(detected_issues) == 1
+    assert detected_issues[0][0] == "rosanetwork_stuck_deletion"
+    assert "my-network" in detected_issues[0][1]
+
+    # Phase 2: context switches to rosaroleconfig
+    monitor.process_line("#AGENT_CONTEXT: resource_name=my-roles namespace=ns-rosa-hcp resource_type=rosaroleconfig")
+
+    # A stale rosanetwork RETRYING line arrives (sidecar race) — should be SKIPPED
+    monitor.process_line("FAILED - RETRYING: [localhost]: Wait for rosanetwork my-network deletion to complete (49 retries left).")
+
+    # Should still be just 1 issue — the stale line was skipped
+    assert len(detected_issues) == 1, \
+        f"Expected 1 issue (stale line should be skipped), got {len(detected_issues)}: {detected_issues}"
+
+    # A rosaroleconfig RETRYING line arrives — should be detected correctly
+    monitor.process_line("FAILED - RETRYING: [localhost]: Wait for rosaroleconfig my-roles deletion to complete (30 retries left).")
+
+    assert len(detected_issues) == 2
+    assert detected_issues[1][0] == "rosaroleconfig_stuck_deletion"
+    assert "my-roles" in detected_issues[1][1]
+
+    print("PASSED")
+
+
 def test_shell_loop_task_file_has_streaming_output():
     """Test 30: Deletion task file uses shell loops with echo for real-time streaming.
 
@@ -780,6 +827,7 @@ def main():
         test_shell_loop_output_matches_agent_patterns,
         test_shell_loop_no_false_positive_on_success,
         test_shell_loop_task_file_has_streaming_output,
+        test_stale_line_not_misattributed,
     ]
 
     passed = 0

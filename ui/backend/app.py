@@ -4055,6 +4055,7 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
         is_deletion = "delete" in playbook.lower()
         sidecar_stop = threading.Event()
         sidecar_thread = None
+        agent_lock = threading.Lock()  # Guard process_line from concurrent sidecar + stdout access
 
         if is_deletion:
             cluster_name = extra_vars.get("cluster_name", extra_vars.get("clusterName", ""))
@@ -4074,11 +4075,12 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
                                     for line in new_lines:
                                         line = line.strip()
                                         if line:
-                                            # Feed to agent
+                                            # Feed to agent (lock prevents race with main stdout loop)
                                             agent_session = ai_agent_sessions.get(job_id)
                                             if agent_session and agent_session.get("monitor"):
                                                 try:
-                                                    agent_session["monitor"].process_line(line)
+                                                    with agent_lock:
+                                                        agent_session["monitor"].process_line(line)
                                                 except Exception:
                                                     pass
                                             # Also add to job logs so UI sees it in real-time
@@ -4170,7 +4172,8 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             agent_session = ai_agent_sessions.get(job_id)
             if agent_session and agent_session.get("monitor"):
                 try:
-                    agent_session["monitor"].process_line(line_stripped)
+                    with agent_lock:
+                        agent_session["monitor"].process_line(line_stripped)
                 except Exception:
                     pass
 

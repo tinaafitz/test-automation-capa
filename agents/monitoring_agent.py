@@ -142,6 +142,20 @@ class MonitoringAgent(BaseAgent):
         """Handle a detected issue through the state machine."""
         issue_type = issue.get("type", "unknown")
 
+        # Guard: if structured context specifies a resource_type, make sure
+        # the detected issue_type is consistent.  For example, if the context
+        # says resource_type=rosaroleconfig but the pattern matched
+        # rosanetwork_stuck_deletion (from a stale sidecar line), skip it.
+        ctx_resource_type = self._structured_context.get("resource_type")
+        if ctx_resource_type and "_stuck_deletion" in issue_type:
+            expected_prefix = f"{ctx_resource_type}_stuck_deletion"
+            if issue_type != expected_prefix:
+                self.log(
+                    f"Skipping stale issue {issue_type} — structured context says resource_type={ctx_resource_type}",
+                    "debug",
+                )
+                return False
+
         # Build a resource key from structured context or fallback to issue type
         resource_key = self._build_resource_key()
         tracking_key = f"{issue_type}:{resource_key}"
