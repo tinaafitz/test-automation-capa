@@ -10143,6 +10143,9 @@ async def get_aws_usage():
         except Exception as e:
             usage_data["s3_buckets"] = "error"
 
+        # Save snapshot to history
+        _save_aws_usage_snapshot(usage_data)
+
         return {
             "success": True,
             "usage": usage_data,
@@ -10155,6 +10158,112 @@ async def get_aws_usage():
             "success": False,
             "message": f"Failed to fetch AWS usage data: {str(e)}",
             "timestamp": datetime.now().isoformat()
+        }
+
+
+def _get_aws_history_db():
+    """Get path to AWS usage history database"""
+    db_path = os.path.join(os.path.dirname(__file__), "aws_usage_history.db")
+    return db_path
+
+
+def _init_aws_history_db():
+    """Initialize the AWS usage history SQLite database"""
+    db_path = _get_aws_history_db()
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS usage_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            resource_key TEXT NOT NULL,
+            count INTEGER NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_snapshots(timestamp)
+    """)
+    conn.commit()
+    conn.close()
+
+
+# Initialize DB on module load
+_init_aws_history_db()
+
+
+def _save_aws_usage_snapshot(usage_data):
+    """Save a usage snapshot to the history database"""
+    try:
+        db_path = _get_aws_history_db()
+        conn = sqlite3.connect(db_path)
+        timestamp = datetime.now().isoformat()
+        for key, value in usage_data.items():
+            if value != "error" and isinstance(value, (int, float)):
+                conn.execute(
+                    "INSERT INTO usage_snapshots (timestamp, resource_key, count) VALUES (?, ?, ?)",
+                    (timestamp, key, int(value))
+                )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ [AWS HISTORY] Failed to save snapshot: {e}")
+
+
+@app.get("/api/aws/usage-trend")
+async def get_aws_usage_trend(days: int = 30):
+    """Get AWS resource usage trend data over time"""
+    try:
+        db_path = _get_aws_history_db()
+        conn = sqlite3.connect(db_path)
+
+        # Get snapshots from the last N days
+        cutoff = (datetime.now() - __import__('datetime').timedelta(days=days)).isoformat()
+        rows = conn.execute(
+            """SELECT timestamp, resource_key, count FROM usage_snapshots
+               WHERE timestamp >= ? ORDER BY timestamp ASC""",
+            (cutoff,)
+        ).fetchall()
+        conn.close()
+
+        if not rows:
+            return {"success": True, "trend": [], "days": days, "message": "No historical data yet. Refresh the AWS Usage page to start collecting data."}
+
+        # Group by timestamp (each snapshot)
+        # Use hourly grouping only when we have enough data (>48 snapshots)
+        snapshots = {}
+        use_hourly = len(set(r[0] for r in rows)) > 48
+        for timestamp, resource_key, count in rows:
+            group_key = timestamp[:13] if use_hourly else timestamp
+            if group_key not in snapshots:
+                snapshots[group_key] = {"timestamp": timestamp, "resources": {}}
+            snapshots[group_key]["resources"][resource_key] = count
+
+        # Convert to list sorted by time
+        trend = []
+        for group_key in sorted(snapshots.keys()):
+            snap = snapshots[group_key]
+            trend.append({
+                "timestamp": snap["timestamp"],
+                **snap["resources"]
+            })
+
+        # Get unique resource keys
+        all_keys = set()
+        for snap in trend:
+            all_keys.update(k for k in snap.keys() if k != "timestamp")
+
+        return {
+            "success": True,
+            "trend": trend,
+            "resource_keys": sorted(all_keys),
+            "days": days,
+            "snapshot_count": len(trend)
+        }
+
+    except Exception as e:
+        print(f"❌ [AWS TREND] Error fetching trend data: {e}")
+        return {
+            "success": False,
+            "message": f"Failed to fetch trend data: {str(e)}"
         }
 
 

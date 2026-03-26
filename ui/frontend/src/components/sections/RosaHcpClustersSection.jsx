@@ -125,7 +125,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         // Extract RosaControlPlane resources (actual ROSA HCP clusters)
         if (data.success && Array.isArray(data.resources)) {
           const rosaHcpClusters = data.resources
-            .filter(r => r.type === 'RosaControlPlane')
+            .filter(r => r.type === 'ROSAControlPlane')
             .map(r => ({
               name: r.name,
               namespace: r.namespace || 'ns-rosa-hcp',
@@ -139,19 +139,47 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
           setClusters([]);
         }
       } else {
-        // For MCE, use the regular ROSA clusters endpoint
-        response = await fetch(buildApiUrl(API_ENDPOINTS.ROSA_CLUSTERS));
+        // For MCE, use the regular ROSA clusters endpoint and filter out minikube-provisioned clusters
+        const credResponse = await fetch(buildApiUrl('/api/credentials'));
+        const credData = await credResponse.json();
+        const minikubeClusterName = credData.credentials?.minikubeCluster || credData.credentials?.clusterName || 'sat-minikube-test';
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const [rosaResponse, minikubeResponse] = await Promise.all([
+          fetch(buildApiUrl(API_ENDPOINTS.ROSA_CLUSTERS)),
+          fetch(buildApiUrl('/api/minikube/get-active-resources'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cluster_name: minikubeClusterName, namespace: 'ns-rosa-hcp' }),
+          }).catch(() => null),
+        ]);
+
+        if (!rosaResponse.ok) {
+          throw new Error(`HTTP ${rosaResponse.status}: ${rosaResponse.statusText}`);
         }
 
-        data = await response.json();
+        data = await rosaResponse.json();
         const validatedData = validateApiResponse(data, ['success']);
+
+        // Get minikube cluster names to exclude
+        let minikubeClusterNames = [];
+        if (minikubeResponse && minikubeResponse.ok) {
+          try {
+            const minikubeData = await minikubeResponse.json();
+            if (minikubeData.success && Array.isArray(minikubeData.resources)) {
+              minikubeClusterNames = minikubeData.resources
+                .filter(r => r.type === 'ROSAControlPlane')
+                .map(r => r.name);
+            }
+          } catch (e) { /* ignore minikube fetch errors */ }
+        }
 
         if (validatedData.success) {
           const clusterList = Array.isArray(validatedData.clusters) ? validatedData.clusters : [];
-          setClusters(clusterList);
+          // Filter out minikube-provisioned clusters
+          const mceOnlyClusters = minikubeClusterNames.length > 0
+            ? clusterList.filter(c => !minikubeClusterNames.includes(c.name))
+            : clusterList;
+          setClusters(mceOnlyClusters);
         } else {
           throw new Error(validatedData.message || 'API returned failure status');
         }

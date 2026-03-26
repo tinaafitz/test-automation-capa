@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import CapaSidebar from '../components/sidebar/CapaSidebar';
+import AWSUsageTrend from '../components/charts/AWSUsageTrend';
 
 const AWSUsageDashboard = () => {
   const navigate = useNavigate();
@@ -115,7 +116,7 @@ const AWSUsageDashboard = () => {
 
   // Calculate estimated monthly cost
   const calculateCost = (resource) => {
-    if (!usage || !resource.costPerMonth) return null;
+    if (!usage || !resource || !resource.costPerMonth) return null;
     const count = usage[resource.key];
     if (count === 'error' || count === undefined) return null;
     return (count * resource.costPerMonth).toFixed(2);
@@ -299,6 +300,11 @@ const AWSUsageDashboard = () => {
                   </div>
                   <span className="text-xs text-gray-500 italic">Based on AWS service limits</span>
                 </div>
+              </div>
+
+              {/* Usage Trend Chart */}
+              <div className="mb-4">
+                <AWSUsageTrend />
               </div>
 
               {/* Billed Resources Section */}
