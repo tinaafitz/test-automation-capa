@@ -80,8 +80,9 @@ spec:
   region: {{ aws_region }}
 {% if channel is defined and channel %}
   channel: {{ channel }}
-{% else %}
-  channelGroup: {{ channel_group | default('stable') }}
+{% endif %}
+{% if channel_group is defined and channel_group %}
+  channelGroup: {{ channel_group }}
 {% endif %}
 
   defaultMachinePoolSpec:

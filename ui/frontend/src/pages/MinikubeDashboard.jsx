@@ -1333,6 +1333,7 @@ const MinikubeDashboardContent = () => {
     onTestSuiteDashboardClick: () => setActiveSection('test-suite-dashboard'),
     onTestAutomationClick: () => setActiveSection('test-automation'),
     onAIAssistantClick: () => setActiveSection('ai-assistant'),
+    onAWSUsageClick: () => window.location.href = '/aws-usage',
     onTerminalClick: () => setActiveSection('terminal'),
     onNotificationsClick: () => setActiveSection('notifications'),
     onRecentTasksClick: () => setActiveSection('recent-tasks'),

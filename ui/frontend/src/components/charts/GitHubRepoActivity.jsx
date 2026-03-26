@@ -6,6 +6,7 @@ const GitHubRepoActivity = () => {
   const [repos, setRepos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const fetchRepoActivity = async () => {
     setLoading(true);
@@ -14,15 +15,13 @@ const GitHubRepoActivity = () => {
       const response = await fetch(buildApiUrl('/api/github/repo-activity'));
       const data = await response.json();
 
-      console.log('GitHub repo activity data:', data);
-
       if (data.success && Array.isArray(data.repos)) {
         setRepos(data.repos);
+        setLastUpdated(new Date());
       } else {
         throw new Error(data.message || 'Failed to fetch GitHub repo activity');
       }
     } catch (err) {
-      console.error('Error fetching GitHub repo activity:', err);
       setError(err.message || 'Failed to load repo activity');
     } finally {
       setLoading(false);
@@ -34,41 +33,46 @@ const GitHubRepoActivity = () => {
       {/* Header */}
       <div className="bg-gray-50 border-b border-gray-200 px-4 py-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-gray-900">Recent GitHub Activity (Last 7 Days)</h3>
+          <h3 className="text-lg font-bold text-gray-900">GitHub Activity</h3>
           <button
             onClick={fetchRepoActivity}
             disabled={loading}
-            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2 border border-blue-200"
+            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2 border border-blue-200"
           >
             <ArrowPathIcon className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
+        {lastUpdated ? (
+          <p className="text-xs text-gray-500 mt-0.5">Last 7 days &middot; Updated: {lastUpdated.toLocaleTimeString()}</p>
+        ) : (
+          <p className="text-xs text-gray-500 mt-0.5">Last 7 days</p>
+        )}
       </div>
 
       {/* Content */}
       <div className="p-4">
         {error ? (
-          <div className="text-center py-4 bg-red-50 border border-red-200 rounded">
-            <p className="text-xs text-red-600">{error}</p>
+          <div className="text-center py-6 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-600">{error}</p>
           </div>
         ) : loading ? (
-          <div className="text-center py-4">
-            <ArrowPathIcon className="h-5 w-5 animate-spin mx-auto mb-1 text-gray-400" />
-            <p className="text-xs text-gray-500">Loading...</p>
+          <div className="text-center py-8 text-gray-500">
+            <ArrowPathIcon className="h-6 w-6 animate-spin mx-auto mb-2" />
+            <p className="text-sm">Loading...</p>
           </div>
         ) : repos.length === 0 ? (
-          <div className="text-center py-6">
-            <p className="text-xs text-gray-500 mb-2">Click Refresh to load GitHub activity</p>
+          <div className="text-center py-8">
+            <p className="text-sm text-gray-500 mb-3">Click Refresh to load GitHub activity</p>
             <button
               onClick={fetchRepoActivity}
-              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-xs transition-colors font-medium border border-blue-200"
+              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md text-xs transition-colors font-medium border border-blue-200"
             >
               Load Data
             </button>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-2">
             {repos.map((repo, idx) => (
               <div key={idx} className="flex items-center justify-between py-2 px-3 hover:bg-gray-50 rounded border border-gray-200">
                 <a

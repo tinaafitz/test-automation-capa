@@ -34,7 +34,7 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
         // Fetch resources from multiple namespaces in parallel with timeout
         const namespaces = ['ns-rosa-hcp', 'capa-system', 'default'];
 
-        const fetchWithTimeout = (namespace, timeoutMs = 8000) => {
+        const fetchWithTimeout = (namespace, timeoutMs = 30000) => {
           return Promise.race([
             fetch(buildApiUrl('/api/minikube/get-active-resources'), {
               method: 'POST',
@@ -59,10 +59,12 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
         );
 
         // Combine all successful results
-        const allResources = results.flatMap(result =>
-          result.success && Array.isArray(result.resources) ? result.resources : []
-        );
+        const allResources = results.flatMap(result => {
+          console.log('ResourcesViewer namespace result:', { success: result.success, count: result.resources?.length });
+          return result.success && Array.isArray(result.resources) ? result.resources : [];
+        });
 
+        console.log('ResourcesViewer total resources:', allResources.length);
         setResources(allResources);
         setTotalCount(allResources.length);
       } else {

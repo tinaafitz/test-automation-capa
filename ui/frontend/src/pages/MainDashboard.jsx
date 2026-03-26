@@ -5,6 +5,7 @@ import { useRecentOperationsContext } from '../store/AppContext';
 import { buildApiUrl, API_ENDPOINTS } from '../config/api';
 import JenkinsTestResultsTrend from '../components/charts/JenkinsTestResultsTrend';
 import GitHubRepoActivity from '../components/charts/GitHubRepoActivity';
+import AWSQuotaWidget from '../components/charts/AWSQuotaWidget';
 
 // Component to fetch and display clusters from both environments
 const CombinedRosaHcpClusters = ({ onRefresh }) => {
@@ -137,7 +138,7 @@ const CombinedRosaHcpClusters = ({ onRefresh }) => {
   );
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden max-h-[400px] overflow-y-auto">
       {/* Cluster Table */}
       {error ? (
         <div className="text-center py-8 text-red-600 p-6">
@@ -190,7 +191,14 @@ const CombinedRosaHcpClusters = ({ onRefresh }) => {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
-                    <span className="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
+                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${
+                      cluster.status === 'ready' ? 'bg-green-500' :
+                      cluster.status === 'installing' ? 'bg-blue-500 animate-pulse' :
+                      cluster.status === 'waiting' ? 'bg-yellow-500 animate-pulse' :
+                      cluster.status === 'uninstalling' ? 'bg-orange-500 animate-pulse' :
+                      cluster.status === 'error' ? 'bg-red-500' :
+                      'bg-gray-400'
+                    }`}></span>
                     <span className="text-sm text-gray-900 capitalize">{cluster.status}</span>
                   </div>
                 </td>
@@ -499,34 +507,34 @@ const MainDashboard = () => {
           </div>
 
           <div className="p-6 space-y-8">
-            {/* ROSA HCP Clusters */}
-            <div ref={clustersRef} className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-gray-900">ROSA HCP Clusters</h2>
-                <button
-                  onClick={() => clustersRefreshRef.current?.()}
-                  className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded transition-colors font-medium flex items-center gap-2 border border-blue-200"
-                >
-                  <ArrowPathIcon className="h-4 w-4" />
-                  Refresh
-                </button>
-              </div>
-              <CombinedRosaHcpClusters onRefresh={clustersRefreshRef} />
-            </div>
-
-            {/* Task Summary */}
-            <div ref={tasksRef} className="space-y-4">
+          {/* ROSA HCP Clusters */}
+          <div ref={clustersRef} className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-900">Task Summary</h2>
+              <h2 className="text-xl font-semibold text-gray-900">ROSA HCP Clusters</h2>
               <button
-                onClick={handleRefreshTasks}
-                className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded transition-colors font-medium flex items-center gap-2 border border-blue-200"
+                onClick={() => clustersRefreshRef.current?.()}
+                className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md transition-colors font-medium flex items-center gap-2 border border-blue-200"
               >
                 <ArrowPathIcon className="h-4 w-4" />
                 Refresh
               </button>
             </div>
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6" key={tasksRefreshKey}>
+            <CombinedRosaHcpClusters onRefresh={clustersRefreshRef} />
+          </div>
+
+          {/* Task Summary */}
+          <div ref={tasksRef} className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-gray-900">Task Summary</h2>
+              <button
+                onClick={handleRefreshTasks}
+                className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md transition-colors font-medium flex items-center gap-2 border border-blue-200"
+              >
+                <ArrowPathIcon className="h-4 w-4" />
+                Refresh
+              </button>
+            </div>
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 max-h-[calc(100vh-580px)] overflow-y-auto" key={tasksRefreshKey}>
               {allRecentTasks.length === 0 ? (
                 <div className="text-center py-12">
                   <ClockIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -625,7 +633,12 @@ const MainDashboard = () => {
 
         {/* Right Sidebar - Monitoring */}
         <div className="w-96 border-l border-gray-300 bg-gray-50 overflow-y-auto">
-          <div className="p-4 space-y-4">
+          <div className="p-4 space-y-5">
+            {/* AWS Resource Quota */}
+            <div>
+              <AWSQuotaWidget />
+            </div>
+
             {/* Jenkins Test Results */}
             <div ref={jenkinsRef}>
               <JenkinsTestResultsTrend />

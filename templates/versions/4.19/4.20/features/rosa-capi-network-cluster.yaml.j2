@@ -72,7 +72,12 @@ spec:
   domainPrefix: {{ domain_prefix | default('rosa-' + cluster_name_prefix) }}"
   version: {{ openshift_version }}
   region: {{ aws_region }}
-  channelGroup: {{ channel_group | default('stable') }}"
+{% if channel is defined and channel %}
+  channel: {{ channel }}
+{% endif %}
+{% if channel_group is defined and channel_group %}
+  channelGroup: {{ channel_group }}
+{% endif %}
 
   defaultMachinePoolSpec:
     instanceType: {{ machine_pool.instance_type | default('m5.xlarge') }}"
