@@ -82,8 +82,8 @@ const AWSUsageTrend = () => {
   };
 
   // Chart rendering
-  const chartHeight = 320;
-  const chartPadding = { top: 20, right: 20, bottom: 40, left: 50 };
+  const chartHeight = 200;
+  const chartPadding = { top: 15, right: 20, bottom: 30, left: 45 };
   const chartWidth = 900;
   const innerWidth = chartWidth - chartPadding.left - chartPadding.right;
   const innerHeight = chartHeight - chartPadding.top - chartPadding.bottom;
@@ -212,7 +212,7 @@ const AWSUsageTrend = () => {
               <svg
                 viewBox={`0 0 ${chartWidth} ${chartHeight}`}
                 className="w-full"
-                style={{ height: '320px' }}
+                style={{ height: '200px' }}
                 onMouseLeave={() => setHoveredPoint(null)}
               >
                 {/* Grid lines */}
