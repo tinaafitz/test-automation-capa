@@ -9951,197 +9951,204 @@ async def get_github_repo_activity():
         }
 
 
+def _collect_aws_usage_data():
+    """Collect AWS resource usage counts (sync, can be called from background tasks)"""
+    usage_data = {}
+
+    # Instance Profiles
+    try:
+        result = subprocess.run(
+            ["aws", "iam", "list-instance-profiles", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            usage_data["instance_profiles"] = len(data.get("InstanceProfiles", []))
+        else:
+            usage_data["instance_profiles"] = "error"
+    except Exception as e:
+        usage_data["instance_profiles"] = "error"
+
+    # CloudFormation Stacks
+    try:
+        result = subprocess.run(
+            ["aws", "cloudformation", "list-stacks", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            # Only count non-deleted stacks
+            stacks = [s for s in data.get("StackSummaries", [])
+                     if s.get("StackStatus") not in ["DELETE_COMPLETE"]]
+            usage_data["cloudformation_stacks"] = len(stacks)
+        else:
+            usage_data["cloudformation_stacks"] = "error"
+    except Exception as e:
+        usage_data["cloudformation_stacks"] = "error"
+
+    # NAT Gateways
+    try:
+        result = subprocess.run(
+            ["aws", "ec2", "describe-nat-gateways", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            # Only count available NAT gateways
+            nat_gateways = [n for n in data.get("NatGateways", [])
+                           if n.get("State") == "available"]
+            usage_data["nat_gateways"] = len(nat_gateways)
+        else:
+            usage_data["nat_gateways"] = "error"
+    except Exception as e:
+        usage_data["nat_gateways"] = "error"
+
+    # Route53 Hosted Zones
+    try:
+        result = subprocess.run(
+            ["aws", "route53", "list-hosted-zones", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            usage_data["route53_zones"] = len(data.get("HostedZones", []))
+        else:
+            usage_data["route53_zones"] = "error"
+    except Exception as e:
+        usage_data["route53_zones"] = "error"
+
+    # IAM Roles
+    try:
+        result = subprocess.run(
+            ["aws", "iam", "list-roles", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            usage_data["iam_roles"] = len(data.get("Roles", []))
+        else:
+            usage_data["iam_roles"] = "error"
+    except Exception as e:
+        usage_data["iam_roles"] = "error"
+
+    # VPCs
+    try:
+        result = subprocess.run(
+            ["aws", "ec2", "describe-vpcs", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            usage_data["vpcs"] = len(data.get("Vpcs", []))
+        else:
+            usage_data["vpcs"] = "error"
+    except Exception as e:
+        usage_data["vpcs"] = "error"
+
+    # Security Groups
+    try:
+        result = subprocess.run(
+            ["aws", "ec2", "describe-security-groups", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            usage_data["security_groups"] = len(data.get("SecurityGroups", []))
+        else:
+            usage_data["security_groups"] = "error"
+    except Exception as e:
+        usage_data["security_groups"] = "error"
+
+    # EC2 Instances
+    try:
+        result = subprocess.run(
+            ["aws", "ec2", "describe-instances", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            # Count running and stopped instances
+            instance_count = 0
+            for reservation in data.get("Reservations", []):
+                instance_count += len(reservation.get("Instances", []))
+            usage_data["ec2_instances"] = instance_count
+        else:
+            usage_data["ec2_instances"] = "error"
+    except Exception as e:
+        usage_data["ec2_instances"] = "error"
+
+    # EBS Volumes
+    try:
+        result = subprocess.run(
+            ["aws", "ec2", "describe-volumes", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            usage_data["ebs_volumes"] = len(data.get("Volumes", []))
+        else:
+            usage_data["ebs_volumes"] = "error"
+    except Exception as e:
+        usage_data["ebs_volumes"] = "error"
+
+    # Load Balancers
+    try:
+        result = subprocess.run(
+            ["aws", "elbv2", "describe-load-balancers", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            usage_data["load_balancers"] = len(data.get("LoadBalancers", []))
+        else:
+            usage_data["load_balancers"] = "error"
+    except Exception as e:
+        usage_data["load_balancers"] = "error"
+
+    # S3 Buckets
+    try:
+        result = subprocess.run(
+            ["aws", "s3api", "list-buckets", "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            usage_data["s3_buckets"] = len(data.get("Buckets", []))
+        else:
+            usage_data["s3_buckets"] = "error"
+    except Exception as e:
+        usage_data["s3_buckets"] = "error"
+
+    return usage_data
+
+
 @app.get("/api/aws/usage")
 async def get_aws_usage():
     """Get AWS resource usage counts"""
     try:
-        usage_data = {}
-
-        # Instance Profiles
-        try:
-            result = subprocess.run(
-                ["aws", "iam", "list-instance-profiles", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                usage_data["instance_profiles"] = len(data.get("InstanceProfiles", []))
-            else:
-                usage_data["instance_profiles"] = "error"
-        except Exception as e:
-            usage_data["instance_profiles"] = "error"
-
-        # CloudFormation Stacks
-        try:
-            result = subprocess.run(
-                ["aws", "cloudformation", "list-stacks", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                # Only count non-deleted stacks
-                stacks = [s for s in data.get("StackSummaries", [])
-                         if s.get("StackStatus") not in ["DELETE_COMPLETE"]]
-                usage_data["cloudformation_stacks"] = len(stacks)
-            else:
-                usage_data["cloudformation_stacks"] = "error"
-        except Exception as e:
-            usage_data["cloudformation_stacks"] = "error"
-
-        # NAT Gateways
-        try:
-            result = subprocess.run(
-                ["aws", "ec2", "describe-nat-gateways", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                # Only count available NAT gateways
-                nat_gateways = [n for n in data.get("NatGateways", [])
-                               if n.get("State") == "available"]
-                usage_data["nat_gateways"] = len(nat_gateways)
-            else:
-                usage_data["nat_gateways"] = "error"
-        except Exception as e:
-            usage_data["nat_gateways"] = "error"
-
-        # Route53 Hosted Zones
-        try:
-            result = subprocess.run(
-                ["aws", "route53", "list-hosted-zones", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                usage_data["route53_zones"] = len(data.get("HostedZones", []))
-            else:
-                usage_data["route53_zones"] = "error"
-        except Exception as e:
-            usage_data["route53_zones"] = "error"
-
-        # IAM Roles
-        try:
-            result = subprocess.run(
-                ["aws", "iam", "list-roles", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                usage_data["iam_roles"] = len(data.get("Roles", []))
-            else:
-                usage_data["iam_roles"] = "error"
-        except Exception as e:
-            usage_data["iam_roles"] = "error"
-
-        # VPCs
-        try:
-            result = subprocess.run(
-                ["aws", "ec2", "describe-vpcs", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                usage_data["vpcs"] = len(data.get("Vpcs", []))
-            else:
-                usage_data["vpcs"] = "error"
-        except Exception as e:
-            usage_data["vpcs"] = "error"
-
-        # Security Groups
-        try:
-            result = subprocess.run(
-                ["aws", "ec2", "describe-security-groups", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                usage_data["security_groups"] = len(data.get("SecurityGroups", []))
-            else:
-                usage_data["security_groups"] = "error"
-        except Exception as e:
-            usage_data["security_groups"] = "error"
-
-        # EC2 Instances
-        try:
-            result = subprocess.run(
-                ["aws", "ec2", "describe-instances", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                # Count running and stopped instances
-                instance_count = 0
-                for reservation in data.get("Reservations", []):
-                    instance_count += len(reservation.get("Instances", []))
-                usage_data["ec2_instances"] = instance_count
-            else:
-                usage_data["ec2_instances"] = "error"
-        except Exception as e:
-            usage_data["ec2_instances"] = "error"
-
-        # EBS Volumes
-        try:
-            result = subprocess.run(
-                ["aws", "ec2", "describe-volumes", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                usage_data["ebs_volumes"] = len(data.get("Volumes", []))
-            else:
-                usage_data["ebs_volumes"] = "error"
-        except Exception as e:
-            usage_data["ebs_volumes"] = "error"
-
-        # Load Balancers
-        try:
-            result = subprocess.run(
-                ["aws", "elbv2", "describe-load-balancers", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                usage_data["load_balancers"] = len(data.get("LoadBalancers", []))
-            else:
-                usage_data["load_balancers"] = "error"
-        except Exception as e:
-            usage_data["load_balancers"] = "error"
-
-        # S3 Buckets
-        try:
-            result = subprocess.run(
-                ["aws", "s3api", "list-buckets", "--output", "json"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                usage_data["s3_buckets"] = len(data.get("Buckets", []))
-            else:
-                usage_data["s3_buckets"] = "error"
-        except Exception as e:
-            usage_data["s3_buckets"] = "error"
+        usage_data = _collect_aws_usage_data()
 
         # Save snapshot to history
         _save_aws_usage_snapshot(usage_data)
@@ -10188,6 +10195,26 @@ def _init_aws_history_db():
 
 # Initialize DB on module load
 _init_aws_history_db()
+
+
+async def _aws_usage_snapshot_loop():
+    """Background task that collects AWS usage snapshots every hour"""
+    await asyncio.sleep(10)  # Wait for app startup
+    print("🔄 [AWS TREND] Hourly AWS usage snapshot collector started", flush=True)
+    while True:
+        try:
+            usage_data = await asyncio.to_thread(_collect_aws_usage_data)
+            _save_aws_usage_snapshot(usage_data)
+            valid_count = sum(1 for v in usage_data.values() if v != "error")
+            print(f"✅ [AWS TREND] Hourly snapshot saved: {valid_count} resources at {datetime.now().strftime('%H:%M')}", flush=True)
+        except Exception as e:
+            print(f"⚠️ [AWS TREND] Hourly snapshot failed: {e}", flush=True)
+        await asyncio.sleep(3600)  # 1 hour
+
+
+@app.on_event("startup")
+async def start_aws_snapshot_collector():
+    asyncio.create_task(_aws_usage_snapshot_loop())
 
 
 def _save_aws_usage_snapshot(usage_data):
@@ -10280,6 +10307,68 @@ async def get_aws_config():
             "message": f"Failed to load AWS configuration: {str(e)}",
             "timestamp": datetime.now().isoformat()
         }
+
+
+@app.get("/api/aws/usage/{resource_key}")
+async def get_single_resource_usage(resource_key: str):
+    """Refresh count for a single AWS resource type"""
+    try:
+        count = "error"
+
+        if resource_key == "nat_gateways":
+            r = subprocess.run(["aws", "ec2", "describe-nat-gateways", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                count = len([n for n in data.get("NatGateways", []) if n.get("State") == "available"])
+        elif resource_key == "route53_zones":
+            r = subprocess.run(["aws", "route53", "list-hosted-zones", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                count = len(json.loads(r.stdout).get("HostedZones", []))
+        elif resource_key == "iam_roles":
+            r = subprocess.run(["aws", "iam", "list-roles", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                count = len(json.loads(r.stdout).get("Roles", []))
+        elif resource_key == "vpcs":
+            r = subprocess.run(["aws", "ec2", "describe-vpcs", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                count = len(json.loads(r.stdout).get("Vpcs", []))
+        elif resource_key == "security_groups":
+            r = subprocess.run(["aws", "ec2", "describe-security-groups", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                count = len(json.loads(r.stdout).get("SecurityGroups", []))
+        elif resource_key == "ec2_instances":
+            r = subprocess.run(["aws", "ec2", "describe-instances", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                count = sum(len(res.get("Instances", [])) for res in data.get("Reservations", []))
+        elif resource_key == "ebs_volumes":
+            r = subprocess.run(["aws", "ec2", "describe-volumes", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                count = len(json.loads(r.stdout).get("Volumes", []))
+        elif resource_key == "load_balancers":
+            r = subprocess.run(["aws", "elbv2", "describe-load-balancers", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                count = len(json.loads(r.stdout).get("LoadBalancers", []))
+        elif resource_key == "s3_buckets":
+            r = subprocess.run(["aws", "s3api", "list-buckets", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                count = len(json.loads(r.stdout).get("Buckets", []))
+        elif resource_key == "cloudformation_stacks":
+            r = subprocess.run(["aws", "cloudformation", "list-stacks", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                count = len([s for s in data.get("StackSummaries", []) if s.get("StackStatus") not in ["DELETE_COMPLETE"]])
+        elif resource_key == "instance_profiles":
+            r = subprocess.run(["aws", "iam", "list-instance-profiles", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                count = len(json.loads(r.stdout).get("InstanceProfiles", []))
+        else:
+            return {"success": False, "message": f"Unknown resource type: {resource_key}"}
+
+        return {"success": True, "resource_key": resource_key, "count": count, "timestamp": datetime.now().isoformat()}
+
+    except Exception as e:
+        return {"success": False, "message": f"Failed to refresh {resource_key}: {str(e)}"}
 
 
 @app.get("/api/aws/resource-details/{resource_type}")
@@ -10554,6 +10643,96 @@ async def get_resource_details(resource_type: str):
                             "description": "",
                             "tags": {}
                         })
+
+        elif resource_type == "load_balancers":
+            # Classic load balancers
+            result = subprocess.run(
+                ["aws", "elbv2", "describe-load-balancers", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                for lb in data.get("LoadBalancers", []):
+                    lb_arn = lb.get("LoadBalancerArn", "")
+                    tags = {}
+                    try:
+                        tags_result = subprocess.run(
+                            ["aws", "elbv2", "describe-tags", "--resource-arns", lb_arn, "--output", "json"],
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        if tags_result.returncode == 0:
+                            tags_data = json.loads(tags_result.stdout)
+                            for desc in tags_data.get("TagDescriptions", []):
+                                tags = {tag["Key"]: tag["Value"] for tag in desc.get("Tags", [])}
+                    except:
+                        pass
+
+                    vpc_id = lb.get("VpcId", "N/A")
+                    vpc_name = vpc_id
+                    try:
+                        vpc_result = subprocess.run(
+                            ["aws", "ec2", "describe-vpcs", "--vpc-ids", vpc_id, "--output", "json"],
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        if vpc_result.returncode == 0:
+                            vpc_data = json.loads(vpc_result.stdout)
+                            vpcs = vpc_data.get("Vpcs", [])
+                            if vpcs:
+                                vpc_tags = {tag["Key"]: tag["Value"] for tag in vpcs[0].get("Tags", [])}
+                                vpc_name = vpc_tags.get("Name", vpc_id)
+                    except:
+                        pass
+
+                    details.append({
+                        "id": lb.get("LoadBalancerArn", "N/A").split("/")[-1] if "/" in lb.get("LoadBalancerArn", "") else lb.get("LoadBalancerArn", "N/A"),
+                        "name": lb.get("LoadBalancerName", "Unnamed"),
+                        "type": lb.get("Type", "N/A"),
+                        "scheme": lb.get("Scheme", "N/A"),
+                        "state": lb.get("State", {}).get("Code", "N/A"),
+                        "dns_name": lb.get("DNSName", "N/A"),
+                        "vpc_id": vpc_id,
+                        "vpc_name": vpc_name,
+                        "created_at": lb.get("CreatedTime", "N/A"),
+                        "tags": tags
+                    })
+
+        elif resource_type == "s3_buckets":
+            result = subprocess.run(
+                ["aws", "s3api", "list-buckets", "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                for bucket in data.get("Buckets", []):
+                    bucket_name = bucket.get("Name", "")
+                    tags = {}
+                    try:
+                        tags_result = subprocess.run(
+                            ["aws", "s3api", "get-bucket-tagging", "--bucket", bucket_name, "--output", "json"],
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        if tags_result.returncode == 0:
+                            tags_data = json.loads(tags_result.stdout)
+                            tags = {tag["Key"]: tag["Value"] for tag in tags_data.get("TagSet", [])}
+                    except:
+                        pass
+
+                    details.append({
+                        "id": bucket_name,
+                        "name": bucket_name,
+                        "created_at": bucket.get("CreationDate", "N/A"),
+                        "tags": tags
+                    })
 
         elif resource_type == "security_groups":
             result = subprocess.run(
