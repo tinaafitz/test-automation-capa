@@ -3116,28 +3116,8 @@ def _get_rosa_clusters_sync(context: str = None):
     """Get actual ROSA HCP clusters (sync — runs in thread pool to avoid blocking event loop)."""
     import json
 
-    # Always get CAPI cluster names from the current hub to filter ROSA CLI output.
-    # This ensures we only show clusters created/managed by this environment.
-    capi_cluster_names = set()
-    try:
-        kubectl_cmd = ["oc", "get", "rosacontrolplane", "-n", "ns-rosa-hcp", "-o", "json"]
-        if context and context != "current":
-            kubectl_cmd = ["kubectl", "--context", context, "get", "rosacontrolplane", "-n", "ns-rosa-hcp", "-o", "json"]
-
-        result = subprocess.run(
-            kubectl_cmd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            capi_data = json.loads(result.stdout)
-            capi_cluster_names = set([item.get("metadata", {}).get("name") for item in capi_data.get("items", [])])
-            print(f"[ROSA Clusters] CAPI clusters on hub: {capi_cluster_names}")
-    except Exception as e:
-        print(f"[ROSA Clusters] Error getting CAPI clusters: {e}")
-        # If we can't reach the hub, set to None to skip filtering (fallback to showing all)
-        capi_cluster_names = None
+    # No CAPI filtering — show all ROSA HCP clusters from rosa CLI
+    capi_cluster_names = None
 
     try:
         # Try to get actual ROSA clusters using rosa CLI with short timeout
@@ -6695,7 +6675,7 @@ async def generate_provisioning_yaml(request: Request):
         availability_zone_count = config.get("availabilityZoneCount", 1)
         role_prefix = config.get("rolePrefix", cluster_name)
         domain_prefix = config.get("domainPrefix", "")
-        channel_group = config.get("channelGroup", "stable")
+        channel_group = config.get("channelGroup", "")
         channel = config.get("channel", "")
         aws_region = config.get("awsRegion", "us-west-2")
 

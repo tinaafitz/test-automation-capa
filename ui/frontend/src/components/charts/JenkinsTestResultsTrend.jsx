@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowPathIcon, ChartBarIcon } from '@heroicons/react/24/outline';
+import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import { buildApiUrl } from '../../config/api';
 
 const JenkinsTestResultsTrend = () => {
   const [trendData, setTrendData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const fetchTrendData = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Add timestamp to prevent browser caching
       const cacheBuster = `?t=${Date.now()}`;
       const response = await fetch(buildApiUrl(`/api/jenkins/test-results-trend${cacheBuster}`), {
         cache: 'no-store',
@@ -23,22 +23,14 @@ const JenkinsTestResultsTrend = () => {
       });
       const data = await response.json();
 
-      console.log('Jenkins trend data received:', {
-        success: data.success,
-        count: data.count,
-        buildNumbers: data.trend ? data.trend.map(b => b.build) : []
-      });
-
       if (data.success && Array.isArray(data.trend)) {
-        // Reverse to show oldest to newest (left to right)
         const reversed = data.trend.reverse();
-        console.log('Setting trend data with', reversed.length, 'builds:', reversed.map(b => `#${b.build}`).join(', '));
         setTrendData(reversed);
+        setLastUpdated(new Date());
       } else {
         throw new Error(data.message || 'Failed to fetch Jenkins test results');
       }
     } catch (err) {
-      console.error('Error fetching Jenkins trend:', err);
       setError(err.message || 'Failed to load test results');
     } finally {
       setLoading(false);
@@ -55,40 +47,44 @@ const JenkinsTestResultsTrend = () => {
   const yAxisMax = Math.ceil(maxCount * 1.1 / 10) * 10; // Round up to nearest 10 with 10% padding
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-      {/* Header - Simple styling to match page */}
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      {/* Header */}
       <div className="bg-gray-50 border-b border-gray-200 px-4 py-3">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-gray-900">Jenkins Test Results</h3>
           <button
             onClick={fetchTrendData}
             disabled={loading}
-            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2 border border-blue-200"
+            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2 border border-blue-200"
           >
             <ArrowPathIcon className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
+        {lastUpdated && (
+          <p className="text-xs text-gray-500 mt-0.5">
+            Updated: {lastUpdated.toLocaleTimeString()}
+          </p>
+        )}
       </div>
 
       {/* Content */}
       <div className="p-4">
         {error ? (
-          <div className="text-center py-12 bg-red-50 border-2 border-red-200 rounded-lg">
-            <div className="text-red-600 font-semibold mb-2">Failed to load test results</div>
-            <p className="text-sm text-red-500">{error}</p>
+          <div className="text-center py-6 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-600">{error}</p>
           </div>
         ) : loading ? (
-          <div className="text-center py-12">
-            <ArrowPathIcon className="h-10 w-10 animate-spin mx-auto mb-3 text-blue-500" />
-            <p className="text-sm font-medium text-gray-600">Loading test results...</p>
+          <div className="text-center py-8 text-gray-500">
+            <ArrowPathIcon className="h-6 w-6 animate-spin mx-auto mb-2" />
+            <p className="text-sm">Loading test results...</p>
           </div>
         ) : trendData.length === 0 ? (
-          <div className="text-center py-12 bg-gray-100 border-2 border-gray-300 rounded-lg">
-            <p className="text-sm font-medium text-gray-600 mb-3">Click Refresh to load test results</p>
+          <div className="text-center py-8">
+            <p className="text-sm text-gray-500 mb-3">Click Refresh to load test results</p>
             <button
               onClick={fetchTrendData}
-              className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-sm transition-colors font-medium border border-blue-200"
+              className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md text-sm transition-colors font-medium border border-blue-200"
             >
               Load Data
             </button>
@@ -224,13 +220,13 @@ const JenkinsTestResultsTrend = () => {
             </div>
 
             {/* Build number labels - below chart */}
-            <div className="flex justify-between px-4 mb-4">
+            <div className="flex justify-between px-4">
               <div className="text-sm font-bold text-gray-700">Build #{trendData[0]?.build}</div>
               <div className="text-sm font-bold text-gray-700">Build #{trendData[trendData.length - 1]?.build}</div>
             </div>
 
-            {/* Legend - Simple */}
-            <div className="flex items-center justify-center gap-6 text-xs mb-3 pb-3 border-b border-gray-200">
+            {/* Legend */}
+            <div className="flex items-center justify-center gap-6 text-xs mt-2 pt-3">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded" style={{ backgroundColor: '#1e88e5' }}></div>
                 <span className="text-gray-700">Passed</span>
@@ -242,28 +238,6 @@ const JenkinsTestResultsTrend = () => {
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded" style={{ backgroundColor: '#d32f2f' }}></div>
                 <span className="text-gray-700">Failed</span>
-              </div>
-            </div>
-
-            {/* Summary Stats - Compact */}
-            <div className="grid grid-cols-3 gap-3 mb-3">
-              <div className="bg-blue-50 border border-blue-200 rounded p-3 text-center">
-                <div className="text-2xl font-bold text-blue-700">
-                  {trendData.length > 0 ? Math.round(trendData.reduce((sum, b) => sum + b.passRate, 0) / trendData.length) : 0}%
-                </div>
-                <div className="text-xs text-blue-900 uppercase">Avg Pass</div>
-              </div>
-              <div className="bg-green-50 border border-green-200 rounded p-3 text-center">
-                <div className="text-2xl font-bold text-green-700">
-                  {trendData.filter(b => b.result === 'SUCCESS').length}
-                </div>
-                <div className="text-xs text-green-900 uppercase">Success</div>
-              </div>
-              <div className="bg-purple-50 border border-purple-200 rounded p-3 text-center">
-                <div className="text-2xl font-bold text-purple-700">
-                  {trendData.reduce((sum, b) => sum + b.totalCount, 0)}
-                </div>
-                <div className="text-xs text-purple-900 uppercase">Total</div>
               </div>
             </div>
 

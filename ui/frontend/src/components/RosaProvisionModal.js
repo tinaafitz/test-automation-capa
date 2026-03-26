@@ -264,7 +264,11 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSubmit(config);
+    // Remove empty optional fields so they don't get sent as blank values
+    const cleanedConfig = { ...config };
+    if (!cleanedConfig.channelGroup) delete cleanedConfig.channelGroup;
+    if (!cleanedConfig.channel) delete cleanedConfig.channel;
+    onSubmit(cleanedConfig);
   };
 
   const handleChange = (field, value) => {
@@ -486,13 +490,14 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
               {/* Channel Group */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Channel Group
+                  Channel Group <span className="text-gray-400 font-normal">(optional)</span>
                 </label>
                 <select
                   value={config.channelGroup}
                   onChange={(e) => handleChange('channelGroup', e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
+                  <option value="">-- None --</option>
                   <option value="stable">Stable (Recommended)</option>
                   <option value="fast">Fast</option>
                   <option value="candidate">Candidate</option>
