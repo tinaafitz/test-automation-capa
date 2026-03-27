@@ -4,19 +4,19 @@
   "patterns": [
     {
       "type": "cloudformation_deletion_failure",
-      "pattern": ".*cloudformation.*(delete.*fail|rollback).*",
+      "pattern": "CloudFormation stack DELETE_FAILED:.*|FAILED - RETRYING.*cloudformation.*deletion",
       "severity": "high",
-      "auto_fix": false,
-      "description": "AWS CloudFormation stack deletion failure",
+      "auto_fix": true,
+      "description": "AWS CloudFormation stack deletion failure detected during post-deletion verification",
       "symptoms": [
         "Stack in DELETE_FAILED state",
-        "Orphaned AWS resources",
-        "Security group dependencies"
+        "Orphaned AWS resources (VPC, SGs, NAT gateways)",
+        "Security group dependencies blocking VPC deletion"
       ],
       "common_causes": [
-        "Resources created outside CloudFormation",
-        "Security group dependencies",
-        "ENI attachments not cleaned up"
+        "ROSA-created security groups (e.g. *-vpce-private-router) not managed by CloudFormation",
+        "VPC endpoint ENI attachments not cleaned up",
+        "Resources created outside CloudFormation blocking stack deletion"
       ]
     },
     {

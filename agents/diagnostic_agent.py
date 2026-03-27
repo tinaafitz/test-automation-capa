@@ -116,10 +116,13 @@ class DiagnosticAgent(BaseAgent):
         resource_name, namespace = self._extract_resource_info(context, "rosanetwork")
         resource_info = self._get_resource_info("rosanetwork", resource_name, namespace)
 
-        # Determine the CloudFormation stack name from the resource spec
+        # Determine the CloudFormation stack name from the resource
+        # Priority: status.stackName > spec.stackName > naming convention
         stack_name = None
         if resource_info:
-            stack_name = resource_info.get("spec", {}).get("stackName")
+            stack_name = resource_info.get("status", {}).get("stackName")
+            if not stack_name:
+                stack_name = resource_info.get("spec", {}).get("stackName")
             if not stack_name:
                 # Convention: <cluster-name>-rosa-network-stack
                 stack_name = f"{resource_name.replace('-network', '')}-rosa-network-stack"
@@ -196,19 +199,51 @@ class DiagnosticAgent(BaseAgent):
             self.log(f"CloudFormation stack {stack_name} is gone — removing finalizers", "info")
             return self._diagnose_stuck_resource(context, "rosanetwork", "rosanetwork_stuck_deletion")
         else:
-            # Unknown or unexpected status — fall back to generic diagnosis
-            self.log(f"CloudFormation stack {stack_name} status: {cfn_status}", "warning")
-            return self._diagnose_stuck_resource(context, "rosanetwork", "rosanetwork_stuck_deletion")
+            # Unknown or unexpected status (e.g., aws CLI not available).
+            # Do NOT fall back to remove_finalizers — removing the finalizer
+            # causes K8s to garbage-collect the ROSANetwork resource, which
+            # ends monitoring, even though the CloudFormation stack may be
+            # DELETE_FAILED with orphaned AWS resources (VPCs, SGs, NAT GWs).
+            # Instead, return low confidence so the agent waits and the CAPA
+            # controller has time to clean up CF properly.
+            self.log(
+                f"CloudFormation stack {stack_name} status: {cfn_status} — "
+                f"cannot confirm stack is gone, NOT removing finalizers", "warning"
+            )
+            return {
+                "issue_type": "rosanetwork_stuck_deletion",
+                "root_cause": f"CloudFormation stack status is {cfn_status} — cannot safely remove finalizers without confirming stack cleanup",
+                "severity": "medium",
+                "confidence": 0.4,
+                "evidence": [
+                    f"CloudFormation stack {stack_name} status: {cfn_status}",
+                    "aws CLI may not be available — cannot verify stack deletion status",
+                ],
+                "recommended_fix": "log_and_continue",
+                "fix_parameters": {}
+            }
 
     def _get_cloudformation_stack_status(self, stack_name: str, resource_info: Dict = None) -> str:
         """Check CloudFormation stack status.
 
+        Priority:
+        1. Read from ROSANetwork K8s resource .status.stackStatus (no AWS deps)
+        2. Fall back to aws CLI subprocess (if available)
+
         Returns one of: DELETE_IN_PROGRESS, DELETE_FAILED, DELETE_COMPLETE, GONE,
-        or the raw stack status string.
+        UNKNOWN, or the raw stack status string.
         """
         if not stack_name:
             return "UNKNOWN"
 
+        # 1. Try reading from K8s resource status (zero dependencies)
+        if resource_info:
+            k8s_stack_status = resource_info.get("status", {}).get("stackStatus")
+            if k8s_stack_status:
+                self.log(f"CloudFormation status from K8s resource: {k8s_stack_status}", "debug")
+                return k8s_stack_status
+
+        # 2. Fall back to aws CLI (may not be available in Jenkins)
         region = "us-west-2"
         if resource_info:
             region = resource_info.get("spec", {}).get("region", region)
@@ -237,7 +272,20 @@ class DiagnosticAgent(BaseAgent):
             return "UNKNOWN"
 
     def _get_stack_vpc_id(self, stack_name: str, resource_info: Dict = None) -> Optional[str]:
-        """Get the VPC ID from a CloudFormation stack."""
+        """Get the VPC ID from a CloudFormation stack.
+
+        Priority:
+        1. Read from ROSANetwork K8s resource .status.vpcId (no AWS deps)
+        2. Fall back to aws CLI subprocess (if available)
+        """
+        # 1. Try reading from K8s resource status (zero dependencies)
+        if resource_info:
+            vpc_id = resource_info.get("status", {}).get("vpcId")
+            if vpc_id and vpc_id.startswith("vpc-"):
+                self.log(f"VPC ID from K8s resource: {vpc_id}", "debug")
+                return vpc_id
+
+        # 2. Fall back to aws CLI
         region = "us-west-2"
         if resource_info:
             region = resource_info.get("spec", {}).get("region", region)
@@ -386,8 +434,65 @@ class DiagnosticAgent(BaseAgent):
         return self._diagnose_stuck_resource(context, "rosaroleconfig", "rosaroleconfig_stuck_deletion")
 
     def _diagnose_cloudformation_failure(self, context: Dict) -> Dict:
-        """Diagnose CloudFormation stack deletion failure."""
+        """Diagnose CloudFormation stack deletion failure.
+
+        Triggered during post-deletion CF verification when a stack is
+        in DELETE_FAILED state. Extracts the stack name from the log line
+        and recommends retry_cloudformation_delete to clean up orphaned
+        VPC dependencies (SGs, ENIs, endpoints) and retry the deletion.
+        """
         self.log("Analyzing CloudFormation failure...", "debug")
+
+        # Extract stack name from the log line
+        stack_name = None
+        buffer = context.get("buffer", [])
+        for line in buffer:
+            match = re.search(r'CloudFormation stack DELETE_FAILED:\s*(\S+)', line)
+            if match:
+                stack_name = match.group(1)
+                break
+            match = re.search(r'cloudformation\s+(\S+)\s+deletion', line)
+            if match:
+                stack_name = match.group(1)
+                break
+
+        # Also try structured context
+        resource_name = context.get("resource_name", "")
+        namespace = context.get("namespace", "default")
+        if not stack_name and resource_name:
+            stack_name = f"{resource_name.replace('-network', '')}-rosa-network-stack"
+
+        if stack_name:
+            # Check actual stack status to confirm
+            cfn_status = self._get_cloudformation_stack_status(stack_name)
+            if cfn_status in ("DELETE_FAILED", "DELETE_IN_PROGRESS"):
+                self.log(f"CloudFormation stack {stack_name} confirmed {cfn_status} — triggering cleanup", "warning")
+                return {
+                    "issue_type": "cloudformation_deletion_failure",
+                    "root_cause": f"CloudFormation stack {stack_name} in {cfn_status} due to orphaned VPC dependencies",
+                    "severity": "high",
+                    "confidence": 0.95,
+                    "evidence": [f"CloudFormation stack {stack_name} status: {cfn_status}"],
+                    "recommended_fix": "retry_cloudformation_delete",
+                    "fix_parameters": {
+                        "stack_name": stack_name,
+                        "region": "us-west-2",
+                        "resource_name": resource_name,
+                        "namespace": namespace,
+                    }
+                }
+            elif cfn_status == "GONE":
+                return {
+                    "issue_type": "cloudformation_deletion_failure",
+                    "root_cause": "CloudFormation stack already deleted",
+                    "severity": "low",
+                    "confidence": 0.9,
+                    "evidence": [f"CloudFormation stack {stack_name} no longer exists"],
+                    "recommended_fix": "log_and_continue",
+                    "fix_parameters": {}
+                }
+
+        # Fallback if we can't determine the stack name or status
         return {
             "issue_type": "cloudformation_deletion_failure",
             "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
