@@ -3590,6 +3590,54 @@ def perform_cluster_deletion(job_id: str, cluster_name: str, namespace: str):
                 log_delete(f"⚠️ {resource_type}/{resource_name} still exists after {max_wait}s timeout")
                 errors.append(f"{resource_type}/{resource_name} deletion timed out after {max_wait}s")
 
+            # Post-deletion CloudFormation verification for ROSANetwork
+            # The K8s resource may be gone but the CF stack could be DELETE_FAILED
+            # with orphaned VPC/SGs costing ~$139/mo
+            if resource_type == "rosanetwork":
+                stack_name = f"{cluster_name}-rosa-network-stack"
+                region = "us-west-2"
+                log_delete(f"🔍 Verifying CloudFormation stack {stack_name} cleanup...")
+                try:
+                    import boto3
+                    cf_client = boto3.client(
+                        "cloudformation",
+                        region_name=region,
+                        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", ""),
+                        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+                    )
+                    try:
+                        response = cf_client.describe_stacks(StackName=stack_name)
+                        cf_status = response["Stacks"][0]["StackStatus"]
+                        if cf_status == "DELETE_COMPLETE":
+                            log_delete(f"✅ CloudFormation stack {stack_name} confirmed deleted")
+                        elif cf_status == "DELETE_FAILED":
+                            log_delete(f"⚠️ CloudFormation stack DELETE_FAILED: {stack_name} — orphaned AWS resources detected")
+                            log_delete(f"CloudFormation stack DELETE_FAILED: {stack_name}")
+                            # Feed to agent for remediation
+                            agent_session = ai_agent_sessions.get(job_id)
+                            if agent_session and agent_session.get("monitor"):
+                                try:
+                                    agent_session["monitor"].process_line(
+                                        f"CloudFormation stack DELETE_FAILED: {stack_name}"
+                                    )
+                                except Exception:
+                                    pass
+                            errors.append(f"CloudFormation stack {stack_name} DELETE_FAILED — manual cleanup may be needed")
+                        elif cf_status == "DELETE_IN_PROGRESS":
+                            log_delete(f"⏳ CloudFormation stack {stack_name} still deleting ({cf_status})")
+                        else:
+                            log_delete(f"ℹ️ CloudFormation stack {stack_name} status: {cf_status}")
+                    except cf_client.exceptions.ClientError as e:
+                        if "does not exist" in str(e):
+                            log_delete(f"✅ CloudFormation stack {stack_name} confirmed deleted")
+                        else:
+                            log_delete(f"⚠️ CloudFormation check failed: {e}")
+                except ImportError:
+                    log_delete(f"⚠️ boto3 not available — cannot verify CloudFormation cleanup")
+                    log_delete(f"   Check manually: aws cloudformation describe-stacks --stack-name {stack_name}")
+                except Exception as e:
+                    log_delete(f"⚠️ CloudFormation verification error: {e}")
+
         # Final status
         jobs[job_id]["progress"] = 100
         jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
