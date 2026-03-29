@@ -64,6 +64,17 @@ class TrackedIssue:
             if self.attempts < self.max_attempts and (time.time() - self.last_updated) >= 120:
                 return True
             return False
+        # Allow re-diagnosis after exhausting max_attempts if enough time has
+        # passed (2 min).  The underlying resource status may have changed
+        # (e.g., CF stack went from DELETE_IN_PROGRESS to DELETE_FAILED).
+        # Grant one more attempt so the diagnostic agent can re-check.
+        if (
+            self.state == IssueState.FAILED
+            and self.attempts >= self.max_attempts
+            and (time.time() - self.last_updated) >= 120
+        ):
+            self.max_attempts += 1
+            return True
         if not (self.state in (IssueState.DETECTED,) or self.can_retry()):
             return False
         # Throttle re-checks to at most once per 60 seconds

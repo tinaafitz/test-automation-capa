@@ -642,6 +642,55 @@ def test_resolved_issue_allows_reintervention():
     print("PASSED")
 
 
+def test_rediagnosis_after_max_attempts():
+    """Test 32: Agent re-diagnoses after exhausting max_attempts.
+
+    When an issue hits max_attempts (3) and stays in FAILED state, the agent
+    should grant one more attempt after 120s.  This catches status transitions
+    like CloudFormation DELETE_IN_PROGRESS -> DELETE_FAILED that happen after
+    the initial diagnosis window.
+    """
+    print("\n=== Test 32: Re-diagnosis after max attempts ===")
+    from agents.monitoring_agent import TrackedIssue, IssueState
+
+    tracked = TrackedIssue("rosanetwork_stuck_deletion", "ns/test-network", {})
+    tracked.state = IssueState.FAILED
+    tracked.attempts = 3  # max_attempts is 3
+
+    # Should NOT intervene immediately after exhausting attempts
+    tracked.last_updated = time.time()
+    assert not tracked.should_intervene(), \
+        "Should not re-diagnose immediately after max attempts"
+
+    # Should NOT intervene after only 60s
+    tracked.last_updated = time.time() - 60
+    assert not tracked.should_intervene(), \
+        "Should not re-diagnose after only 60s"
+
+    # SHOULD intervene after 120s — status may have changed
+    tracked.last_updated = time.time() - 130
+    assert tracked.should_intervene(), \
+        "Should re-diagnose after 120s to catch status transitions"
+    assert tracked.max_attempts == 4, \
+        "max_attempts should be incremented to 4"
+
+    # After the extra attempt, should NOT intervene again immediately
+    tracked.state = IssueState.FAILED
+    tracked.attempts = 4
+    tracked.last_updated = time.time()
+    assert not tracked.should_intervene(), \
+        "Should not re-diagnose immediately after extra attempt"
+
+    # Should get another chance after 120s again
+    tracked.last_updated = time.time() - 130
+    assert tracked.should_intervene(), \
+        "Should get another re-diagnosis after another 120s"
+    assert tracked.max_attempts == 5, \
+        "max_attempts should be incremented to 5"
+
+    print("PASSED")
+
+
 def test_shell_loop_output_matches_agent_patterns():
     """Test 28: Wait loop retry output matches agent detection patterns.
 
@@ -828,6 +877,7 @@ def main():
         test_shell_loop_no_false_positive_on_success,
         test_shell_loop_task_file_has_streaming_output,
         test_stale_line_not_misattributed,
+        test_rediagnosis_after_max_attempts,
     ]
 
     passed = 0
