@@ -31,7 +31,16 @@
 - name: Fail if CAPI controller not found
   fail:
     msg: "ℹ️  Environment not configured yet - Ready to set up! Click the 'Configure' button in the Components card to install CAPI/CAPA controllers (~2 minutes)"
-  when: capi_controller_manager.stdout | length == 0
+  when:
+    - capi_controller_manager.stdout | length == 0
+    - not (soft_verify | default(false) | bool)
+
+- name: Info if CAPI controller not found (soft mode)
+  debug:
+    msg: "ℹ️  CAPI controller not found - environment not configured yet (non-blocking in workflow mode)"
+  when:
+    - capi_controller_manager.stdout | length == 0
+    - soft_verify | default(false) | bool
 
 - name: CAPI Controller Check
   debug:
@@ -48,7 +57,16 @@
 - name: Fail if CAPA controller not found
   fail:
     msg: "ℹ️  AWS provider not configured yet - Click the 'Configure' button to add cluster-api-provider-aws (CAPA) for ROSA HCP support"
-  when: capa_controller_manager.stdout | length == 0
+  when:
+    - capa_controller_manager.stdout | length == 0
+    - not (soft_verify | default(false) | bool)
+
+- name: Info if CAPA controller not found (soft mode)
+  debug:
+    msg: "ℹ️  CAPA controller not found - AWS provider not configured yet (non-blocking in workflow mode)"
+  when:
+    - capa_controller_manager.stdout | length == 0
+    - soft_verify | default(false) | bool
 
 - name: CAPA Controller Check
   debug:

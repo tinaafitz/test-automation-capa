@@ -27,7 +27,7 @@ try:
     _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if _project_root not in sys.path:
         sys.path.insert(0, _project_root)
-    from agents import MonitoringAgent, DiagnosticAgent, RemediationAgent, IssueState
+    from agents import MonitoringAgent, DiagnosticAgent, RemediationAgent, LearningAgent, IssueState
     AI_AGENTS_AVAILABLE = True
     print("AI Agent Framework loaded successfully")
 except ImportError as e:
@@ -79,6 +79,7 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
         monitor = MonitoringAgent(base_dir=base_dir)
         diagnostic = DiagnosticAgent(base_dir=base_dir)
         remediation = RemediationAgent(base_dir=base_dir, dry_run=dry_run)
+        learning = LearningAgent(base_dir=base_dir)
 
         def on_issue_detected(issue_type, context, issue):
             resource_key = context.get("resource_key", "")
@@ -95,6 +96,15 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
             if diagnosis and diagnosis.get("confidence", 0) >= 0.7:
                 success, message = remediation.remediate(diagnosis)
                 remediation_msg = message
+                # Record outcome for learning agent
+                learning.record_outcome(
+                    issue_type=issue_type,
+                    diagnosis=diagnosis,
+                    fix_applied=diagnosis.get("recommended_fix", ""),
+                    success=success,
+                    resource_key=resource_key,
+                    details=message,
+                )
                 if success:
                     monitor.mark_issue_resolved(issue_type, resource_key)
                 else:
@@ -151,6 +161,7 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
             "monitor": monitor,
             "diagnostic": diagnostic,
             "remediation": remediation,
+            "learning": learning,
         }
         ai_agent_sessions[job_id] = session
         print(f"[AI Agent] Initialized for job {job_id} (dry_run={dry_run})")
@@ -210,12 +221,22 @@ def get_agent_stats(job_id: str) -> dict:
         and "already deleted" not in i.get("details", {}).get("message", "")
     )
 
+    # Flush learning agent outcomes and apply confidence adjustments
+    learning = session.get("learning")
+    learning_summary = {}
+    if learning:
+        try:
+            learning_summary = learning.end_of_run_summary()
+        except Exception as e:
+            print(f"[AI Agent] Learning summary error: {e}")
+
     return {
         "enabled": True,
         "issues_detected": unique_issues,
         "interventions": meaningful_interventions,
         "total_checks": len(monitor.patterns_detected),
         "resource_details": list(resource_details.values()),
+        "learning": learning_summary,
     }
 
 # Cache for expensive operations (TTL: 30 seconds)
