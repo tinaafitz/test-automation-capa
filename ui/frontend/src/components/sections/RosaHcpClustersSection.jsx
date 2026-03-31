@@ -424,9 +424,11 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
     }
   };
 
-  // Auto-fetch clusters on mount
+  // Auto-fetch clusters on mount + poll every 30 seconds
   useEffect(() => {
     fetchClusters();
+    const interval = setInterval(fetchClusters, 30000);
+    return () => clearInterval(interval);
   }, [fetchClusters]);
 
   // Resume polling for any running delete jobs on mount/remount

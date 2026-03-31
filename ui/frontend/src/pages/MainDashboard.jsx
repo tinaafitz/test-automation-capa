@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bars3Icon, ClockIcon, ArrowPathIcon, TrashIcon, ChevronUpDownIcon, ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
+import { Bars3Icon, ClockIcon, ArrowPathIcon, TrashIcon, ChevronUpDownIcon, ChevronDownIcon, ChevronRightIcon, BellIcon } from '@heroicons/react/24/outline';
 import { useRecentOperationsContext } from '../store/AppContext';
 import { buildApiUrl, API_ENDPOINTS } from '../config/api';
 import JenkinsTestResultsTrend from '../components/charts/JenkinsTestResultsTrend';
 import GitHubRepoActivity from '../components/charts/GitHubRepoActivity';
 import AWSQuotaWidget from '../components/charts/AWSQuotaWidget';
+import { AIAssistantChat } from '../components/chat/AIAssistantChat';
+import NotificationSettingsInline from '../components/NotificationSettingsInline';
+import AWSUsageDashboard from './AWSUsageDashboard';
 
 // Component to fetch and display clusters from both environments
 const CombinedRosaHcpClusters = ({ onRefresh }) => {
@@ -73,6 +76,9 @@ const CombinedRosaHcpClusters = ({ onRefresh }) => {
 
   useEffect(() => {
     fetchClusters();
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchClusters, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   // Expose fetch function to parent
@@ -316,7 +322,7 @@ const MainDashboard = () => {
         {/* Sidebar Title */}
         <div className="flex-shrink-0 bg-white px-4 py-4 border-b border-gray-300 h-[72px] relative">
           <div className="flex items-center justify-between gap-3">
-            <h1 className="text-2xl font-bold text-gray-900 leading-tight flex-1">CAPA Automation</h1>
+            <h1 className="text-2xl font-bold text-gray-900 leading-tight flex-1 cursor-pointer" onClick={() => setActiveSection(null)}>CAPA Automation</h1>
             <button
               onClick={() => setShowEnvMenu(!showEnvMenu)}
               className="p-2 hover:bg-gray-100 rounded transition-colors flex-shrink-0"
@@ -387,52 +393,50 @@ const MainDashboard = () => {
         <div className="flex-shrink-0 border-b border-gray-300">
           <nav className="py-2">
             <button
-              onClick={() => scrollToSection(clustersRef, 'rosa-hcp-clusters')}
+              onClick={() => setActiveSection('notifications')}
               className={`
                 w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm
                 transition-all duration-150 ease-in-out
-                ${activeSection === 'rosa-hcp-clusters'
+                ${activeSection === 'notifications'
                   ? 'bg-blue-100 text-blue-900 border-l-4 border-blue-600 font-medium shadow-sm'
                   : 'text-gray-700 hover:bg-gray-200 hover:shadow-sm hover:translate-x-0.5'
                 }
               `}
             >
-              <span className={activeSection === 'rosa-hcp-clusters' ? 'text-blue-600 text-lg' : 'text-gray-500 text-lg'}>
+              <BellIcon className={`h-5 w-5 ${activeSection === 'notifications' ? 'text-blue-600' : 'text-gray-500'}`} />
+              <span className="flex-1">Notifications</span>
+            </button>
+            <button
+              onClick={() => setActiveSection('ai-assistant')}
+              className={`
+                w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm
+                transition-all duration-150 ease-in-out
+                ${activeSection === 'ai-assistant'
+                  ? 'bg-blue-100 text-blue-900 border-l-4 border-blue-600 font-medium shadow-sm'
+                  : 'text-gray-700 hover:bg-gray-200 hover:shadow-sm hover:translate-x-0.5'
+                }
+              `}
+            >
+              <span className={activeSection === 'ai-assistant' ? 'text-blue-600 text-lg' : 'text-gray-500 text-lg'}>
+                🤖
+              </span>
+              <span className="flex-1">AI Assistant</span>
+            </button>
+            <button
+              onClick={() => setActiveSection('aws-usage')}
+              className={`
+                w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm
+                transition-all duration-150 ease-in-out
+                ${activeSection === 'aws-usage'
+                  ? 'bg-blue-100 text-blue-900 border-l-4 border-blue-600 font-medium shadow-sm'
+                  : 'text-gray-700 hover:bg-gray-200 hover:shadow-sm hover:translate-x-0.5'
+                }
+              `}
+            >
+              <span className={activeSection === 'aws-usage' ? 'text-blue-600 text-lg' : 'text-gray-500 text-lg'}>
                 ☁️
               </span>
-              <span className="flex-1">ROSA HCP Clusters</span>
-            </button>
-            <button
-              onClick={() => scrollToSection(tasksRef, 'task-summary')}
-              className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm
-                transition-all duration-150 ease-in-out
-                ${activeSection === 'task-summary'
-                  ? 'bg-blue-100 text-blue-900 border-l-4 border-blue-600 font-medium shadow-sm'
-                  : 'text-gray-700 hover:bg-gray-200 hover:shadow-sm hover:translate-x-0.5'
-                }
-              `}
-            >
-              <span className={activeSection === 'task-summary' ? 'text-blue-600 text-lg' : 'text-gray-500 text-lg'}>
-                📋
-              </span>
-              <span className="flex-1">Task Summary</span>
-            </button>
-            <button
-              onClick={() => scrollToSection(jenkinsRef, 'jenkins-test-results')}
-              className={`
-                w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm
-                transition-all duration-150 ease-in-out
-                ${activeSection === 'jenkins-test-results'
-                  ? 'bg-blue-100 text-blue-900 border-l-4 border-blue-600 font-medium shadow-sm'
-                  : 'text-gray-700 hover:bg-gray-200 hover:shadow-sm hover:translate-x-0.5'
-                }
-              `}
-            >
-              <span className={activeSection === 'jenkins-test-results' ? 'text-blue-600 text-lg' : 'text-gray-500 text-lg'}>
-                📊
-              </span>
-              <span className="flex-1">Test Results</span>
+              <span className="flex-1">AWS Usage</span>
             </button>
           </nav>
         </div>
@@ -487,7 +491,10 @@ const MainDashboard = () => {
 
         {/* Sidebar Footer */}
         {allRecentTasks.length === 0 && <div className="flex-1"></div>}
-        <div className="flex-shrink-0 border-t border-gray-300 px-4 py-3 text-sm font-semibold bg-gray-50">
+        <div
+          onClick={() => setActiveSection(null)}
+          className="flex-shrink-0 border-t border-gray-300 px-4 py-3 text-sm font-semibold bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
+        >
           <div className="flex items-center gap-2">
             <span className="text-base">🏠</span>
             <span className="text-gray-700">At a Glance</span>
@@ -502,11 +509,44 @@ const MainDashboard = () => {
           {/* Page Header - Lighter Bar */}
           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4 shadow-md flex items-center h-[72px] border-b border-blue-100">
             <div>
-              <h1 className="text-2xl font-bold leading-tight tracking-tight text-gray-800">At a Glance</h1>
+              <h1 className="text-2xl font-bold leading-tight tracking-tight text-gray-800">
+                {activeSection === 'notifications' ? 'Notifications' : activeSection === 'ai-assistant' ? 'AI Assistant' : activeSection === 'aws-usage' ? 'AWS Usage' : 'At a Glance'}
+              </h1>
             </div>
           </div>
 
           <div className="p-6 space-y-8">
+
+          {/* Notifications View */}
+          {activeSection === 'notifications' && (
+            <div className="space-y-6">
+              <h2 className="text-2xl font-bold text-blue-900">Notification Settings</h2>
+              <NotificationSettingsInline />
+            </div>
+          )}
+
+          {/* AI Assistant View */}
+          {activeSection === 'ai-assistant' && (
+            <div className="space-y-6">
+              <h2 className="text-2xl font-bold text-blue-900">AI Assistant</h2>
+              <p className="text-gray-600">
+                Chat with the AI assistant to get help with CAPI/CAPA automation, troubleshooting, and best practices.
+              </p>
+              <AIAssistantChat inline={true} />
+            </div>
+          )}
+
+          {/* AWS Usage View */}
+          {activeSection === 'aws-usage' && (
+            <div className="space-y-6">
+              <h2 className="text-2xl font-bold text-blue-900">AWS Resource Usage</h2>
+              <AWSUsageDashboard inline={true} />
+            </div>
+          )}
+
+          {/* Default: At a Glance View */}
+          {activeSection !== 'notifications' && activeSection !== 'ai-assistant' && activeSection !== 'aws-usage' && (
+          <>
           {/* ROSA HCP Clusters */}
           <div ref={clustersRef} className="space-y-4">
             <div className="flex items-center justify-between">
@@ -526,13 +566,24 @@ const MainDashboard = () => {
           <div ref={tasksRef} className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-gray-900">Task Summary</h2>
-              <button
-                onClick={handleRefreshTasks}
-                className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md transition-colors font-medium flex items-center gap-2 border border-blue-200"
-              >
-                <ArrowPathIcon className="h-4 w-4" />
-                Refresh
-              </button>
+              <div className="flex items-center gap-2">
+                {allRecentTasks.length > 0 && (
+                  <button
+                    onClick={() => { recentOps.clearRecentOperations(); setTasksRefreshKey(prev => prev + 1); }}
+                    className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-md transition-colors font-medium flex items-center gap-2 border border-red-200 text-sm"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                    Clear All
+                  </button>
+                )}
+                <button
+                  onClick={handleRefreshTasks}
+                  className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md transition-colors font-medium flex items-center gap-2 border border-blue-200"
+                >
+                  <ArrowPathIcon className="h-4 w-4" />
+                  Refresh
+                </button>
+              </div>
             </div>
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 max-h-[calc(100vh-580px)] overflow-y-auto" key={tasksRefreshKey}>
               {allRecentTasks.length === 0 ? (
@@ -628,6 +679,8 @@ const MainDashboard = () => {
               )}
             </div>
           </div>
+          </>
+          )}
           </div>
         </div>
 
