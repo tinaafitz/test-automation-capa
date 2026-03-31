@@ -58,10 +58,45 @@ class DiagnosticAgent(BaseAgent):
         diagnostic_method = diagnosis_methods.get(issue_type)
         if diagnostic_method:
             diagnosis = diagnostic_method(context)
+            diagnosis = self._apply_learned_confidence(diagnosis)
             self.current_diagnosis = diagnosis
             return diagnosis
 
-        return self._diagnose_generic(issue_type, context)
+        diagnosis = self._diagnose_generic(issue_type, context)
+        diagnosis = self._apply_learned_confidence(diagnosis)
+        return diagnosis
+
+    def _apply_learned_confidence(self, diagnosis: Dict) -> Dict:
+        """Apply learned confidence adjustment from the knowledge base.
+
+        If the learning agent has recorded a learned_confidence for this
+        issue type, blend it with the diagnostic confidence. The learned
+        value acts as a nudge — it can boost or reduce confidence by up
+        to 0.1 from the diagnostic value, but never override it entirely.
+        """
+        issue_type = diagnosis.get("issue_type")
+        if not issue_type:
+            return diagnosis
+
+        patterns = self.known_issues.get("patterns", [])
+        for pattern in patterns:
+            if pattern.get("type") == issue_type and "learned_confidence" in pattern:
+                learned = pattern["learned_confidence"]
+                original = diagnosis.get("confidence", 0.5)
+
+                # Nudge toward learned value, capped at ±0.1
+                delta = max(-0.1, min(0.1, learned - original))
+                adjusted = max(0.0, min(1.0, round(original + delta, 2)))
+
+                if adjusted != original:
+                    diagnosis["confidence"] = adjusted
+                    diagnosis.setdefault("evidence", []).append(
+                        f"Confidence adjusted {original} -> {adjusted} (learned from {pattern.get('adjustment_reason', 'historical outcomes')})"
+                    )
+                    self.log(f"Learned confidence adjustment for {issue_type}: {original} -> {adjusted}", "debug")
+                break
+
+        return diagnosis
 
     def _diagnose_stuck_resource(self, context: Dict, resource_type: str, issue_type: str) -> Dict:
         """Generic diagnosis for a resource stuck in deletion state."""

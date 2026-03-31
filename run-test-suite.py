@@ -41,7 +41,7 @@ from typing import Dict, List, Optional, Tuple
 
 # AI Agent Framework (optional - only imported if --ai-agent flag is used)
 try:
-    from agents import MonitoringAgent, DiagnosticAgent, RemediationAgent
+    from agents import MonitoringAgent, DiagnosticAgent, RemediationAgent, LearningAgent
     AI_AGENTS_AVAILABLE = True
 except ImportError:
     AI_AGENTS_AVAILABLE = False
@@ -95,6 +95,7 @@ class TestSuiteRunner:
         self.monitor_agent = None
         self.diagnostic_agent = None
         self.remediation_agent = None
+        self.learning_agent = None
         self._agent_lock = threading.Lock()  # Guards process_line from concurrent sidecar + stdout calls
 
         if self.ai_agent_enabled:
@@ -107,6 +108,7 @@ class TestSuiteRunner:
                 self.monitor_agent = MonitoringAgent(base_dir, enabled=True, verbose=(verbosity > 0))
                 self.diagnostic_agent = DiagnosticAgent(base_dir, enabled=True, verbose=(verbosity > 0))
                 self.remediation_agent = RemediationAgent(base_dir, enabled=True, verbose=(verbosity > 0), dry_run=ai_agent_dry_run)
+                self.learning_agent = LearningAgent(base_dir, enabled=True, verbose=(verbosity > 0))
 
                 self.monitor_agent.set_issue_callback(self._ai_agent_issue_detected)
 
@@ -114,7 +116,8 @@ class TestSuiteRunner:
                 print(f"{Colors.GREEN}AI Agent Framework initialized ({mode_text}){Colors.ENDC}")
                 print(f"{Colors.CYAN}  - Monitoring Agent: Real-time issue detection{Colors.ENDC}")
                 print(f"{Colors.CYAN}  - Diagnostic Agent: Root cause analysis{Colors.ENDC}")
-                print(f"{Colors.CYAN}  - Remediation Agent: Autonomous fixes{Colors.ENDC}\n")
+                print(f"{Colors.CYAN}  - Remediation Agent: Autonomous fixes{Colors.ENDC}")
+                print(f"{Colors.CYAN}  - Learning Agent: Outcome tracking & knowledge base adjustment{Colors.ENDC}\n")
 
     def _ai_agent_issue_detected(self, issue_type: str, context: Dict, issue: Dict):
         """
@@ -134,6 +137,13 @@ class TestSuiteRunner:
 
                 if diagnosis.get('confidence', 0) >= 0.7:
                     success, message = self.remediation_agent.remediate(diagnosis)
+
+                    # Record outcome for learning
+                    if self.learning_agent:
+                        self.learning_agent.record_outcome(
+                            issue_type, diagnosis, diagnosis.get('recommended_fix', ''),
+                            success, resource_key, message
+                        )
 
                     if success:
                         print(f"{Colors.GREEN}   Fix applied: {message}{Colors.ENDC}\n")
@@ -957,6 +967,22 @@ class TestSuiteRunner:
                     attempts = info.get('attempts', 0)
                     state_color = Colors.GREEN if state == 'resolved' else Colors.YELLOW if state == 'failed' else Colors.CYAN
                     print(f"   {state_color}  {key}: {state} ({attempts} attempt(s)){Colors.ENDC}")
+
+            # Learning agent: record outcomes and adjust knowledge base
+            if self.learning_agent:
+                learning_summary = self.learning_agent.end_of_run_summary()
+                adjustments = learning_summary.get('adjustments', [])
+                pending = learning_summary.get('pending_reviews', 0)
+
+                if adjustments or pending or learning_summary.get('session_outcomes', 0) > 0:
+                    print(f"\n   {Colors.BOLD}Learning:{Colors.ENDC}")
+                    print(f"   {Colors.CYAN}  Outcomes recorded: {learning_summary.get('session_outcomes', 0)}{Colors.ENDC}")
+                    if adjustments:
+                        for adj in adjustments:
+                            direction = "↑" if adj['action'] == 'boost' else "↓"
+                            print(f"   {Colors.CYAN}  {direction} {adj['issue_type']}: {adj['reason']}{Colors.ENDC}")
+                    if pending > 0:
+                        print(f"   {Colors.YELLOW}  {pending} pattern(s) awaiting human review{Colors.ENDC}")
 
             # Store stats for results
             success_rates = self.remediation_agent.get_success_rate() if self.remediation_agent else {}
