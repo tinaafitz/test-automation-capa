@@ -43,6 +43,7 @@ const CapaSidebar = ({
   onNotificationsClick,
   onRecentTasksClick,
   onAWSUsageClick,
+  onWorkflowsClick,
   activeSection = 'environments',
   environment = 'mce' // 'mce' or 'minikube'
 }) => {
@@ -141,6 +142,12 @@ const CapaSidebar = ({
       label: 'Playbooks',
       icon: <ArrowPathIcon className="h-5 w-5" />,
       onClick: onTestAutomationClick
+    },
+    {
+      id: 'workflows',
+      label: 'Workflows',
+      icon: <span className="text-lg">&#9776;</span>,
+      onClick: onWorkflowsClick
     },
     {
       id: 'test-suite-dashboard',

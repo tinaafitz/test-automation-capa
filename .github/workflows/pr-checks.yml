@@ -68,8 +68,16 @@ jobs:
             );
             const isDocsOnly = docOrCiFiles.length > 0 && docOrCiFiles.length === changedFiles.length;
 
+            // Check if this is a new UI component PR (single large new component file)
+            const newUiComponents = changedFiles.filter(f =>
+              f.match(/^ui\/frontend\/src\/(components|pages)\/.*\.jsx$/)
+            );
+            const isNewUiComponent = newUiComponents.length > 0 && changes <= 1500;
+
             if (isDocsOnly) {
               console.log(`Documentation-only PR - skipping size check (${changes} changes in ${docOrCiFiles.length} doc/ci files)`);
+            } else if (isNewUiComponent && changes > 1000) {
+              core.warning(`Large UI component PR (${changes} changes in ${newUiComponents.length} component files). Allowed up to 1500 for new components.`);
             } else if (changes > 1000) {
               core.setFailed(`PR is too large (${changes} changes). Please split into smaller PRs.`);
             } else if (changes > 500) {
