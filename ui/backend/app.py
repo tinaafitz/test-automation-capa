@@ -9907,7 +9907,6 @@ async def get_github_repo_activity():
     try:
         # Repositories to monitor
         repos = [
-            "kubernetes-sigs/cluster-api-provider-aws",
             "stolostron/cluster-api-provider-aws",
             "tinaafitz/test-automation-capa"
         ]

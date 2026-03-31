@@ -34,6 +34,13 @@ const AWSQuotaWidget = () => {
     }
   };
 
+  // Auto-fetch on mount + poll every 5 minutes
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 300000);
+    return () => clearInterval(interval);
+  }, []);
+
   const getBarColor = (count, threshold) => {
     if (count === 'error') return 'bg-red-400';
     const pct = count / threshold;
