@@ -17,7 +17,10 @@
         "ROSA-created security groups (e.g. *-vpce-private-router) not managed by CloudFormation",
         "VPC endpoint ENI attachments not cleaned up",
         "Resources created outside CloudFormation blocking stack deletion"
-      ]
+      ],
+      "learned_confidence": 1.0,
+      "last_adjusted": "2026-03-31T16:10:22.909159",
+      "adjustment_reason": "4 consecutive successes in last 4 runs"
     },
     {
       "type": "ocm_auth_failure",
@@ -123,7 +126,10 @@
         "Underlying CloudFormation stack stuck",
         "VPC has orphaned dependencies",
         "Controller unable to clean up resources"
-      ]
+      ],
+      "learned_confidence": 1.0,
+      "last_adjusted": "2026-03-31T16:08:36.149421",
+      "adjustment_reason": "4 consecutive successes in last 4 runs"
     },
     {
       "type": "rosaroleconfig_stuck_deletion",

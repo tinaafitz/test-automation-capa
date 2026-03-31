@@ -85,6 +85,9 @@ class LearningAgent(BaseAgent):
             else:
                 fix_stats[key]["failures"] += 1
 
+        # Capture count before persisting (which clears session_outcomes)
+        session_count = len(self.session_outcomes)
+
         # Persist outcomes to history
         self._append_outcomes()
 
@@ -99,13 +102,13 @@ class LearningAgent(BaseAgent):
             self._apply_confidence_adjustments(adjustments)
 
         summary = {
-            "session_outcomes": len(self.session_outcomes),
+            "session_outcomes": session_count,
             "fix_stats": fix_stats,
             "adjustments": adjustments,
             "pending_reviews": self._get_pending_count(),
         }
 
-        self.log(f"Learning summary: {len(self.session_outcomes)} outcomes, "
+        self.log(f"Learning summary: {session_count} outcomes, "
                  f"{len(adjustments)} confidence adjustments", "info")
 
         return summary
@@ -232,6 +235,9 @@ class LearningAgent(BaseAgent):
 
     def _append_outcomes(self):
         """Append session outcomes to the outcomes history file."""
+        if not self.session_outcomes:
+            return
+
         try:
             existing = []
             if self.outcomes_file.exists():
@@ -247,6 +253,10 @@ class LearningAgent(BaseAgent):
             with open(self.outcomes_file, 'w') as f:
                 json.dump(existing, f, indent=2)
                 f.write('\n')
+
+            # Clear session outcomes after persisting to prevent
+            # duplicate entries on subsequent end_of_run_summary() calls
+            self.session_outcomes = []
 
         except Exception as e:
             self.log(f"Failed to persist outcomes: {e}", "error")
