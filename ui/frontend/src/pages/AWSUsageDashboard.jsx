@@ -4,7 +4,7 @@ import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import CapaSidebar from '../components/sidebar/CapaSidebar';
 import AWSUsageTrend from '../components/charts/AWSUsageTrend';
 
-const AWSUsageDashboard = () => {
+const AWSUsageDashboard = ({ inline = false }) => {
   const navigate = useNavigate();
   const [usage, setUsage] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -45,6 +45,13 @@ const AWSUsageDashboard = () => {
 
     fetchConfig();
   }, []);
+
+  // Auto-fetch usage data when rendered inline
+  useEffect(() => {
+    if (inline && !usage && !loading) {
+      fetchUsage();
+    }
+  }, [inline, configLoading]);
 
   const fetchUsage = async () => {
     setLoading(true);
@@ -412,53 +419,36 @@ const AWSUsageDashboard = () => {
     onAWSUsageClick: () => navigate('/aws-usage'),
   };
 
-  return (
-    <div className="flex h-screen bg-gray-50">
-      <CapaSidebar
-        {...sidebarHandlers}
-        activeSection="aws-usage"
-        environment="mce"
-      />
-
-      <div className="flex-1 overflow-auto" style={{ backgroundColor: '#FFF5F0' }}>
-        {/* Header - Softer AWS Orange Theme */}
-        <div className="text-white px-6 py-4 shadow-lg flex items-center justify-between h-[72px]" style={{ background: 'linear-gradient(to right, #FF9900, #FF8C00)' }}>
-          <div>
-            <h1 className="text-2xl font-bold leading-tight tracking-tight">AWS Resource Usage</h1>
-            {lastUpdated && (
-              <p className="text-orange-100 text-xs mt-0.5">
-                Last updated: {lastUpdated.toLocaleString()}
+  const contentBody = (
+        <div className={inline ? "" : "p-6"}>
+          {/* Description + Refresh */}
+          <div className="mb-4 flex items-start justify-between">
+            <div>
+              <p className="text-gray-600 text-sm">
+                Monitor your AWS resource counts across all services
               </p>
-            )}
-          </div>
-          <button
-            onClick={fetchUsage}
-            disabled={loading}
-            className={`
-              flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium text-sm
-              transition-all duration-200 shadow-md
-              ${loading
-                ? 'bg-white/20 text-white/50 cursor-not-allowed'
-                : 'bg-white text-orange-600 hover:bg-orange-50 hover:shadow-lg'
-              }
-            `}
-          >
-            <ArrowPathIcon className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Loading...' : 'Refresh Data'}
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-6">
-          {/* Description */}
-          <div className="mb-4">
-            <p className="text-gray-600 text-sm">
-              Monitor your AWS resource counts across all services
-            </p>
-            <p className="text-gray-500 text-xs mt-1 flex items-center gap-1">
-              <span className="inline-block w-1 h-1 rounded-full bg-gray-400"></span>
-              Data may take a few minutes to load as it queries all AWS resources
-            </p>
+              <p className="text-gray-500 text-xs mt-1 flex items-center gap-1">
+                <span className="inline-block w-1 h-1 rounded-full bg-gray-400"></span>
+                {lastUpdated
+                  ? `Last updated: ${lastUpdated.toLocaleString()}`
+                  : 'Data may take a few minutes to load as it queries all AWS resources'}
+              </p>
+            </div>
+            <button
+              onClick={fetchUsage}
+              disabled={loading}
+              className={`
+                flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm
+                transition-all duration-200 shadow-sm flex-shrink-0
+                ${loading
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-orange-500 text-white hover:bg-orange-600 hover:shadow-md'
+                }
+              `}
+            >
+              <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Loading...' : 'Refresh Data'}
+            </button>
           </div>
 
           {error && (
@@ -605,6 +595,52 @@ const AWSUsageDashboard = () => {
               </div>
             </>
           )}
+        </div>
+  );
+
+  if (inline) {
+    return contentBody;
+  }
+
+  return (
+    <div className="flex h-screen bg-gray-50">
+      <CapaSidebar
+        {...sidebarHandlers}
+        activeSection="aws-usage"
+        environment="mce"
+      />
+
+      <div className="flex-1 overflow-auto" style={{ backgroundColor: '#FFF5F0' }}>
+        {/* Header - Softer AWS Orange Theme */}
+        <div className="text-white px-6 py-4 shadow-lg flex items-center justify-between h-[72px]" style={{ background: 'linear-gradient(to right, #FF9900, #FF8C00)' }}>
+          <div>
+            <h1 className="text-2xl font-bold leading-tight tracking-tight">AWS Resource Usage</h1>
+            {lastUpdated && (
+              <p className="text-orange-100 text-xs mt-0.5">
+                Last updated: {lastUpdated.toLocaleString()}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={fetchUsage}
+            disabled={loading}
+            className={`
+              flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium text-sm
+              transition-all duration-200 shadow-md
+              ${loading
+                ? 'bg-white/20 text-white/50 cursor-not-allowed'
+                : 'bg-white text-orange-600 hover:bg-orange-50 hover:shadow-lg'
+              }
+            `}
+          >
+            <ArrowPathIcon className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Loading...' : 'Refresh Data'}
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          {contentBody}
         </div>
       </div>
     </div>

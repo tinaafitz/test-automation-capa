@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircleIcon, Cog6ToothIcon, ClockIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, Cog6ToothIcon, ClockIcon, TrashIcon } from '@heroicons/react/24/outline';
 
 import CapaSidebar from '../components/sidebar/CapaSidebar';
 import RosaHcpClustersSection from '../components/sections/RosaHcpClustersSection';
@@ -1904,7 +1904,18 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Task Summary</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-blue-900">Task Summary</h2>
+              {recentOps.recentOperations.filter((op) => op.environment === 'mce').length > 0 && (
+                <button
+                  onClick={() => recentOps.clearRecentOperations()}
+                  className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-md transition-colors font-medium flex items-center gap-2 border border-red-200 text-sm"
+                >
+                  <TrashIcon className="h-4 w-4" />
+                  Clear All
+                </button>
+              )}
+            </div>
 
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               {recentOps.recentOperations.filter((op) => op.environment === 'mce').length === 0 ? (
