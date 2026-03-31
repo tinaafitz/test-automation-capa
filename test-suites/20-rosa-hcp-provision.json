@@ -11,6 +11,7 @@
       "description": "Provisions a ROSA HCP cluster using CAPA with optional ROSANetwork and ROSARoleConfig automation",
       "test_case_id": "RHACM4K-61815",
       "extra_vars": {
+        "name_prefix": "",
         "openshift_version": "4.20.10",
         "create_rosa_network": true,
         "create_rosa_role_config": true,

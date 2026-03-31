@@ -15,6 +15,7 @@ import TestSuiteSection from '../components/sections/TestSuiteSection';
 import ResourcesViewer from '../components/ResourcesViewer';
 import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import NotificationSettingsInline from '../components/NotificationSettingsInline';
+import WorkflowBuilder from '../components/WorkflowBuilder';
 import {
   useApiStatusContext,
   useRecentOperationsContext,
@@ -1053,6 +1054,7 @@ const CAPADashboardContent = () => {
     onNotificationsClick: () => setActiveSection('notifications'),
     onRecentTasksClick: () => setActiveSection('recent-tasks'),
     onAWSUsageClick: () => navigate('/aws-usage'),
+    onWorkflowsClick: () => setActiveSection('workflows'),
   };
 
   // ============================================================================
@@ -1858,6 +1860,17 @@ const CAPADashboardContent = () => {
             <h2 className="text-2xl font-bold text-blue-900">Playbooks</h2>
 
             <TestSuiteSection />
+          </div>
+        );
+
+      case 'workflows':
+        return (
+          <div className="space-y-6">
+            <h2 className="text-2xl font-bold text-blue-900">Workflow Builder</h2>
+            <p className="text-gray-600">
+              Chain playbooks into automated workflows. Drag from the palette, reorder steps, and run them as a pipeline.
+            </p>
+            <WorkflowBuilder />
           </div>
         );
 
