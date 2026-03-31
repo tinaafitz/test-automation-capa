@@ -1,0 +1,42 @@
+[
+  {
+    "timestamp": "2026-03-31T14:27:26.826615",
+    "issue_type": "rosanetwork_stuck_deletion",
+    "recommended_fix": "retry_cloudformation_delete",
+    "success": true,
+    "confidence_used": 0.95,
+    "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
+    "resource_key": "ns-rosa-hcp/ish-rosa-hcp-network",
+    "details": "Cleaned up VPC dependencies for ish-rosa-hcp-rosa-network-stack; Deleted security group sg-0607fa5c4b42bbdeb (2pcqj0tkrt6tbd989ooo1a5gfdkfco6o-vpce-private-router)"
+  },
+  {
+    "timestamp": "2026-03-31T14:29:20.248689",
+    "issue_type": "cloudformation_deletion_failure",
+    "recommended_fix": "manual_cloudformation_cleanup",
+    "success": true,
+    "confidence_used": 0.8,
+    "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+    "resource_key": "ns-rosa-hcp/ish-rosa-hcp-network",
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+  },
+  {
+    "timestamp": "2026-03-31T16:08:33.967817",
+    "issue_type": "rosanetwork_stuck_deletion",
+    "recommended_fix": "retry_cloudformation_delete",
+    "success": true,
+    "confidence_used": 0.95,
+    "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
+    "resource_key": "ROSANetwork",
+    "details": "Cleaned up VPC dependencies for foo-rosa-hcp-rosa-network-stack; Deleted security group sg-048df72cfb7e78c16 (2pcs2d8mc03unakfs6fg9nkaj2rpga1m-vpce-private-router)"
+  },
+  {
+    "timestamp": "2026-03-31T16:10:21.497864",
+    "issue_type": "cloudformation_deletion_failure",
+    "recommended_fix": "manual_cloudformation_cleanup",
+    "success": true,
+    "confidence_used": 0.8,
+    "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+    "resource_key": "ns-rosa-hcp/foo-rosa-hcp-network",
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+  }
+]
