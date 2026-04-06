@@ -336,11 +336,11 @@ const MainDashboard = () => {
             <div className="absolute top-[72px] left-0 right-0 bg-white border-b border-gray-300 shadow-lg z-50">
               <div className="py-2">
                 <button
-                  onClick={() => { navigate('/presentation'); setShowEnvMenu(false); }}
+                  onClick={() => { navigate('/tour'); setShowEnvMenu(false); }}
                   className="w-full px-4 py-2.5 text-left hover:bg-indigo-50 transition-colors flex items-center gap-3"
                 >
                   <span className="text-lg">TV</span>
-                  <span className="text-sm font-medium text-gray-900">Presentation Mode</span>
+                  <span className="text-sm font-medium text-gray-900">A Guided Tour</span>
                 </button>
                 <button
                   onClick={() => { navigate('/'); setShowEnvMenu(false); }}

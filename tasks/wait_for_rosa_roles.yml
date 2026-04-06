@@ -18,33 +18,73 @@
       - Poll interval: {{ poll_interval }} seconds
       - Start time: {{ ansible_date_time.iso8601 }}
 
-- name: Wait for ROSARoleConfig to exist
-  shell: |
-    oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} -o json 2>/dev/null || echo '{"items":[]}'
-  register: rosa_role_config_check
-  until: (rosa_role_config_check.stdout if rosa_role_config_check.stdout is mapping else (rosa_role_config_check.stdout | from_json)).metadata.name | default('') != ''
-  retries: 20
-  delay: 15
-  changed_when: false
-
-- name: Monitor ROSARoleConfig status until ready
+- name: Wait for ROSARoleConfig to be ready (sidecar-logged)
   block:
-    - name: Wait for ROSARoleConfig to be ready
+    - name: Wait for ROSARoleConfig via shell loop with sidecar logging
       shell: |
-        oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} -o json 2>/dev/null || echo '{}'
-      register: rosa_role_config_status
-      until:
-        - ((rosa_role_config_status.stdout if rosa_role_config_status.stdout is mapping else (rosa_role_config_status.stdout | from_json)).status.conditions | default([]) | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length) > 0
-      retries: "{{ (max_wait_time | int / poll_interval | int) | int }}"
-      delay: "{{ poll_interval | int }}"
+        LOGFILE="{{ agent_sidecar_log | default('/tmp/provision-agent-' + cluster_name + '.log') }}"
+        ROLE_NAME="{{ rosa_role_config_name }}"
+        NAMESPACE="{{ capi_namespace }}"
+        TIMEOUT="{{ max_wait_time | default(1800) }}"
+        POLL="{{ poll_interval | default(30) }}"
+        START_TIME=$(date +%s)
+
+        echo "#AGENT_CONTEXT: resource_name=${ROLE_NAME} namespace=${NAMESPACE} resource_type=rosaroleconfig" | tee -a "$LOGFILE"
+        echo "Waiting for ROSARoleConfig ${ROLE_NAME} in namespace ${NAMESPACE} to be Ready..." | tee -a "$LOGFILE"
+
+        while true; do
+          CURRENT_TIME=$(date +%s)
+          ELAPSED=$((CURRENT_TIME - START_TIME))
+
+          if [ $ELAPSED -gt $TIMEOUT ]; then
+            echo "ERROR: Timeout after ${TIMEOUT} seconds waiting for ROSARoleConfig to be Ready" | tee -a "$LOGFILE"
+            exit 1
+          fi
+
+          # Check if ROSARoleConfig exists
+          STATUS_JSON=$(oc get rosaroleconfig "${ROLE_NAME}" -n "${NAMESPACE}" -o json 2>/dev/null)
+          if [ $? -ne 0 ]; then
+            echo "FAILED - RETRYING: [localhost]: Wait for rosaroleconfig ${ROLE_NAME} to exist ($((TIMEOUT - ELAPSED))s remaining)." | tee -a "$LOGFILE"
+            sleep 15
+            continue
+          fi
+
+          # Check Ready condition
+          READY=$(echo "$STATUS_JSON" | jq -r '.status.conditions[]? | select(.type=="Ready") | .status' 2>/dev/null || echo "")
+          REASON=$(echo "$STATUS_JSON" | jq -r '.status.conditions[]? | select(.type=="Ready") | .reason' 2>/dev/null || echo "Unknown")
+          MESSAGE=$(echo "$STATUS_JSON" | jq -r '.status.conditions[]? | select(.type=="Ready") | .message' 2>/dev/null || echo "")
+
+          if [ "$READY" = "True" ]; then
+            echo "ROSARoleConfig ${ROLE_NAME} is Ready after ${ELAPSED} seconds" | tee -a "$LOGFILE"
+            # Save status for Ansible to parse
+            echo "$STATUS_JSON" > /tmp/rosaroleconfig_status.json
+            exit 0
+          else
+            echo "FAILED - RETRYING: [localhost]: Wait for rosaroleconfig ${ROLE_NAME} to be ready. Status: ${READY:-Pending} Reason: ${REASON} (${ELAPSED}s elapsed, $((TIMEOUT - ELAPSED))s remaining)." | tee -a "$LOGFILE"
+            sleep "$POLL"
+          fi
+        done
+      args:
+        executable: /bin/bash
+      register: rosa_role_config_wait_result
+
+    - name: Load ROSARoleConfig status
+      shell: cat /tmp/rosaroleconfig_status.json
+      register: rosa_role_config_status_json
       changed_when: false
 
     - name: Set successful completion facts
       set_fact:
         rosa_roles_ready: true
-        rosa_role_config_resource: "{{ rosa_role_config_status.stdout | from_json }}"
+        rosa_role_config_resource: "{{ rosa_role_config_status_json.stdout | from_json }}"
         current_time: "{{ ansible_date_time.epoch | int }}"
         wait_duration: "{{ (ansible_date_time.epoch | int) - (start_time | int) }}"
+
+    - name: Cleanup temporary file
+      file:
+        path: /tmp/rosaroleconfig_status.json
+        state: absent
+      changed_when: false
 
   rescue:
     - name: Handle timeout or failure

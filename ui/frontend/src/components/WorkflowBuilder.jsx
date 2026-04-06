@@ -330,6 +330,7 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
 // ============================================================================
 const StepOutputPanel = ({ logs, status, agentStats }) => {
   const outputRef = useRef(null);
+  const [copied, setCopied] = useState(false);
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
@@ -337,6 +338,13 @@ const StepOutputPanel = ({ logs, status, agentStats }) => {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
   }, [logs, status]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(logs.join('\n')).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   const stats = agentStats;
   const hasAgent = stats?.enabled;
@@ -368,10 +376,20 @@ const StepOutputPanel = ({ logs, status, agentStats }) => {
           )}
         </div>
       )}
-      <div
-        ref={outputRef}
-        className="bg-gray-900 text-gray-100 rounded-b-lg p-3 max-h-80 overflow-y-auto font-mono text-xs leading-relaxed"
-      >
+      <div className="relative">
+        {logs.length > 0 && (
+          <button
+            onClick={handleCopy}
+            className="absolute top-2 right-2 z-10 px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white transition-colors"
+            title="Copy output"
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        )}
+        <div
+          ref={outputRef}
+          className="bg-gray-900 text-gray-100 rounded-b-lg p-3 max-h-80 overflow-y-auto font-mono text-xs leading-relaxed"
+        >
         {logs.map((line, i) => (
           <div
             key={i}
@@ -392,6 +410,7 @@ const StepOutputPanel = ({ logs, status, agentStats }) => {
         {status === 'running' && (
           <div className="text-blue-400 animate-pulse mt-1">▋</div>
         )}
+        </div>
       </div>
     </div>
   );
@@ -742,12 +761,22 @@ const WorkflowBuilder = () => {
           prev.map((s, idx) => idx === i ? { ...s, status: success ? 'completed' : 'failed', completedAt: Date.now() } : s)
         );
 
+        // Fetch final logs from the API for the task summary
+        let stepOutput = '';
+        try {
+          const finalLogsRes = await fetch(buildApiUrl(`/api/jobs/${jobId}/logs`));
+          if (finalLogsRes.ok) {
+            const finalLogsData = await finalLogsRes.json();
+            stepOutput = (finalLogsData.logs || []).join('\n');
+          }
+        } catch (e) { /* ignore */ }
+
         if (success) {
           completedCount++;
-          updateRecentOperationStatus(stepOpId, '✅ Completed');
+          updateRecentOperationStatus(stepOpId, '✅ Completed', stepOutput);
         } else {
           failedCount++;
-          updateRecentOperationStatus(stepOpId, '❌ Failed');
+          updateRecentOperationStatus(stepOpId, '❌ Failed', stepOutput);
         }
 
         if (!success) {
@@ -772,12 +801,22 @@ const WorkflowBuilder = () => {
               setWorkflowSteps((prev) =>
                 prev.map((s, idx) => idx === i ? { ...s, status: retrySuccess ? 'completed' : 'failed' } : s)
               );
+              // Fetch retry logs
+              let retryOutput = '';
+              try {
+                const retryLogsRes = await fetch(buildApiUrl(`/api/jobs/${retryResult.job_id}/logs`));
+                if (retryLogsRes.ok) {
+                  const retryLogsData = await retryLogsRes.json();
+                  retryOutput = (retryLogsData.logs || []).join('\n');
+                }
+              } catch (e) { /* ignore */ }
+
               if (retrySuccess) {
                 failedCount--;
                 completedCount++;
-                updateRecentOperationStatus(stepOpId, '✅ Completed (retry)');
+                updateRecentOperationStatus(stepOpId, '✅ Completed (retry)', retryOutput);
               } else {
-                updateRecentOperationStatus(stepOpId, '❌ Failed (after retry)');
+                updateRecentOperationStatus(stepOpId, '❌ Failed (after retry)', retryOutput);
                 if (step.required && stopOnFailure) {
                   // Mark remaining as skipped
                   for (let j = i + 1; j < workflowSteps.length; j++) {
@@ -894,6 +933,10 @@ const WorkflowBuilder = () => {
               clearInterval(interval);
               resolve(false);
             }
+          } else if (statusResponse.status === 404) {
+            // Job was cleaned up — process already finished
+            clearInterval(interval);
+            resolve(true);
           }
         } catch (e) {
           // Keep polling
