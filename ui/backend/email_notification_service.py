@@ -2,6 +2,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional, Dict, Any
+from html import escape as html_escape
 import yaml
 import os
 from datetime import datetime
@@ -86,10 +87,10 @@ class EmailNotificationService:
 
     def _build_email_content(self, job_data: dict, status: str) -> tuple:
         """Build email subject and body content"""
-        cluster_name = job_data.get("cluster_name", "Unknown")
-        region = job_data.get("region", "N/A")
-        version = job_data.get("version", "N/A")
-        job_id = job_data.get("job_id", "N/A")
+        cluster_name = html_escape(job_data.get("cluster_name", "Unknown"))
+        region = html_escape(job_data.get("region", "N/A"))
+        version = html_escape(job_data.get("version", "N/A"))
+        job_id = html_escape(job_data.get("job_id", "N/A"))
 
         if status == "completed":
             return self._build_success_email(cluster_name, region, version, job_id)
@@ -220,9 +221,10 @@ Job ID: {job_id} | Completed: {timestamp}
         error = job_data.get("error", "Unknown error")
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Truncate error if too long
+        # Truncate error if too long, then escape for HTML
         if len(error) > 500:
             error = error[:497] + "..."
+        error = html_escape(error)
 
         subject = f"ROSA Cluster Provisioning Failed - {cluster_name}"
 
