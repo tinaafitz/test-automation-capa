@@ -416,29 +416,23 @@ class DiagnosticAgent(BaseAgent):
         # Check if the ROSA cluster is still known to ROSA/OCM
         rosa_status = self._get_rosa_cluster_status(resource_name)
 
-        if rosa_status == "gone":
-            # Cluster fully deleted in ROSA — safe to remove finalizers
-            self.log(f"ROSA cluster {resource_name} is fully gone — safe to remove finalizers", "info")
-            result = self._diagnose_stuck_resource(context, "rosacontrolplane", "rosacontrolplane_stuck_deletion")
-            result["root_cause"] = "ROSA cluster fully removed — cleaning up remaining K8s resource"
-            return result
-        else:
-            # Cluster still exists (ready, installing, uninstalling, error, unknown) —
-            # do NOT remove finalizers. The CAPA controller needs its finalizer to
-            # properly orchestrate cluster deletion via OCM.
-            self.log(
-                f"ROSA cluster {resource_name} is still {rosa_status} — "
-                f"waiting for ROSA to finish before removing finalizers", "info"
-            )
-            return {
-                "issue_type": "rosacontrolplane_stuck_deletion",
-                "root_cause": f"ROSA cluster is still {rosa_status} — waiting for full removal",
-                "severity": "low",
-                "confidence": 0.5,
-                "evidence": [f"rosa describe cluster shows state: {rosa_status}"],
-                "recommended_fix": "log_and_continue",
-                "fix_parameters": {}
-            }
+        # NEVER remove ROSAControlPlane finalizers. The CAPA controller needs them
+        # to properly orchestrate AWS resource cleanup (CloudFormation stacks, IAM roles,
+        # network resources). Even when ROSA/OCM says the cluster is "gone", the controller
+        # may still be cleaning up underlying infrastructure.
+        self.log(
+            f"ROSA cluster {resource_name} status: {rosa_status} — "
+            f"never removing ROSAControlPlane finalizers (CAPA controller handles cleanup)", "info"
+        )
+        return {
+            "issue_type": "rosacontrolplane_stuck_deletion",
+            "root_cause": f"ROSA cluster status: {rosa_status} — CAPA controller managing deletion",
+            "severity": "low",
+            "confidence": 0.4,
+            "evidence": [f"rosa describe cluster shows state: {rosa_status}"],
+            "recommended_fix": "log_and_continue",
+            "fix_parameters": {}
+        }
 
     def _get_rosa_cluster_status(self, cluster_name: str) -> str:
         """Check ROSA cluster status via rosa CLI.
