@@ -136,7 +136,7 @@ export function AIAssistantChat({ inline = false, theme = 'mce' }) {
   // If inline mode, render without floating button/modal
   if (inline) {
     return (
-      <div className="w-full h-[600px] bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col">
+      <div className="w-full h-[calc(100vh-280px)] min-h-[400px] bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col">
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
           {messages.map((message, index) => (

@@ -434,21 +434,23 @@ const AWSUsageDashboard = ({ inline = false }) => {
                   : 'Data may take a few minutes to load as it queries all AWS resources'}
               </p>
             </div>
-            <button
-              onClick={fetchUsage}
-              disabled={loading}
-              className={`
-                flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm
-                transition-all duration-200 shadow-sm flex-shrink-0
-                ${loading
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : 'bg-orange-500 text-white hover:bg-orange-600 hover:shadow-md'
-                }
-              `}
-            >
-              <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              {loading ? 'Loading...' : 'Refresh Data'}
-            </button>
+            {inline && (
+              <button
+                onClick={fetchUsage}
+                disabled={loading}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm
+                  transition-all duration-200 shadow-sm whitespace-nowrap
+                  ${loading
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-orange-500 text-white hover:bg-orange-600 hover:shadow-md'
+                  }
+                `}
+              >
+                <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                {loading ? 'Loading...' : 'Refresh Data'}
+              </button>
+            )}
           </div>
 
           {error && (

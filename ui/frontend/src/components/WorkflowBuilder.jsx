@@ -131,7 +131,24 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
           {/* Step info */}
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold text-gray-900 truncate">{step.name}</div>
-            <div className="text-xs text-gray-500 truncate">{step.description}</div>
+            <div className="text-xs text-gray-500 truncate">
+              {step.description}
+              {step.startedAt && (
+                <span className="ml-2 text-gray-400">
+                  {step.completedAt
+                    ? (() => {
+                        const secs = Math.round((step.completedAt - step.startedAt) / 1000);
+                        return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+                      })()
+                    : step.status === 'running'
+                    ? (() => {
+                        const secs = Math.round((Date.now() - step.startedAt) / 1000);
+                        return secs < 60 ? `${secs}s...` : `${Math.floor(secs / 60)}m ${secs % 60}s...`;
+                      })()
+                    : null}
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Step badges */}
@@ -311,7 +328,7 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
 // ============================================================================
 // Step Output Panel (live log viewer)
 // ============================================================================
-const StepOutputPanel = ({ logs, status }) => {
+const StepOutputPanel = ({ logs, status, agentStats }) => {
   const outputRef = useRef(null);
 
   // Auto-scroll to bottom when new logs arrive
@@ -321,8 +338,36 @@ const StepOutputPanel = ({ logs, status }) => {
     }
   }, [logs, status]);
 
+  const stats = agentStats;
+  const hasAgent = stats?.enabled;
+  const issuesDetected = stats?.issues_detected || 0;
+  const interventions = stats?.interventions || 0;
+  const totalChecks = stats?.total_checks || 0;
+
   return (
     <div className="border-t border-gray-200">
+      {/* AI Agent summary header */}
+      {hasAgent && (issuesDetected > 0 || interventions > 0 || totalChecks > 0) && (
+        <div className={`px-3 py-2 text-xs flex items-center gap-4 ${
+          interventions > 0
+            ? 'bg-yellow-50 border-b border-yellow-200'
+            : 'bg-gray-50 border-b border-gray-200'
+        }`}>
+          <span className="font-semibold text-gray-700">
+            {issuesDetected > 0 ? '\uD83E\uDD16' : '\uD83D\uDEE1\uFE0F'} AI Agent{status === 'running' ? ': Monitoring' : ': Summary'}
+          </span>
+          <span className="text-gray-600">Issues: {issuesDetected}</span>
+          <span className="text-gray-600">Fixes: {interventions}</span>
+          {totalChecks > 0 && (
+            <span className="text-gray-500">({totalChecks} checks)</span>
+          )}
+          {interventions > 0 && (
+            <span className="text-green-700 font-medium">
+              Auto-fixed {interventions} issue(s)
+            </span>
+          )}
+        </div>
+      )}
       <div
         ref={outputRef}
         className="bg-gray-900 text-gray-100 rounded-b-lg p-3 max-h-80 overflow-y-auto font-mono text-xs leading-relaxed"
@@ -337,6 +382,7 @@ const StepOutputPanel = ({ logs, status }) => {
               line.includes('fatal:') || line.includes('FAILED') ? 'text-red-400 font-bold' :
               line.includes('PLAY RECAP') ? 'text-cyan-300 mt-2 font-bold' :
               line.includes('skipping:') ? 'text-gray-500' :
+              line.includes('\uD83E\uDD16') || line.includes('Agent') ? 'text-yellow-300 font-medium' :
               'text-gray-300'
             }
           >
@@ -390,6 +436,48 @@ const WorkflowBuilder = () => {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
+
+  // ---- Restore last run results from localStorage ----
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('capa-workflow-last-run');
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data.workflowSteps?.length > 0) {
+          setWorkflowName(data.workflowName || 'My Workflow');
+          setWorkflowSteps(data.workflowSteps);
+          setGlobalVars(data.globalVars || {});
+          setStopOnFailure(data.stopOnFailure ?? true);
+          if (data.activeOutputStepId) setActiveOutputStepId(data.activeOutputStepId);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to restore last run:', e);
+    }
+  }, []);
+
+  // ---- Persist workflow results to localStorage when steps change ----
+  const initialLoadDone = useRef(false);
+  useEffect(() => {
+    // Skip the first render cycle so we don't overwrite stored data with empty initial state
+    if (!initialLoadDone.current) {
+      initialLoadDone.current = true;
+      return;
+    }
+    if (workflowSteps.length > 0) {
+      try {
+        localStorage.setItem('capa-workflow-last-run', JSON.stringify({
+          workflowName,
+          workflowSteps,
+          globalVars,
+          stopOnFailure,
+          activeOutputStepId,
+        }));
+      } catch (e) {
+        console.error('Failed to persist workflow results:', e);
+      }
+    }
+  }, [workflowSteps, workflowName, activeOutputStepId, globalVars, stopOnFailure]);
 
   // ---- Fetch available playbooks ----
   useEffect(() => {
@@ -601,7 +689,7 @@ const WorkflowBuilder = () => {
 
       // Mark current step as running and auto-show its output
       setWorkflowSteps((prev) =>
-        prev.map((s, idx) => idx === i ? { ...s, status: 'running' } : s)
+        prev.map((s, idx) => idx === i ? { ...s, status: 'running', startedAt: Date.now(), completedAt: null } : s)
       );
       setActiveOutputStepId(step.id);
 
@@ -651,7 +739,7 @@ const WorkflowBuilder = () => {
         const success = await pollJobCompletion(jobId, step.id);
 
         setWorkflowSteps((prev) =>
-          prev.map((s, idx) => idx === i ? { ...s, status: success ? 'completed' : 'failed' } : s)
+          prev.map((s, idx) => idx === i ? { ...s, status: success ? 'completed' : 'failed', completedAt: Date.now() } : s)
         );
 
         if (success) {
@@ -774,18 +862,25 @@ const WorkflowBuilder = () => {
     return new Promise((resolve) => {
       const interval = setInterval(async () => {
         try {
-          const [statusResponse, logsResponse] = await Promise.all([
+          const [statusResponse, logsResponse, agentResponse] = await Promise.all([
             fetch(buildApiUrl(`/api/jobs/${jobId}`)),
             fetch(buildApiUrl(`/api/jobs/${jobId}/logs`)),
+            fetch(buildApiUrl(`/api/jobs/${jobId}/agent-stats`)).catch(() => null),
           ]);
 
-          // Update logs on the step
+          // Update logs and agent stats on the step
+          const agentStats = agentResponse?.ok ? await agentResponse.json().catch(() => null) : null;
+
           if (logsResponse.ok) {
             const logsData = await logsResponse.json();
             const logLines = (logsData.logs || []).filter(l => l.trim());
-            if (logLines.length > 0 && stepId) {
+            if (stepId) {
               setWorkflowSteps((prev) =>
-                prev.map((s) => s.id === stepId ? { ...s, logs: logLines } : s)
+                prev.map((s) => s.id === stepId ? {
+                  ...s,
+                  ...(logLines.length > 0 ? { logs: logLines } : {}),
+                  ...(agentStats?.agent_stats ? { agentStats: agentStats.agent_stats } : {}),
+                } : s)
               );
             }
           }
@@ -819,6 +914,8 @@ const WorkflowBuilder = () => {
     setWorkflowName('My Workflow');
     setStopOnFailure(true);
     setGlobalVars({});
+    setActiveOutputStepId(null);
+    localStorage.removeItem('capa-workflow-last-run');
   };
 
   // ============================================================================
@@ -1219,7 +1316,7 @@ const WorkflowBuilder = () => {
                   </button>
                 </div>
               </div>
-              <StepOutputPanel logs={activeStep.logs} status={activeStep.status} />
+              <StepOutputPanel logs={activeStep.logs} status={activeStep.status} agentStats={activeStep.agentStats} />
             </div>
           );
         })()}

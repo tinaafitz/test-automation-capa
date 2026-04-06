@@ -37,11 +37,8 @@ const JenkinsTestResultsTrend = () => {
     }
   };
 
-  // Auto-fetch on mount + poll every 5 minutes
   useEffect(() => {
     fetchTrendData();
-    const interval = setInterval(fetchTrendData, 300000);
-    return () => clearInterval(interval);
   }, []);
 
   // Calculate max count for scaling with better padding
