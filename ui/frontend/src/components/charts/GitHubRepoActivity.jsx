@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import { buildApiUrl } from '../../config/api';
 
+// Module-level cache survives component unmount/remount
+let _cache = { repos: [], lastUpdated: null };
+
 const GitHubRepoActivity = () => {
-  const [repos, setRepos] = useState([]);
+  const [repos, setRepos] = useState(_cache.repos);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(_cache.lastUpdated);
 
   const fetchRepoActivity = async () => {
     setLoading(true);
@@ -18,6 +21,8 @@ const GitHubRepoActivity = () => {
       if (data.success && Array.isArray(data.repos)) {
         setRepos(data.repos);
         setLastUpdated(new Date());
+        _cache.repos = data.repos;
+        _cache.lastUpdated = new Date();
       } else {
         throw new Error(data.message || 'Failed to fetch GitHub repo activity');
       }
@@ -60,7 +65,7 @@ const GitHubRepoActivity = () => {
           <div className="text-center py-6 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-sm text-red-600">{error}</p>
           </div>
-        ) : loading ? (
+        ) : loading && repos.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
             <ArrowPathIcon className="h-6 w-6 animate-spin mx-auto mb-2" />
             <p className="text-sm">Loading...</p>
