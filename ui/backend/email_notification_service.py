@@ -106,48 +106,89 @@ class EmailNotificationService:
         """Build success notification email"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        subject = f"✅ ROSA Cluster Provisioned Successfully - {cluster_name}"
+        subject = f"ROSA Cluster Provisioned Successfully - {cluster_name}"
 
         html_body = f"""
         <html>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-              <h2 style="color: #10b981; border-bottom: 3px solid #10b981; padding-bottom: 10px;">
-                ✅ ROSA Cluster Provisioned Successfully
-              </h2>
+          <body style="margin: 0; padding: 0; background-color: #f0fdf4; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
+              <div style="background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(16, 185, 129, 0.12);">
 
-              <div style="background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 15px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px; font-weight: bold; width: 120px;">Cluster:</td>
-                    <td style="padding: 8px; font-family: monospace;">{cluster_name}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px; font-weight: bold;">Region:</td>
-                    <td style="padding: 8px;">{region}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px; font-weight: bold;">Version:</td>
-                    <td style="padding: 8px;">{version}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px; font-weight: bold;">Status:</td>
-                    <td style="padding: 8px; color: #10b981;">Ready ✅</td>
-                  </tr>
-                </table>
-              </div>
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #059669 0%, #10b981 50%, #34d399 100%); padding: 32px 32px 28px; text-align: center;">
+                  <div style="font-size: 48px; margin-bottom: 8px;">&#9989;</div>
+                  <h1 style="color: #ffffff; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px;">
+                    Cluster Provisioned Successfully
+                  </h1>
+                  <p style="color: rgba(255,255,255,0.85); margin: 6px 0 0; font-size: 14px;">Your ROSA HCP cluster is ready to use</p>
+                </div>
 
-              <div style="background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0;">
-                <h3 style="margin-top: 0; color: #1e40af;">Next Steps:</h3>
-                <ul style="margin: 10px 0; padding-left: 20px;">
-                  <li>Access via OpenShift Console</li>
-                  <li>Configure cluster-admin access</li>
-                  <li>Deploy your applications</li>
-                </ul>
-              </div>
+                <!-- Progress Bar -->
+                <div style="padding: 0 32px;">
+                  <div style="display: flex; justify-content: space-between; padding: 20px 0 8px; font-size: 11px; color: #6b7280;">
+                    <span>Network</span><span>IAM Roles</span><span>Cluster</span><span style="color: #059669; font-weight: 700;">Ready</span>
+                  </div>
+                  <div style="background: #d1fae5; border-radius: 8px; height: 8px; overflow: hidden;">
+                    <div style="background: linear-gradient(90deg, #059669, #10b981, #34d399); width: 100%; height: 100%; border-radius: 8px;"></div>
+                  </div>
+                </div>
 
-              <div style="color: #6b7280; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-                Job ID: {job_id} | Completed: {timestamp}
+                <!-- Cluster Details -->
+                <div style="padding: 24px 32px;">
+                  <table style="width: 100%; border-collapse: separate; border-spacing: 0; background: #f0fdf4; border-radius: 12px; overflow: hidden;">
+                    <tr>
+                      <td style="padding: 14px 20px; font-weight: 600; color: #374151; width: 130px; border-bottom: 1px solid #d1fae5; font-size: 14px;">Cluster</td>
+                      <td style="padding: 14px 20px; font-family: 'SF Mono', Monaco, Consolas, monospace; color: #059669; font-weight: 600; border-bottom: 1px solid #d1fae5; font-size: 14px;">{cluster_name}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 14px 20px; font-weight: 600; color: #374151; border-bottom: 1px solid #d1fae5; font-size: 14px;">Region</td>
+                      <td style="padding: 14px 20px; color: #4b5563; border-bottom: 1px solid #d1fae5; font-size: 14px;">{region}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 14px 20px; font-weight: 600; color: #374151; border-bottom: 1px solid #d1fae5; font-size: 14px;">Version</td>
+                      <td style="padding: 14px 20px; color: #4b5563; border-bottom: 1px solid #d1fae5; font-size: 14px;">{version}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 14px 20px; font-weight: 600; color: #374151; font-size: 14px;">Status</td>
+                      <td style="padding: 14px 20px; font-size: 14px;">
+                        <span style="background: #059669; color: #fff; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;">Ready</span>
+                      </td>
+                    </tr>
+                  </table>
+                </div>
+
+                <!-- Next Steps -->
+                <div style="padding: 0 32px 24px;">
+                  <div style="background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%); border-radius: 12px; padding: 20px 24px; border: 1px solid #bfdbfe;">
+                    <h3 style="margin: 0 0 12px; color: #1e40af; font-size: 15px; font-weight: 700;">&#128640; Next Steps</h3>
+                    <table style="width: 100%; border-collapse: collapse;">
+                      <tr>
+                        <td style="padding: 6px 0; color: #374151; font-size: 14px;">
+                          <span style="color: #3b82f6; margin-right: 8px;">&#10095;</span> Access via OpenShift Console
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #374151; font-size: 14px;">
+                          <span style="color: #3b82f6; margin-right: 8px;">&#10095;</span> Configure cluster-admin access
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #374151; font-size: 14px;">
+                          <span style="color: #3b82f6; margin-right: 8px;">&#10095;</span> Deploy your applications
+                        </td>
+                      </tr>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- Footer -->
+                <div style="padding: 16px 32px; background: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center;">
+                  <p style="margin: 0; color: #9ca3af; font-size: 11px;">
+                    Job ID: {job_id} &nbsp;&#8226;&nbsp; Completed: {timestamp}
+                  </p>
+                  <p style="margin: 4px 0 0; color: #d1d5db; font-size: 10px;">CAPA Automation Framework</p>
+                </div>
+
               </div>
             </div>
           </body>
@@ -160,12 +201,12 @@ ROSA Cluster Provisioned Successfully
 Cluster: {cluster_name}
 Region: {region}
 Version: {version}
-Status: Ready ✅
+Status: Ready
 
 Next Steps:
-• Access via OpenShift Console
-• Configure cluster-admin access
-• Deploy your applications
+- Access via OpenShift Console
+- Configure cluster-admin access
+- Deploy your applications
 
 Job ID: {job_id} | Completed: {timestamp}
         """
@@ -183,46 +224,84 @@ Job ID: {job_id} | Completed: {timestamp}
         if len(error) > 500:
             error = error[:497] + "..."
 
-        subject = f"❌ ROSA Cluster Provisioning Failed - {cluster_name}"
+        subject = f"ROSA Cluster Provisioning Failed - {cluster_name}"
 
         html_body = f"""
         <html>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-              <h2 style="color: #ef4444; border-bottom: 3px solid #ef4444; padding-bottom: 10px;">
-                ❌ ROSA Cluster Provisioning Failed
-              </h2>
+          <body style="margin: 0; padding: 0; background-color: #fef2f2; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
+              <div style="background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(239, 68, 68, 0.12);">
 
-              <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 15px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px; font-weight: bold; width: 120px;">Cluster:</td>
-                    <td style="padding: 8px; font-family: monospace;">{cluster_name}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px; font-weight: bold;">Region:</td>
-                    <td style="padding: 8px;">{region}</td>
-                  </tr>
-                </table>
-              </div>
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #b91c1c 0%, #dc2626 50%, #ef4444 100%); padding: 32px 32px 28px; text-align: center;">
+                  <div style="font-size: 48px; margin-bottom: 8px;">&#10060;</div>
+                  <h1 style="color: #ffffff; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px;">
+                    Cluster Provisioning Failed
+                  </h1>
+                  <p style="color: rgba(255,255,255,0.85); margin: 6px 0 0; font-size: 14px;">Action required &mdash; see details below</p>
+                </div>
 
-              <div style="background-color: #fef2f2; border: 1px solid #fecaca; padding: 15px; margin: 20px 0; border-radius: 6px;">
-                <h3 style="margin-top: 0; color: #991b1b;">Error:</h3>
-                <pre style="background-color: #fff; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px;">{error}</pre>
-              </div>
+                <!-- Cluster Details -->
+                <div style="padding: 24px 32px 16px;">
+                  <table style="width: 100%; border-collapse: separate; border-spacing: 0; background: #fef2f2; border-radius: 12px; overflow: hidden;">
+                    <tr>
+                      <td style="padding: 14px 20px; font-weight: 600; color: #374151; width: 130px; border-bottom: 1px solid #fecaca; font-size: 14px;">Cluster</td>
+                      <td style="padding: 14px 20px; font-family: 'SF Mono', Monaco, Consolas, monospace; color: #dc2626; font-weight: 600; border-bottom: 1px solid #fecaca; font-size: 14px;">{cluster_name}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 14px 20px; font-weight: 600; color: #374151; font-size: 14px;">Region</td>
+                      <td style="padding: 14px 20px; color: #4b5563; font-size: 14px;">{region}</td>
+                    </tr>
+                  </table>
+                </div>
 
-              <div style="background-color: #fffbeb; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
-                <h3 style="margin-top: 0; color: #92400e;">Troubleshooting:</h3>
-                <ul style="margin: 10px 0; padding-left: 20px;">
-                  <li>Check task logs for details</li>
-                  <li>Verify AWS credentials and permissions</li>
-                  <li>Ensure subnet and VPC configuration</li>
-                  <li>Check OpenShift Cluster Manager quota limits</li>
-                </ul>
-              </div>
+                <!-- Error Box -->
+                <div style="padding: 0 32px 20px;">
+                  <div style="background: #1e1e1e; border-radius: 12px; padding: 20px; border: 1px solid #374151;">
+                    <div style="display: flex; align-items: center; margin-bottom: 12px;">
+                      <span style="color: #ef4444; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">&#9888; Error Output</span>
+                    </div>
+                    <pre style="margin: 0; color: #fca5a5; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;">{error}</pre>
+                  </div>
+                </div>
 
-              <div style="color: #6b7280; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-                Job ID: {job_id} | Failed: {timestamp}
+                <!-- Troubleshooting -->
+                <div style="padding: 0 32px 24px;">
+                  <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-radius: 12px; padding: 20px 24px; border: 1px solid #fbbf24;">
+                    <h3 style="margin: 0 0 12px; color: #92400e; font-size: 15px; font-weight: 700;">&#128269; Troubleshooting</h3>
+                    <table style="width: 100%; border-collapse: collapse;">
+                      <tr>
+                        <td style="padding: 6px 0; color: #78350f; font-size: 14px;">
+                          <span style="color: #d97706; margin-right: 8px;">&#10095;</span> Check task logs for details
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #78350f; font-size: 14px;">
+                          <span style="color: #d97706; margin-right: 8px;">&#10095;</span> Verify AWS credentials and permissions
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #78350f; font-size: 14px;">
+                          <span style="color: #d97706; margin-right: 8px;">&#10095;</span> Ensure subnet and VPC configuration
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #78350f; font-size: 14px;">
+                          <span style="color: #d97706; margin-right: 8px;">&#10095;</span> Check OpenShift Cluster Manager quota limits
+                        </td>
+                      </tr>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- Footer -->
+                <div style="padding: 16px 32px; background: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center;">
+                  <p style="margin: 0; color: #9ca3af; font-size: 11px;">
+                    Job ID: {job_id} &nbsp;&#8226;&nbsp; Failed: {timestamp}
+                  </p>
+                  <p style="margin: 4px 0 0; color: #d1d5db; font-size: 10px;">CAPA Automation Framework</p>
+                </div>
+
               </div>
             </div>
           </body>
@@ -239,10 +318,10 @@ Error:
 {error}
 
 Troubleshooting:
-• Check task logs for details
-• Verify AWS credentials and permissions
-• Ensure subnet and VPC configuration
-• Check OpenShift Cluster Manager quota limits
+- Check task logs for details
+- Verify AWS credentials and permissions
+- Ensure subnet and VPC configuration
+- Check OpenShift Cluster Manager quota limits
 
 Job ID: {job_id} | Failed: {timestamp}
         """
@@ -255,39 +334,94 @@ Job ID: {job_id} | Failed: {timestamp}
         """Build started notification email"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        subject = f"🚀 ROSA Cluster Provisioning Started - {cluster_name}"
+        subject = f"ROSA Cluster Provisioning Started - {cluster_name}"
 
         html_body = f"""
         <html>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-              <h2 style="color: #0891b2; border-bottom: 3px solid #0891b2; padding-bottom: 10px;">
-                🚀 ROSA Cluster Provisioning Started
-              </h2>
+          <body style="margin: 0; padding: 0; background-color: #ecfeff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
+              <div style="background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(8, 145, 178, 0.12);">
 
-              <div style="background-color: #ecfeff; border-left: 4px solid #0891b2; padding: 15px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px; font-weight: bold; width: 120px;">Cluster:</td>
-                    <td style="padding: 8px; font-family: monospace;">{cluster_name}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px; font-weight: bold;">Region:</td>
-                    <td style="padding: 8px;">{region}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px; font-weight: bold;">Version:</td>
-                    <td style="padding: 8px;">{version}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px; font-weight: bold;">Status:</td>
-                    <td style="padding: 8px; color: #0891b2;">Provisioning ⏳</td>
-                  </tr>
-                </table>
-              </div>
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #0e7490 0%, #0891b2 50%, #06b6d4 100%); padding: 32px 32px 28px; text-align: center;">
+                  <div style="font-size: 48px; margin-bottom: 8px;">&#128640;</div>
+                  <h1 style="color: #ffffff; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px;">
+                    Cluster Provisioning Started
+                  </h1>
+                  <p style="color: rgba(255,255,255,0.85); margin: 6px 0 0; font-size: 14px;">Estimated time: ~17 minutes</p>
+                </div>
 
-              <div style="color: #6b7280; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-                Job ID: {job_id} | Started: {timestamp}
+                <!-- Progress Bar -->
+                <div style="padding: 0 32px;">
+                  <div style="display: flex; justify-content: space-between; padding: 20px 0 8px; font-size: 11px; color: #6b7280;">
+                    <span style="color: #0891b2; font-weight: 700;">Network</span><span>IAM Roles</span><span>Cluster</span><span>Ready</span>
+                  </div>
+                  <div style="background: #e0f2fe; border-radius: 8px; height: 8px; overflow: hidden;">
+                    <div style="background: linear-gradient(90deg, #0e7490, #0891b2, #22d3ee); width: 15%; height: 100%; border-radius: 8px;"></div>
+                  </div>
+                </div>
+
+                <!-- Cluster Details -->
+                <div style="padding: 24px 32px;">
+                  <table style="width: 100%; border-collapse: separate; border-spacing: 0; background: #ecfeff; border-radius: 12px; overflow: hidden;">
+                    <tr>
+                      <td style="padding: 14px 20px; font-weight: 600; color: #374151; width: 130px; border-bottom: 1px solid #a5f3fc; font-size: 14px;">Cluster</td>
+                      <td style="padding: 14px 20px; font-family: 'SF Mono', Monaco, Consolas, monospace; color: #0e7490; font-weight: 600; border-bottom: 1px solid #a5f3fc; font-size: 14px;">{cluster_name}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 14px 20px; font-weight: 600; color: #374151; border-bottom: 1px solid #a5f3fc; font-size: 14px;">Region</td>
+                      <td style="padding: 14px 20px; color: #4b5563; border-bottom: 1px solid #a5f3fc; font-size: 14px;">{region}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 14px 20px; font-weight: 600; color: #374151; border-bottom: 1px solid #a5f3fc; font-size: 14px;">Version</td>
+                      <td style="padding: 14px 20px; color: #4b5563; border-bottom: 1px solid #a5f3fc; font-size: 14px;">{version}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 14px 20px; font-weight: 600; color: #374151; font-size: 14px;">Status</td>
+                      <td style="padding: 14px 20px; font-size: 14px;">
+                        <span style="background: linear-gradient(135deg, #0891b2, #06b6d4); color: #fff; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;">Provisioning</span>
+                      </td>
+                    </tr>
+                  </table>
+                </div>
+
+                <!-- What's Happening -->
+                <div style="padding: 0 32px 24px;">
+                  <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-radius: 12px; padding: 20px 24px; border: 1px solid #7dd3fc;">
+                    <h3 style="margin: 0 0 12px; color: #0c4a6e; font-size: 15px; font-weight: 700;">&#9881; What's happening</h3>
+                    <table style="width: 100%; border-collapse: collapse;">
+                      <tr>
+                        <td style="padding: 6px 0; color: #0c4a6e; font-size: 14px;">
+                          <span style="color: #0891b2; margin-right: 8px;">1.</span> Creating VPC and network via CloudFormation
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #0c4a6e; font-size: 14px;">
+                          <span style="color: #0891b2; margin-right: 8px;">2.</span> Configuring IAM roles and OIDC provider
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #0c4a6e; font-size: 14px;">
+                          <span style="color: #0891b2; margin-right: 8px;">3.</span> Provisioning ROSA HCP control plane
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #0c4a6e; font-size: 14px;">
+                          <span style="color: #0891b2; margin-right: 8px;">4.</span> Waiting for cluster readiness
+                        </td>
+                      </tr>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- Footer -->
+                <div style="padding: 16px 32px; background: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center;">
+                  <p style="margin: 0; color: #9ca3af; font-size: 11px;">
+                    Job ID: {job_id} &nbsp;&#8226;&nbsp; Started: {timestamp}
+                  </p>
+                  <p style="margin: 4px 0 0; color: #d1d5db; font-size: 10px;">CAPA Automation Framework</p>
+                </div>
+
               </div>
             </div>
           </body>
@@ -300,7 +434,15 @@ ROSA Cluster Provisioning Started
 Cluster: {cluster_name}
 Region: {region}
 Version: {version}
-Status: Provisioning ⏳
+Status: Provisioning
+
+What's happening:
+1. Creating VPC and network via CloudFormation
+2. Configuring IAM roles and OIDC provider
+3. Provisioning ROSA HCP control plane
+4. Waiting for cluster readiness
+
+Estimated time: ~17 minutes
 
 Job ID: {job_id} | Started: {timestamp}
         """
@@ -396,18 +538,29 @@ Job ID: {job_id} | Started: {timestamp}
                 server.login(self.smtp_username, self.smtp_password)
 
             # Send test email
-            subject = "Test Email - ROSA Automation"
+            subject = "Email Notification Test - CAPA Automation"
             html_body = """
             <html>
-              <body style="font-family: Arial, sans-serif;">
-                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                  <h2 style="color: #10b981;">✅ Email Notification Test</h2>
-                  <p>Your email integration is working correctly!</p>
+              <body style="margin: 0; padding: 0; background-color: #f0fdf4; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
+                  <div style="background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(16, 185, 129, 0.12);">
+                    <div style="background: linear-gradient(135deg, #059669 0%, #10b981 50%, #34d399 100%); padding: 32px; text-align: center;">
+                      <div style="font-size: 48px; margin-bottom: 8px;">&#9989;</div>
+                      <h1 style="color: #ffffff; margin: 0; font-size: 22px; font-weight: 700;">Email Test Successful</h1>
+                    </div>
+                    <div style="padding: 32px; text-align: center;">
+                      <p style="color: #374151; font-size: 16px; margin: 0;">Your email integration is working correctly!</p>
+                      <p style="color: #9ca3af; font-size: 13px; margin: 12px 0 0;">You will receive notifications for cluster provisioning events.</p>
+                    </div>
+                    <div style="padding: 16px 32px; background: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center;">
+                      <p style="margin: 0; color: #d1d5db; font-size: 10px;">CAPA Automation Framework</p>
+                    </div>
+                  </div>
                 </div>
               </body>
             </html>
             """
-            text_body = "✅ Email Notification Test\n\nYour email integration is working correctly!"
+            text_body = "Email Notification Test\n\nYour email integration is working correctly!\nYou will receive notifications for cluster provisioning events."
 
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject

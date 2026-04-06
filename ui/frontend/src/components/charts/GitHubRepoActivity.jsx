@@ -28,11 +28,8 @@ const GitHubRepoActivity = () => {
     }
   };
 
-  // Auto-fetch on mount + poll every 5 minutes
   useEffect(() => {
     fetchRepoActivity();
-    const interval = setInterval(fetchRepoActivity, 300000);
-    return () => clearInterval(interval);
   }, []);
 
   return (

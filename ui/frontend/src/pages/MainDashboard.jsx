@@ -76,9 +76,6 @@ const CombinedRosaHcpClusters = ({ onRefresh }) => {
 
   useEffect(() => {
     fetchClusters();
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchClusters, 30000);
-    return () => clearInterval(interval);
   }, []);
 
   // Expose fetch function to parent
@@ -307,11 +304,13 @@ const MainDashboard = () => {
   const getStatusIcon = (status) => {
     if (!status) return '⏳';
     const statusStr = typeof status === 'object' ? (status.status || '') : String(status);
-    if (statusStr.includes('✅') || statusStr.toLowerCase().includes('success')) return '✅';
-    if (statusStr.includes('❌') || statusStr.toLowerCase().includes('fail')) return '❌';
-    if (statusStr.includes('⚠️') || statusStr.toLowerCase().includes('warn')) return '⚠️';
+    const lower = statusStr.toLowerCase();
+    // Check failure/warning first — status text may contain mixed emoji from detailed messages
+    if (lower.includes('fail') || lower.includes('error') || lower.includes('authentication failed')) return '❌';
+    if (lower.includes('warn')) return '⚠️';
+    if (lower.includes('success') || lower.includes('passed') || lower.includes('verified')) return '✅';
     if (statusStr.includes('🆕')) return '🆕';
-    if (statusStr.includes('⏳') || statusStr.toLowerCase().includes('running')) return '⏳';
+    if (lower.includes('running') || lower.includes('in progress')) return '⏳';
     return '📄';
   };
 
@@ -336,6 +335,13 @@ const MainDashboard = () => {
           {showEnvMenu && (
             <div className="absolute top-[72px] left-0 right-0 bg-white border-b border-gray-300 shadow-lg z-50">
               <div className="py-2">
+                <button
+                  onClick={() => { navigate('/presentation'); setShowEnvMenu(false); }}
+                  className="w-full px-4 py-2.5 text-left hover:bg-indigo-50 transition-colors flex items-center gap-3"
+                >
+                  <span className="text-lg">TV</span>
+                  <span className="text-sm font-medium text-gray-900">Presentation Mode</span>
+                </button>
                 <button
                   onClick={() => { navigate('/'); setShowEnvMenu(false); }}
                   className="w-full px-4 py-2.5 text-left bg-gradient-to-r from-gray-100 to-gray-50 border-l-4 border-gray-500 transition-colors flex items-center gap-3"
