@@ -678,18 +678,6 @@ const PresentationMode = () => {
             {slide.content}
           </div>
 
-          {/* Start Demo button on last slide */}
-          {slide.showStartDemo && (
-            <div className="flex justify-center mt-10">
-              <button
-                onClick={() => navigate('/')}
-                className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-lg font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-3"
-              >
-                <PlayIcon className="h-6 w-6" />
-                Start Live Demo
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -732,7 +720,7 @@ const PresentationMode = () => {
               : 'text-gray-700 hover:bg-gray-200'
           }`}
         >
-          {currentSlide === slides.length - 1 ? 'Start Demo' : 'Next'}
+          {currentSlide === slides.length - 1 ? 'Start Exploring' : 'Next'}
           <ChevronRightIcon className="h-5 w-5" />
         </button>
       </div>
