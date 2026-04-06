@@ -8,52 +8,52 @@ import {
 } from '@heroicons/react/24/outline';
 
 const mainSidebarItems = [
-  { label: 'Dashboard', icon: '\uD83D\uDCCA', src: '/screenshots/at-a-glance-dashboard.png' },
-  { label: 'Notifications', icon: '\uD83D\uDD14', src: '/screenshots/main-notifications.png' },
-  { label: 'Email: Started', icon: '\uD83D\uDCE8', src: '/screenshots/email-started.png' },
-  { label: 'Email: Success', icon: '\u2705', src: '/screenshots/email-success.png' },
-  { label: 'Email: Failed', icon: '\u274C', src: '/screenshots/email-failed.png' },
-  { label: 'AI Assistant', icon: '\uD83E\uDD16', src: '/screenshots/main-ai-assistant.png' },
-  { label: 'AWS Usage', icon: '\u2601', src: '/screenshots/mk-aws-usage.png' },
+  { label: 'Dashboard', icon: '\uD83D\uDCCA', src: '/screenshots/at-a-glance-dashboard.png', description: 'Cluster status, task history, Jenkins trends, AWS quota, and GitHub activity at a glance' },
+  { label: 'Notifications', icon: '\uD83D\uDD14', src: '/screenshots/main-notifications.png', description: 'Configure email and Slack notifications for cluster provisioning and deletion events' },
+  { label: 'Email: Started', icon: '\uD83D\uDCE8', src: '/screenshots/email-started.png', description: 'Email sent when a cluster operation begins — includes cluster name, environment, and timestamp' },
+  { label: 'Email: Success', icon: '\u2705', src: '/screenshots/email-success.png', description: 'Email sent on successful completion — includes duration, cluster details, and console link' },
+  { label: 'Email: Failed', icon: '\u274C', src: '/screenshots/email-failed.png', description: 'Email sent on failure — includes error details, AI agent diagnostics, and suggested next steps' },
+  { label: 'AI Assistant', icon: '\uD83E\uDD16', src: '/screenshots/main-ai-assistant.png', description: 'Chat with Claude about your clusters, logs, and operations — context-aware troubleshooting' },
+  { label: 'AWS Usage', icon: '\u2601', src: '/screenshots/mk-aws-usage.png', description: 'Track AWS resource quotas, usage trends, and estimated monthly costs across accounts' },
 ];
 
 const mceSidebarItems = [
-  { label: 'Environments', icon: '\uD83C\uDF10', src: '/screenshots/mce-environments.png' },
-  { label: 'Credentials', icon: '\uD83D\uDD11', src: '/screenshots/mce-credentials.png' },
-  { label: 'Verify', icon: '\u2714', src: '/screenshots/mce-verify.png' },
-  { label: 'Configure', icon: '\u2699', src: '/screenshots/mce-configure.png' },
-  { label: 'Provision', icon: '\uD83D\uDE80', src: '/screenshots/mce-provision.png' },
-  { label: 'ROSA Clusters', icon: '\uD83D\uDCE1', src: '/screenshots/mce-rosa-clusters.png' },
-  { label: 'CAPA Resources', icon: '\uD83D\uDD27', src: '/screenshots/mce-capa-resources.png' },
-  { label: 'Playbooks', icon: '\uD83D\uDCD6', src: '/screenshots/mce-playbooks.png' },
-  { label: 'Workflows', icon: '\u2699\uFE0F', src: '/screenshots/mce-workflow-builder.png' },
-  { label: 'Feature Tests', icon: '\uD83E\uddEA', src: '/screenshots/mce-feature-tests.png' },
-  { label: 'Terminal', icon: '\uD83D\uDCBB', src: '/screenshots/mce-terminal.png' },
-  { label: 'Notifications', icon: '\uD83D\uDD14', src: '/screenshots/mce-notifications.png' },
-  { label: 'Email: Started', icon: '\uD83D\uDCE8', src: '/screenshots/email-started.png' },
-  { label: 'Email: Success', icon: '\u2705', src: '/screenshots/email-success.png' },
-  { label: 'Email: Failed', icon: '\u274C', src: '/screenshots/email-failed.png' },
-  { label: 'Task Summary', icon: '\uD83D\uDCCB', src: '/screenshots/mce-task-summary.png' },
-  { label: 'AI Assistant', icon: '\uD83E\uDD16', src: '/screenshots/mce-ai-assistant.png' },
-  { label: 'AWS Usage', icon: '\u2601', src: '/screenshots/mce-aws-usage.png' },
+  { label: 'Environments', icon: '\uD83C\uDF10', src: '/screenshots/mce-environments.png', description: 'View and switch between OpenShift Hub environments — see connection status and API endpoints' },
+  { label: 'Credentials', icon: '\uD83D\uDD11', src: '/screenshots/mce-credentials.png', description: 'Manage OpenShift credentials needed for connecting to the OpenShift Hub cluster' },
+  { label: 'Verify', icon: '\u2714', src: '/screenshots/mce-verify.png', description: 'Run verification checks on CAPI/CAPA controllers and Hypershift components' },
+  { label: 'Configure', icon: '\u2699', src: '/screenshots/mce-configure.png', description: 'Set up the MCE environment — install CAPI/CAPA providers and configure cluster settings' },
+  { label: 'Provision', icon: '\uD83D\uDE80', src: '/screenshots/mce-provision.png', description: 'Provision a new ROSA HCP cluster with configurable version, region, and instance type' },
+  { label: 'ROSA Clusters', icon: '\uD83D\uDCE1', src: '/screenshots/mce-rosa-clusters.png', description: 'Monitor active ROSA HCP clusters — status, version, age, and one-click deletion' },
+  { label: 'CAPA Resources', icon: '\uD83D\uDD27', src: '/screenshots/mce-capa-resources.png', description: 'Inspect Kubernetes CAPA resources — ROSAControlPlane, AWSManagedControlPlane, and MachinePool objects' },
+  { label: 'Playbooks', icon: '\uD83D\uDCD6', src: '/screenshots/mce-playbooks.png', description: 'Browse and run individual Ansible playbooks for provisioning, testing, and cleanup' },
+  { label: 'Workflows', icon: '\u2699\uFE0F', src: '/screenshots/mce-workflow-builder.png', description: 'Build multi-step pipelines by chaining playbooks with drag-and-drop' },
+  { label: 'Feature Tests', icon: '\uD83E\uddEA', src: '/screenshots/mce-feature-tests.png', description: 'Run targeted feature test suites against provisioned clusters' },
+  { label: 'Terminal', icon: '\uD83D\uDCBB', src: '/screenshots/mce-terminal.png', description: 'Built-in terminal for running kubectl, oc, and aws commands directly in the browser' },
+  { label: 'Notifications', icon: '\uD83D\uDD14', src: '/screenshots/mce-notifications.png', description: 'Configure email and Slack notification preferences for this environment' },
+  { label: 'Email: Started', icon: '\uD83D\uDCE8', src: '/screenshots/email-started.png', description: 'Email sent when a cluster operation begins — includes cluster name, environment, and timestamp' },
+  { label: 'Email: Success', icon: '\u2705', src: '/screenshots/email-success.png', description: 'Email sent on successful completion — includes duration, cluster details, and console link' },
+  { label: 'Email: Failed', icon: '\u274C', src: '/screenshots/email-failed.png', description: 'Email sent on failure — includes error details, AI agent diagnostics, and suggested next steps' },
+  { label: 'Task Summary', icon: '\uD83D\uDCCB', src: '/screenshots/mce-task-summary.png', description: 'View recent operations with timestamps, status badges, and detailed logs' },
+  { label: 'AI Assistant', icon: '\uD83E\uDD16', src: '/screenshots/mce-ai-assistant.png', description: 'Chat with Claude about your MCE environment, clusters, and operations' },
+  { label: 'AWS Usage', icon: '\u2601', src: '/screenshots/mce-aws-usage.png', description: 'Track AWS resource quotas, usage trends, and estimated monthly costs' },
 ];
 
 const mkSidebarItems = [
-  { label: 'Clusters', icon: '\uD83C\uDF10', src: '/screenshots/mk-clusters.png' },
-  { label: 'Configure', icon: '\u2699', src: '/screenshots/mk-configure.png' },
-  { label: 'Custom Image', icon: '\uD83D\uDCE6', src: '/screenshots/mk-custom-image.png' },
-  { label: 'Provision', icon: '\uD83D\uDE80', src: '/screenshots/mk-provision.png' },
-  { label: 'ROSA Clusters', icon: '\uD83D\uDCE1', src: '/screenshots/mk-rosa-clusters.png' },
-  { label: 'CAPA Resources', icon: '\uD83D\uDD27', src: '/screenshots/mk-capa-resources.png' },
-  { label: 'Playbooks', icon: '\uD83D\uDCD6', src: '/screenshots/mk-playbooks.png' },
-  { label: 'Terminal', icon: '\uD83D\uDCBB', src: '/screenshots/mk-terminal.png' },
-  { label: 'Notifications', icon: '\uD83D\uDD14', src: '/screenshots/mk-notifications.png' },
-  { label: 'Email: Started', icon: '\uD83D\uDCE8', src: '/screenshots/email-started.png' },
-  { label: 'Email: Success', icon: '\u2705', src: '/screenshots/email-success.png' },
-  { label: 'Email: Failed', icon: '\u274C', src: '/screenshots/email-failed.png' },
-  { label: 'Task Summary', icon: '\uD83D\uDCCB', src: '/screenshots/mk-task-summary.png' },
-  { label: 'AI Assistant', icon: '\uD83E\uDD16', src: '/screenshots/mk-ai-assistant.png' },
-  { label: 'AWS Usage', icon: '\u2601', src: '/screenshots/mk-aws-usage.png' },
+  { label: 'Clusters', icon: '\uD83C\uDF10', src: '/screenshots/mk-clusters.png', description: 'View and manage local Minikube clusters used for CAPA development and testing' },
+  { label: 'Configure', icon: '\u2699', src: '/screenshots/mk-configure.png', description: 'Set up Minikube with CAPI/CAPA providers — configure cluster settings for local dev' },
+  { label: 'Custom Image', icon: '\uD83D\uDCE6', src: '/screenshots/mk-custom-image.png', description: 'Build and deploy custom CAPA provider images from open PRs for local testing' },
+  { label: 'Provision', icon: '\uD83D\uDE80', src: '/screenshots/mk-provision.png', description: 'Provision a ROSA HCP cluster from Minikube using a custom or default CAPA image' },
+  { label: 'ROSA Clusters', icon: '\uD83D\uDCE1', src: '/screenshots/mk-rosa-clusters.png', description: 'Monitor ROSA HCP clusters provisioned from the Minikube environment' },
+  { label: 'CAPA Resources', icon: '\uD83D\uDD27', src: '/screenshots/mk-capa-resources.png', description: 'Inspect Kubernetes CAPA resources in the Minikube cluster' },
+  { label: 'Playbooks', icon: '\uD83D\uDCD6', src: '/screenshots/mk-playbooks.png', description: 'Browse and run Ansible playbooks tailored for the Minikube environment' },
+  { label: 'Terminal', icon: '\uD83D\uDCBB', src: '/screenshots/mk-terminal.png', description: 'Built-in terminal for running commands against the Minikube cluster' },
+  { label: 'Notifications', icon: '\uD83D\uDD14', src: '/screenshots/mk-notifications.png', description: 'Configure email and Slack notification preferences for Minikube operations' },
+  { label: 'Email: Started', icon: '\uD83D\uDCE8', src: '/screenshots/email-started.png', description: 'Email sent when a cluster operation begins — includes cluster name, environment, and timestamp' },
+  { label: 'Email: Success', icon: '\u2705', src: '/screenshots/email-success.png', description: 'Email sent on successful completion — includes duration, cluster details, and console link' },
+  { label: 'Email: Failed', icon: '\u274C', src: '/screenshots/email-failed.png', description: 'Email sent on failure — includes error details, AI agent diagnostics, and suggested next steps' },
+  { label: 'Task Summary', icon: '\uD83D\uDCCB', src: '/screenshots/mk-task-summary.png', description: 'View recent Minikube operations with timestamps, status badges, and logs' },
+  { label: 'AI Assistant', icon: '\uD83E\uDD16', src: '/screenshots/mk-ai-assistant.png', description: 'Chat with Claude about your Minikube environment, clusters, and operations' },
+  { label: 'AWS Usage', icon: '\u2601', src: '/screenshots/mk-aws-usage.png', description: 'Track AWS resource quotas, usage trends, and estimated monthly costs' },
 ];
 
 const ScreenshotSidebarViewer = ({ items, title, gradient }) => {
@@ -85,9 +85,14 @@ const ScreenshotSidebarViewer = ({ items, title, gradient }) => {
           ))}
         </div>
       </div>
-      {/* Screenshot */}
-      <div className="flex-1 rounded-xl overflow-hidden border border-gray-200 shadow-md">
-        <img src={item.src} alt={item.label} className="w-full h-full object-contain object-left-top" style={{backgroundColor: '#f8fafc'}} />
+      {/* Screenshot + description */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 rounded-xl overflow-hidden border border-gray-200 shadow-md">
+          <img src={item.src} alt={item.label} className="w-full h-full object-contain object-left-top" style={{backgroundColor: '#f8fafc'}} />
+        </div>
+        {item.description && (
+          <p className="text-base text-gray-700 text-center mt-3 px-4">{item.description}</p>
+        )}
       </div>
     </div>
   );
@@ -106,10 +111,15 @@ const MainScreenshotViewer = () => (
 );
 
 const workflowScreenshots = [
-  { src: '/screenshots/workflow-empty.png', label: '1. Drag & Drop', description: 'Browse playbooks by category and drag them onto the canvas' },
-  { src: '/screenshots/workflow-verify.png', label: '2. Live Output', description: 'Ansible output streams live with syntax highlighting' },
-  { src: '/screenshots/workflow-configure.png', label: '3. Live Progress', description: 'Watch each step execute with real-time status updates' },
-  { src: '/screenshots/workflow-running.png', label: '4. Configure & Run', description: 'Set variables, chain steps, and execute with one click' },
+  { src: '/screenshots/mce-wf-empty.png', label: '1. Empty Canvas', description: 'Browse playbooks by category in the left palette and drag them onto the canvas' },
+  { src: '/screenshots/mce-wf-one-step.png', label: '2. Add First Step', description: 'Drag a Verify MCE Environment playbook as the first step' },
+  { src: '/screenshots/mce-wf-two-steps.png', label: '3. Chain Steps', description: 'Add a Configure step after Verify to build a sequential pipeline' },
+  { src: '/screenshots/mce-wf-configure-vars.png', label: '4. Configure Variables', description: 'Expand a step to set per-step variables like name_prefix, region, and OpenShift version' },
+  { src: '/screenshots/mce-wf-three-steps.png', label: '5. Complete Pipeline', description: 'Three-step workflow: Verify, Configure, then Provision — ready to run' },
+  { src: '/screenshots/mce-wf-ready.png', label: '6. Ready to Run', description: 'Click Run Workflow to execute all steps sequentially' },
+  { src: '/screenshots/mce-wf-running-verify.png', label: '7. Step 1 Running', description: 'Verify step executes with live Ansible output streaming below' },
+  { src: '/screenshots/mce-wf-running-configure.png', label: '8. Step 2 Running', description: 'Configure step runs after Verify completes — creating credentials, secrets, and AWSClusterControllerIdentity' },
+  { src: '/screenshots/mce-wf-running-provision.png', label: '9. Step 3 Running', description: 'Provisioning step kicks off — applying cluster YAML and monitoring progress' },
 ];
 
 const ScreenshotCarousel = () => {
@@ -217,9 +227,14 @@ const slides = [
   {
     id: 'problems',
     title: 'Key Benefits',
-    subtitle: 'What the automation framework delivers',
+    subtitle: 'How the framework saves time, reduces manual work, and prevents orphaned AWS resources',
     content: (
       <div className="max-w-3xl mx-auto space-y-5">
+        <div className="rounded-xl p-5 text-center text-white mb-2" style={{background: 'linear-gradient(135deg, #232f3e 0%, #527fff 100%)'}}>
+          <p className="text-xl font-semibold">
+            Automate everything &mdash; and the framework learns from every run.
+          </p>
+        </div>
         <div className="flex items-start gap-6 py-5 border-b border-gray-200">
           <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-bold text-lg" style={{backgroundColor: '#ff9900'}}>1</div>
           <div>
@@ -260,11 +275,6 @@ const slides = [
             </p>
           </div>
         </div>
-        <div className="rounded-xl p-5 text-center text-white mt-6" style={{background: 'linear-gradient(135deg, #232f3e 0%, #527fff 100%)'}}>
-          <p className="text-xl font-semibold">
-            Automate everything &mdash; and the framework learns from every run.
-          </p>
-        </div>
       </div>
     ),
   },
@@ -273,7 +283,7 @@ const slides = [
   {
     id: 'ai-agents',
     title: 'Claude API & AI Agents',
-    subtitle: 'Intelligent automation powered by Anthropic',
+    subtitle: 'A 4-stage AI pipeline — Monitor, Diagnose, Remediate, Learn — that runs autonomously during every cluster operation',
     content: (
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Claude API banner */}
@@ -365,7 +375,7 @@ const slides = [
   {
     id: 'ai-assistant',
     title: 'AI Assistant',
-    subtitle: 'Interactive troubleshooting powered by Claude',
+    subtitle: 'A built-in Claude-powered chat that understands your clusters, logs, and operations — ask it anything without leaving the dashboard',
     content: (
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Hero */}
@@ -435,7 +445,7 @@ const slides = [
   {
     id: 'architecture',
     title: 'Architecture',
-    subtitle: 'How the pieces fit together',
+    subtitle: 'React frontend, FastAPI backend, Ansible playbooks, and AI agents — connected via REST API and WebSocket',
     content: (
       <div className="max-w-5xl mx-auto space-y-5">
         {/* Top layer - UI */}
@@ -517,7 +527,7 @@ const slides = [
   {
     id: 'at-a-glance',
     title: 'At a Glance Dashboard',
-    subtitle: 'Click any menu item to explore',
+    subtitle: 'A unified view of ROSA HCP clusters, recent tasks, Jenkins test results, AWS resource quotas, and GitHub activity — all in one place',
     content: <MainScreenshotViewer />,
   },
 
@@ -525,7 +535,7 @@ const slides = [
   {
     id: 'mce-tour',
     title: 'MCE Environment',
-    subtitle: 'Click any menu item to explore',
+    subtitle: 'Manage credentials, verify CAPI/CAPA controllers, provision and delete ROSA HCP clusters on a full OpenShift Hub',
     content: <MCEScreenshotViewer />,
   },
 
@@ -533,7 +543,7 @@ const slides = [
   {
     id: 'minikube-tour',
     title: 'Minikube Environment',
-    subtitle: 'Local development with custom CAPA images',
+    subtitle: 'Spin up a local Minikube cluster to test custom CAPA provider images from open PRs — fast iteration without needing a full Hub',
     content: <MinikubeScreenshotViewer />,
   },
 
@@ -541,7 +551,7 @@ const slides = [
   {
     id: 'workflow-screenshots',
     title: 'Workflow Builder in Action',
-    subtitle: 'Build, configure, and run multi-step pipelines',
+    subtitle: 'Drag-and-drop playbooks into multi-step pipelines — configure variables, set failure policies, and execute with one click',
     content: <ScreenshotCarousel />,
   },
 
@@ -549,7 +559,7 @@ const slides = [
   {
     id: 'overview',
     title: 'What You\'ll See',
-    subtitle: 'A walkthrough of the framework in action',
+    subtitle: 'A summary of the key features covered in this tour — dashboards, environments, workflows, and AI agents',
     content: (
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="space-y-4">

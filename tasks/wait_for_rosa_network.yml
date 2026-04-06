@@ -12,25 +12,27 @@
     - name: Wait for ROSANetwork to complete network creation
       shell: |
         set -e
+        LOGFILE="{{ agent_sidecar_log | default('/tmp/provision-agent-' + cluster_name + '.log') }}"
         NETWORK_NAME="{{ rosa_network_config_name | default(cluster_name + '-network') }}"
         NAMESPACE="{{ capi_namespace }}"
         TIMEOUT="{{ rosa_network_creation_timeout | default(900) }}"
         START_TIME=$(date +%s)
 
-        echo "Waiting for ROSANetwork ${NETWORK_NAME} in namespace ${NAMESPACE} to be Ready..."
+        echo "#AGENT_CONTEXT: resource_name=${NETWORK_NAME} namespace=${NAMESPACE} resource_type=rosanetwork" | tee -a "$LOGFILE"
+        echo "Waiting for ROSANetwork ${NETWORK_NAME} in namespace ${NAMESPACE} to be Ready..." | tee -a "$LOGFILE"
 
         while true; do
           CURRENT_TIME=$(date +%s)
           ELAPSED=$((CURRENT_TIME - START_TIME))
 
           if [ $ELAPSED -gt $TIMEOUT ]; then
-            echo "ERROR: Timeout after ${TIMEOUT} seconds waiting for ROSANetwork to be Ready"
+            echo "ERROR: Timeout after ${TIMEOUT} seconds waiting for ROSANetwork to be Ready" | tee -a "$LOGFILE"
             exit 1
           fi
 
           # Check if ROSANetwork exists
           if ! oc get rosanetwork "${NETWORK_NAME}" -n "${NAMESPACE}" &>/dev/null; then
-            echo "Waiting for ROSANetwork to be created... (${ELAPSED}s elapsed)"
+            echo "FAILED - RETRYING: [localhost]: Wait for rosanetwork ${NETWORK_NAME} to be created ($((TIMEOUT - ELAPSED))s remaining)." | tee -a "$LOGFILE"
             sleep 5
             continue
           fi
@@ -40,7 +42,7 @@
             -o jsonpath='{.status.conditions[?(@.type=="ROSANetworkReady")].status}' 2>/dev/null || echo "")
 
           if [ "$READY_STATUS" = "True" ]; then
-            echo "✓ ROSANetwork is Ready after ${ELAPSED} seconds"
+            echo "ROSANetwork is Ready after ${ELAPSED} seconds" | tee -a "$LOGFILE"
 
             # Get full status for output
             oc get rosanetwork "${NETWORK_NAME}" -n "${NAMESPACE}" -o json > /tmp/rosanetwork_status.json
@@ -48,7 +50,9 @@
           else
             READY_REASON=$(oc get rosanetwork "${NETWORK_NAME}" -n "${NAMESPACE}" \
               -o jsonpath='{.status.conditions[?(@.type=="ROSANetworkReady")].reason}' 2>/dev/null || echo "Unknown")
-            echo "Waiting for Ready condition... Status: ${READY_STATUS:-Pending} Reason: ${READY_REASON} (${ELAPSED}s elapsed)"
+            STACK_STATUS=$(oc get rosanetwork "${NETWORK_NAME}" -n "${NAMESPACE}" \
+              -o jsonpath='{.status.stackStatus}' 2>/dev/null || echo "Unknown")
+            echo "FAILED - RETRYING: [localhost]: Wait for rosanetwork ${NETWORK_NAME} to be ready. Status: ${READY_STATUS:-Pending} Reason: ${READY_REASON} StackStatus: ${STACK_STATUS} (${ELAPSED}s elapsed, $((TIMEOUT - ELAPSED))s remaining)." | tee -a "$LOGFILE"
             sleep 10
           fi
         done

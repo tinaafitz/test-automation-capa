@@ -19,6 +19,16 @@
     cluster_name: "test-cluster"
   when: cluster_name is not defined
 
+- name: Set sidecar log file for real-time agent monitoring
+  set_fact:
+    agent_sidecar_log: "/tmp/provision-agent-{{ cluster_name }}.log"
+
+- name: Initialize sidecar log file
+  copy:
+    content: ""
+    dest: "{{ agent_sidecar_log }}"
+    force: true
+
 - name: Set default value for rosa_role_prefix
   set_fact:
     rosa_role_prefix: "{{ cluster_name }}"

@@ -73,13 +73,16 @@ const CapaSidebar = ({
     if (!status) return '⏳';
     // Handle object status (with {status, output} structure)
     const statusStr = typeof status === 'object' ? (status.status || '') : String(status);
-    if (statusStr.includes('✅') || statusStr.toLowerCase().includes('success') || statusStr.toLowerCase().includes('verified')) return '✅';
-    if (statusStr.includes('❌') || (statusStr.toLowerCase().includes('fail') && !statusStr.toLowerCase().includes('configuration'))) return '❌';
-    if (statusStr.includes('⚠️') || statusStr.toLowerCase().includes('warn')) return '⚠️';
+    const lower = statusStr.toLowerCase();
+    // Check failure/warning first — status text may contain mixed emoji from detailed messages
+    if (lower.includes('fail') && !lower.includes('configuration')) return '❌';
+    if (lower.includes('error') || lower.includes('authentication failed')) return '❌';
+    if (lower.includes('warn')) return '⚠️';
     // Configuration Required is not a failure or running state - it's complete but needs action
-    if (statusStr.includes('🆕') || statusStr.toLowerCase().includes('configuration required')) return '🆕';
+    if (statusStr.includes('🆕') || lower.includes('configuration required')) return '🆕';
+    if (lower.includes('success') || lower.includes('verified') || lower.includes('passed')) return '✅';
     // Only show hourglass for things that are actually in progress
-    if (statusStr.includes('⏳') || statusStr.toLowerCase().includes('running') || statusStr.toLowerCase().includes('verifying')) return '⏳';
+    if (lower.includes('running') || lower.includes('verifying') || lower.includes('in progress')) return '⏳';
     // Default for completed tasks without explicit status
     return '📄';
   };

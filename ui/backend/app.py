@@ -4098,17 +4098,23 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         playbook_path = os.path.join(project_root, playbook)
 
-        # For deletion playbooks, start a sidecar file tailer for real-time agent monitoring.
-        # Ansible shell wait loops buffer stdout, but they also write to a sidecar log file
-        # via tee. This thread tails that file and feeds lines to the agent immediately.
+        # For deletion and provisioning playbooks, start a sidecar file tailer for real-time
+        # agent monitoring. Ansible shell wait loops buffer stdout, but they also write to a
+        # sidecar log file via tee. This thread tails that file and feeds lines to the agent.
         is_deletion = "delete" in playbook.lower()
+        is_provisioning = "create" in playbook.lower() or "provision" in playbook.lower()
+        use_sidecar = is_deletion or is_provisioning
         sidecar_stop = threading.Event()
         sidecar_thread = None
         agent_lock = threading.Lock()  # Guard process_line from concurrent sidecar + stdout access
 
-        if is_deletion:
-            cluster_name = extra_vars.get("cluster_name", extra_vars.get("clusterName", ""))
-            sidecar_logfile = f"/tmp/deletion-agent-{cluster_name}.log"
+        if use_sidecar:
+            cluster_name = extra_vars.get("cluster_name", extra_vars.get("clusterName", extra_vars.get("name_prefix", "")))
+            if cluster_name and not cluster_name.endswith("-rosa-hcp") and is_provisioning:
+                sidecar_cluster = f"{cluster_name}-rosa-hcp"
+            else:
+                sidecar_cluster = cluster_name
+            sidecar_logfile = f"/tmp/{'deletion' if is_deletion else 'provision'}-agent-{sidecar_cluster}.log"
 
             def _tail_sidecar():
                 """Tail the sidecar log file and feed lines to the AI agent in real-time."""

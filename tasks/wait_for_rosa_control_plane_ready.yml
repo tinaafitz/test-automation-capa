@@ -1,31 +1,94 @@
-- name: Wait for ROSA Control Plane status to be ready
-  shell: oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace | default('ns-rosa-hcp') }} -o json | jq -r '.status.ready'
+- name: Wait for ROSA Control Plane status to be ready (sidecar-logged)
+  shell: |
+    LOGFILE="{{ agent_sidecar_log | default('/tmp/provision-agent-' + cluster_name + '.log') }}"
+    CLUSTER="{{ cluster_name }}"
+    NAMESPACE="{{ capi_namespace | default('ns-rosa-hcp') }}"
+    RETRIES="{{ 75 if retry_count is undefined else retry_count|int }}"
+    DELAY="{{ 30 if delay is undefined else delay|int }}"
+    TIMEOUT=$((RETRIES * DELAY))
+    START_TIME=$(date +%s)
+
+    echo "#AGENT_CONTEXT: resource_name=${CLUSTER} namespace=${NAMESPACE} resource_type=rosacontrolplane" | tee -a "$LOGFILE"
+    echo "Waiting for ROSAControlPlane ${CLUSTER} in namespace ${NAMESPACE} to be Ready..." | tee -a "$LOGFILE"
+
+    while true; do
+      CURRENT_TIME=$(date +%s)
+      ELAPSED=$((CURRENT_TIME - START_TIME))
+
+      if [ $ELAPSED -gt $TIMEOUT ]; then
+        echo "ERROR: Timeout after ${TIMEOUT} seconds waiting for ROSAControlPlane to be Ready" | tee -a "$LOGFILE"
+        # Get conditions for error details
+        CONDITIONS=$(oc get rosacontrolplane "${CLUSTER}" -n "${NAMESPACE}" \
+          -o jsonpath='{range .status.conditions[*]}{.type}: {.status} - {.message}{"\n"}{end}' 2>/dev/null || echo "No conditions available")
+        echo "Current conditions:" | tee -a "$LOGFILE"
+        echo "$CONDITIONS" | tee -a "$LOGFILE"
+        exit 1
+      fi
+
+      # Check if ready
+      READY=$(oc get rosacontrolplane "${CLUSTER}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.status.ready // false')
+
+      if [ "$READY" = "true" ]; then
+        echo "ROSAControlPlane ${CLUSTER} is Ready after ${ELAPSED} seconds" | tee -a "$LOGFILE"
+        exit 0
+      else
+        # Get current status for logging
+        RCP_REASON=$(oc get rosacontrolplane "${CLUSTER}" -n "${NAMESPACE}" \
+          -o jsonpath='{.status.conditions[?(@.type=="ROSAControlPlaneReady")].reason}' 2>/dev/null || echo "Unknown")
+        RCP_MSG=$(oc get rosacontrolplane "${CLUSTER}" -n "${NAMESPACE}" \
+          -o jsonpath='{.status.conditions[?(@.type=="ROSAControlPlaneReady")].message}' 2>/dev/null || echo "")
+        echo "FAILED - RETRYING: [localhost]: Wait for rosacontrolplane ${CLUSTER} to be ready. Reason: ${RCP_REASON} (${ELAPSED}s elapsed, $((TIMEOUT - ELAPSED))s remaining)." | tee -a "$LOGFILE"
+        if [ -n "$RCP_MSG" ] && [ "$RCP_MSG" != "" ]; then
+          echo "  Message: ${RCP_MSG}" | tee -a "$LOGFILE"
+        fi
+        sleep "$DELAY"
+      fi
+    done
+  args:
+    executable: /bin/bash
   register: rcp_status
-  until: rcp_status.stdout | bool
-  retries: "{{ 75 if retry_count is undefined else retry_count|int }}"
-  delay: "{{ 30 if delay is undefined else delay|int }}"
   ignore_errors: true
 
-- name: Display wait timeout warning if cluster not ready
+- name: Check ROSA Control Plane error conditions
+  shell: >
+    oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace | default('ns-rosa-hcp') }}
+    -o jsonpath='{range .status.conditions[*]}{.type}: {.status} - {.message}{"\n"}{end}'
+  register: rcp_conditions
+  when: rcp_status.rc != 0
+  ignore_errors: true
+
+- name: Display control plane error details
   debug:
     msg: |
-      ⚠️  WARNING: ROSA HCP cluster did not become ready within the timeout period.
+      ROSA Control Plane is NOT ready. Error details:
 
-      This may be normal if:
-      - Cluster provisioning takes longer than expected
-      - AWS is experiencing delays
+      {{ rcp_conditions.stdout | default('No condition details available') }}
+
+      {% if 'not authorized to access AWS Account' in (rcp_conditions.stdout | default('')) or 'CLUSTERS-MGMT-403' in (rcp_conditions.stdout | default('')) %}
+      ROOT CAUSE: OCM role is not linked to the AWS account.
+
+      To fix this:
+        1. Check existing roles: aws iam list-roles --query 'Roles[?contains(RoleName, `OCM-Role`)]'
+        2. If no role exists: rosa create ocm-role --admin --mode auto --yes
+        3. If role exists but unlinked: rosa link ocm-role --role-arn <role-arn>
+      {% endif %}
 
       Check cluster status manually:
       oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace | default('ns-rosa-hcp') }}
       oc describe rosacontrolplane {{ cluster_name }} -n {{ capi_namespace | default('ns-rosa-hcp') }}
-  when: not (rcp_status.stdout | bool)
+  when: rcp_status.rc != 0
+
+- name: Fail if control plane not ready
+  fail:
+    msg: "ROSAControlPlane {{ cluster_name }} did not become ready within the timeout period."
+  when: rcp_status.rc != 0
 
 - name: Print the ROSA control plane is ready
   debug:
     msg: |
-      ✅ ROSA HCP Control Plane is READY!
+      ROSA HCP Control Plane is READY!
 
       Cluster: {{ cluster_name }}
       Namespace: {{ capi_namespace | default('ns-rosa-hcp') }}
       Status: Running and available
-  when: rcp_status.stdout | bool
+  when: rcp_status.rc == 0
