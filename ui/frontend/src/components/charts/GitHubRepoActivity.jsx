@@ -2,14 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import { buildApiUrl } from '../../config/api';
 
-// Module-level cache survives component unmount/remount
-let _cache = { repos: [], lastUpdated: null };
+// Persistent cache survives page refresh via sessionStorage
+const _loadCache = () => {
+  try {
+    const c = JSON.parse(sessionStorage.getItem('github-activity-cache'));
+    return c && c.repos?.length ? c : { repos: [], lastUpdated: null };
+  } catch { return { repos: [], lastUpdated: null }; }
+};
+let _cache = _loadCache();
 
 const GitHubRepoActivity = () => {
   const [repos, setRepos] = useState(_cache.repos);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(_cache.lastUpdated);
+  const [lastUpdated, setLastUpdated] = useState(_cache.lastUpdated ? new Date(_cache.lastUpdated) : null);
 
   const fetchRepoActivity = async () => {
     setLoading(true);
@@ -23,6 +29,7 @@ const GitHubRepoActivity = () => {
         setLastUpdated(new Date());
         _cache.repos = data.repos;
         _cache.lastUpdated = new Date();
+        try { sessionStorage.setItem('github-activity-cache', JSON.stringify(_cache)); } catch {}
       } else {
         throw new Error(data.message || 'Failed to fetch GitHub repo activity');
       }
