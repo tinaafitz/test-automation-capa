@@ -4,6 +4,7 @@ import MainDashboard from './pages/MainDashboard';
 import CAPADashboard from './pages/CAPADashboard';
 import MinikubeDashboard from './pages/MinikubeDashboard';
 import AWSUsageDashboard from './pages/AWSUsageDashboard';
+import PresentationMode from './pages/PresentationMode';
 import { AppProvider } from './store/AppContext';
 import ToastNotifications from './components/ToastNotifications';
 
@@ -18,6 +19,7 @@ function App() {
             <Route path="/mce" element={<CAPADashboard />} />
             <Route path="/minikube" element={<MinikubeDashboard />} />
             <Route path="/aws-usage" element={<AWSUsageDashboard />} />
+            <Route path="/tour" element={<PresentationMode />} />
           </Routes>
         </div>
       </Router>

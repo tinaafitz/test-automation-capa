@@ -20,7 +20,7 @@
 
   - name: Remove existing entries for components being updated
     shell: |
-      echo '{{ current_components.stdout }}' | jq -c 'map(select([.name] | inside({{ component_names | to_json }}) | not))'
+      echo '{{ current_components.stdout }}' | jq -c 'map(select(.name | IN({{ component_names | to_json }}[]) | not))'
     register: filtered_components
 
   - name: Build new components array with updated values

@@ -40,6 +40,29 @@
       ]
     },
     {
+      "type": "ocm_role_not_linked",
+      "pattern": "(?i)(?:not authorized to access AWS Account|rosa create ocm-role|CLUSTERS-MGMT-403)",
+      "severity": "critical",
+      "auto_fix": false,
+      "description": "OCM role is not linked to the AWS account. The ROSA organization cannot create or manage clusters in this AWS account.",
+      "symptoms": [
+        "ROSAControlPlane stuck with 403 error",
+        "CLUSTERS-MGMT-403 in control plane status",
+        "Organization not authorized to access AWS Account"
+      ],
+      "common_causes": [
+        "OCM role was deleted from AWS but still referenced in OCM",
+        "OCM role was never created for this AWS account",
+        "OCM role was unlinked from the organization"
+      ],
+      "resolution_steps": [
+        "1. Check if an OCM role exists: aws iam list-roles --query 'Roles[?contains(RoleName, `OCM-Role`)]'",
+        "2. If the role exists but is unlinked: rosa link ocm-role --role-arn <role-arn>",
+        "3. If the role doesn't exist: rosa unlink ocm-role (to clear stale reference), then rosa create ocm-role --admin --mode auto --yes",
+        "4. IMPORTANT: Never delete or modify roles with 'mv' prefix — those belong to other developers"
+      ]
+    },
+    {
       "type": "capi_not_installed",
       "pattern": ".*(capi|cluster.*api).*(not found|does not exist|no.*running).*",
       "severity": "high",
