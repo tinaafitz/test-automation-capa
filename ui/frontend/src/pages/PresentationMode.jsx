@@ -120,6 +120,7 @@ const workflowScreenshots = [
   { src: '/screenshots/mce-wf-running-verify.png', label: '7. Step 1 Running', description: 'Verify step executes with live Ansible output streaming below' },
   { src: '/screenshots/mce-wf-running-configure.png', label: '8. Step 2 Running', description: 'Configure step runs after Verify completes — creating credentials, secrets, and AWSClusterControllerIdentity' },
   { src: '/screenshots/mce-wf-running-provision.png', label: '9. Step 3 Running', description: 'Provisioning step kicks off — applying cluster YAML and monitoring progress' },
+  { src: '/screenshots/mce-wf-complete.png', label: '10. Workflow Complete', description: 'All three steps completed successfully — cluster is fully provisioned and running' },
 ];
 
 const ScreenshotCarousel = () => {
