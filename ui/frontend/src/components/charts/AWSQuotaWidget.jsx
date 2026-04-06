@@ -2,15 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import { buildApiUrl } from '../../config/api';
 
-// Module-level cache survives component unmount/remount
-let _cache = { usage: null, config: [], lastUpdated: null };
+// Persistent cache survives page refresh via sessionStorage
+const _loadCache = () => {
+  try {
+    const c = JSON.parse(sessionStorage.getItem('aws-quota-cache'));
+    return c && c.usage ? c : { usage: null, config: [], lastUpdated: null };
+  } catch { return { usage: null, config: [], lastUpdated: null }; }
+};
+let _cache = _loadCache();
 
 const AWSQuotaWidget = () => {
   const [usage, setUsage] = useState(_cache.usage);
   const [config, setConfig] = useState(_cache.config);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(_cache.lastUpdated);
+  const [lastUpdated, setLastUpdated] = useState(_cache.lastUpdated ? new Date(_cache.lastUpdated) : null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -35,6 +41,7 @@ const AWSQuotaWidget = () => {
         setConfig(merged);
         _cache.config = merged;
       }
+      try { sessionStorage.setItem('aws-quota-cache', JSON.stringify(_cache)); } catch {}
     } catch (err) {
       setError('Failed to load AWS data');
     } finally {

@@ -10,8 +10,14 @@ import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import NotificationSettingsInline from '../components/NotificationSettingsInline';
 import AWSUsageDashboard from './AWSUsageDashboard';
 
-// Module-level cache survives component unmount/remount
-let _clustersCache = { clusters: [], lastFetched: null };
+// Persistent cache survives page refresh via sessionStorage
+const _loadClustersCache = () => {
+  try {
+    const c = JSON.parse(sessionStorage.getItem('rosa-clusters-cache'));
+    return c && c.clusters?.length ? c : { clusters: [], lastFetched: null };
+  } catch { return { clusters: [], lastFetched: null }; }
+};
+let _clustersCache = _loadClustersCache();
 
 // Component to fetch and display clusters from both environments
 const CombinedRosaHcpClusters = ({ onRefresh }) => {
@@ -69,6 +75,7 @@ const CombinedRosaHcpClusters = ({ onRefresh }) => {
         setClusters(allClusters);
         _clustersCache.clusters = allClusters;
         _clustersCache.lastFetched = Date.now();
+        try { sessionStorage.setItem('rosa-clusters-cache', JSON.stringify(_clustersCache)); } catch {}
       } else {
         setClusters([]);
         _clustersCache.clusters = [];

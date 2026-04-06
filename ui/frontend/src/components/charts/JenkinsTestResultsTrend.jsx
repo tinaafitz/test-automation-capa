@@ -2,14 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import { buildApiUrl } from '../../config/api';
 
-// Module-level cache survives component unmount/remount
-let _cache = { trendData: [], lastUpdated: null };
+// Persistent cache survives page refresh via sessionStorage
+const _loadCache = () => {
+  try {
+    const c = JSON.parse(sessionStorage.getItem('jenkins-trend-cache'));
+    return c && c.trendData?.length ? c : { trendData: [], lastUpdated: null };
+  } catch { return { trendData: [], lastUpdated: null }; }
+};
+let _cache = _loadCache();
 
 const JenkinsTestResultsTrend = () => {
   const [trendData, setTrendData] = useState(_cache.trendData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(_cache.lastUpdated);
+  const [lastUpdated, setLastUpdated] = useState(_cache.lastUpdated ? new Date(_cache.lastUpdated) : null);
 
   const fetchTrendData = async () => {
     setLoading(true);
@@ -32,6 +38,7 @@ const JenkinsTestResultsTrend = () => {
         setLastUpdated(new Date());
         _cache.trendData = reversed;
         _cache.lastUpdated = new Date();
+        try { sessionStorage.setItem('jenkins-trend-cache', JSON.stringify(_cache)); } catch {}
       } else {
         throw new Error(data.message || 'Failed to fetch Jenkins test results');
       }
