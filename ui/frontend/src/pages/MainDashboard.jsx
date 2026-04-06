@@ -10,9 +10,12 @@ import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import NotificationSettingsInline from '../components/NotificationSettingsInline';
 import AWSUsageDashboard from './AWSUsageDashboard';
 
+// Module-level cache survives component unmount/remount
+let _clustersCache = { clusters: [], lastFetched: null };
+
 // Component to fetch and display clusters from both environments
 const CombinedRosaHcpClusters = ({ onRefresh }) => {
-  const [clusters, setClusters] = useState([]);
+  const [clusters, setClusters] = useState(_clustersCache.clusters);
   const [loading, setLoading] = useState(false);
   const [sortField, setSortField] = useState('created');
   const [sortDirection, setSortDirection] = useState('desc');
@@ -64,8 +67,11 @@ const CombinedRosaHcpClusters = ({ onRefresh }) => {
         });
 
         setClusters(allClusters);
+        _clustersCache.clusters = allClusters;
+        _clustersCache.lastFetched = Date.now();
       } else {
         setClusters([]);
+        _clustersCache.clusters = [];
       }
     } catch (err) {
       setError(err.message || 'Failed to load clusters');
@@ -148,7 +154,7 @@ const CombinedRosaHcpClusters = ({ onRefresh }) => {
           <p className="text-sm">Failed to load clusters</p>
           <p className="text-xs mt-2">{error}</p>
         </div>
-      ) : loading ? (
+      ) : loading && clusters.length === 0 ? (
         <div className="text-center py-8 text-gray-500 p-6">
           <ArrowPathIcon className="h-8 w-8 animate-spin mx-auto mb-2" />
           <p className="text-sm">Loading clusters...</p>
