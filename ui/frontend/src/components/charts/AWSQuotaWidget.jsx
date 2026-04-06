@@ -2,12 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import { buildApiUrl } from '../../config/api';
 
+// Module-level cache survives component unmount/remount
+let _cache = { usage: null, config: [], lastUpdated: null };
+
 const AWSQuotaWidget = () => {
-  const [usage, setUsage] = useState(null);
-  const [config, setConfig] = useState([]);
+  const [usage, setUsage] = useState(_cache.usage);
+  const [config, setConfig] = useState(_cache.config);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(_cache.lastUpdated);
 
   const fetchData = async () => {
     setLoading(true);
@@ -21,11 +24,16 @@ const AWSQuotaWidget = () => {
       const configData = await configRes.json();
 
       if (usageData.success) {
+        const ts = new Date(usageData.timestamp);
         setUsage(usageData.usage);
-        setLastUpdated(new Date(usageData.timestamp));
+        setLastUpdated(ts);
+        _cache.usage = usageData.usage;
+        _cache.lastUpdated = ts;
       }
       if (configData.success) {
-        setConfig([...(configData.billedResources || []), ...(configData.freeResources || [])]);
+        const merged = [...(configData.billedResources || []), ...(configData.freeResources || [])];
+        setConfig(merged);
+        _cache.config = merged;
       }
     } catch (err) {
       setError('Failed to load AWS data');
