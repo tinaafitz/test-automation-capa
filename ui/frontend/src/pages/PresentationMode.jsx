@@ -204,8 +204,8 @@ const slides = [
             <p className="text-sm text-gray-600">Track quota, usage trends, and resource costs across accounts in real time</p>
           </div>
           <div className="rounded-xl p-5 border-l-4 shadow-sm" style={{borderColor: '#1a8f53', backgroundColor: '#f0faf4'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#1a8f53'}}>Jenkins CI</div>
-            <p className="text-sm text-gray-600">Monitor job runs, test result trends, and build health at a glance</p>
+            <div className="text-2xl font-bold mb-2" style={{color: '#1a8f53'}}>GitHub + Jenkins</div>
+            <p className="text-sm text-gray-600">View repo activity, pull request status, and test result trends at a glance</p>
           </div>
           <div className="rounded-xl p-5 border-l-4 shadow-sm" style={{borderColor: '#d13212', backgroundColor: '#fef5f2'}}>
             <div className="text-2xl font-bold mb-2" style={{color: '#d13212'}}>Workflow Builder</div>
