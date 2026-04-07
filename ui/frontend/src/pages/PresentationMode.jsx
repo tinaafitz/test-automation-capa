@@ -528,7 +528,7 @@ const slides = [
   {
     id: 'test-coverage',
     title: 'Test Coverage & Code Quality',
-    subtitle: 'Nearly 600 automated tests across agents, backend, and frontend — plus real-world operational experience encoded directly into the framework',
+    subtitle: 'Over 1,000 automated tests across agents, backend, and frontend — plus real-world operational experience encoded directly into the framework',
     content: (
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Operational experience banner - top of page */}
@@ -552,7 +552,7 @@ const slides = [
 
         {/* Test coverage */}
         <div className="rounded-2xl p-5 text-center text-white" style={{background: 'linear-gradient(135deg, #1a8f53 0%, #15803d 50%, #232f3e 100%)'}}>
-          <p className="text-4xl font-bold mb-1">599 Automated Tests</p>
+          <p className="text-4xl font-bold mb-1">1,030 Automated Tests</p>
           <p className="text-base font-light opacity-90">
             Covering agents, backend API, and React components
           </p>
@@ -561,7 +561,7 @@ const slides = [
         {/* Coverage breakdown */}
         <div className="grid grid-cols-3 gap-5">
           <div className="rounded-xl p-5 border-2 text-center" style={{borderColor: '#8b5cf6', backgroundColor: '#f5f0ff'}}>
-            <div className="text-3xl font-bold mb-1" style={{color: '#8b5cf6'}}>164</div>
+            <div className="text-3xl font-bold mb-1" style={{color: '#8b5cf6'}}>197</div>
             <div className="text-sm font-semibold text-gray-900">Agent Tests</div>
             <div className="text-xs text-gray-500 mt-1">~90% coverage</div>
             <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
@@ -569,17 +569,17 @@ const slides = [
             </div>
           </div>
           <div className="rounded-xl p-5 border-2 text-center" style={{borderColor: '#ff9900', backgroundColor: '#fff8ee'}}>
-            <div className="text-3xl font-bold mb-1" style={{color: '#ff9900'}}>276</div>
+            <div className="text-3xl font-bold mb-1" style={{color: '#ff9900'}}>540</div>
             <div className="text-sm font-semibold text-gray-900">Backend Tests</div>
-            <div className="text-xs text-gray-500 mt-1">~55% coverage</div>
+            <div className="text-xs text-gray-500 mt-1">~74% coverage</div>
             <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
-              <div className="h-2 rounded-full" style={{width: '55%', backgroundColor: '#ff9900'}}></div>
+              <div className="h-2 rounded-full" style={{width: '74%', backgroundColor: '#ff9900'}}></div>
             </div>
           </div>
           <div className="rounded-xl p-5 border-2 text-center" style={{borderColor: '#527fff', backgroundColor: '#f0f4ff'}}>
-            <div className="text-3xl font-bold mb-1" style={{color: '#527fff'}}>159</div>
+            <div className="text-3xl font-bold mb-1" style={{color: '#527fff'}}>293</div>
             <div className="text-sm font-semibold text-gray-900">Frontend Tests</div>
-            <div className="text-xs text-gray-500 mt-1">14 test suites</div>
+            <div className="text-xs text-gray-500 mt-1">37 test suites</div>
             <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
               <div className="h-2 rounded-full" style={{width: '45%', backgroundColor: '#527fff'}}></div>
             </div>
