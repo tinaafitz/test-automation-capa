@@ -1,27 +1,31 @@
 ---
 # ================================================================
-# Upgrade ROSA HCP Control Plane Version
+# Upgrade ROSA HCP Machine Pool Version
 # ================================================================
-# This playbook upgrades a ROSA HCP cluster's control plane to
-# the next available OpenShift version via the ROSAControlPlane
+# This playbook upgrades a ROSA HCP cluster's machine pool to
+# the next available OpenShift version via the ROSAMachinePool
 # spec.version patch.
+#
+# IMPORTANT: The machine pool version cannot exceed the control
+# plane version. Upgrade the control plane first.
 #
 # Usage Examples:
 #
-# 1. Upgrade to the first available version (auto-detect):
-#    ansible-playbook upgrade_rosa_control_plane.yml \
+# 1. Upgrade default pool to first available version (auto-detect):
+#    ansible-playbook upgrade_rosa_machine_pool.yml \
 #      -e cluster_name=my-cluster
 #
-# 2. Upgrade to a specific version:
-#    ansible-playbook upgrade_rosa_control_plane.yml \
+# 2. Upgrade a specific pool to a specific version:
+#    ansible-playbook upgrade_rosa_machine_pool.yml \
 #      -e cluster_name=my-cluster \
+#      -e pool_name=worker-pool \
 #      -e requested_version=4.20.14
 #
 # 3. Via UI (Workflow Builder):
 #    All configuration options are passed as extra_vars
 # ================================================================
 
-- name: Upgrade ROSA HCP Control Plane
+- name: Upgrade ROSA HCP Machine Pool
   hosts: localhost
   connection: local
   any_errors_fatal: true
@@ -54,50 +58,83 @@
         msg: "cluster_name is required. Usage: -e cluster_name=my-cluster"
       when: cluster_name is not defined or cluster_name == ""
 
-    - name: Get ROSAControlPlane resource
+    - name: Discover machine pool name
       shell: |
-        oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} -o json
-      register: rcp_resource
-      failed_when: rcp_resource.rc != 0
+        oc get rosamachinepool -n {{ capi_namespace }} \
+          -l cluster.x-k8s.io/cluster-name={{ cluster_name }} \
+          -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ""
+      register: discovered_pool
+      when: pool_name is not defined or pool_name == ""
 
-    - name: Parse ROSAControlPlane details
+    - name: Set pool name from discovery or parameter
       set_fact:
-        rcp_data: "{{ rcp_resource.stdout | from_json }}"
+        pool_name: "{{ pool_name | default(discovered_pool.stdout | default('')) }}"
+
+    - name: Validate pool_name is set
+      fail:
+        msg: |
+          Could not determine machine pool name.
+          Either pass -e pool_name=<name> or ensure the cluster has a ROSAMachinePool
+          with label cluster.x-k8s.io/cluster-name={{ cluster_name }}
+      when: pool_name == ""
+
+    - name: Get ROSAMachinePool resource
+      shell: |
+        oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} -o json
+      register: rmp_resource
+      failed_when: rmp_resource.rc != 0
+
+    - name: Parse ROSAMachinePool details
+      set_fact:
+        rmp_data: "{{ rmp_resource.stdout | from_json }}"
 
     - name: Get current version
       set_fact:
-        current_version: "{{ rcp_data.spec.version }}"
-        available_upgrades: "{{ rcp_data.status.availableUpgrades | default([]) }}"
-        cluster_ready: "{{ rcp_data.status.ready | default(false) }}"
+        current_version: "{{ rmp_data.spec.version }}"
+        available_upgrades: "{{ rmp_data.status.availableUpgrades | default([]) }}"
+        pool_ready: "{{ rmp_data.status.ready | default(false) }}"
 
-    - name: Validate cluster is ready
+    - name: Validate pool is ready
       fail:
         msg: |
-          Cluster {{ cluster_name }} is not in ready state.
-          Current status: ready={{ cluster_ready }}
-          The cluster must be fully provisioned before upgrading.
-      when: not cluster_ready | bool
+          Machine pool {{ pool_name }} is not in ready state.
+          Current status: ready={{ pool_ready }}
+          The machine pool must be fully provisioned before upgrading.
+      when: not pool_ready | bool
+
+    - name: Get control plane version
+      shell: |
+        oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
+          -o jsonpath='{.spec.version}' 2>/dev/null || echo "unknown"
+      register: cp_version_result
+
+    - name: Set control plane version
+      set_fact:
+        control_plane_version: "{{ cp_version_result.stdout }}"
 
     - name: Display current state
       debug:
         msg: |
           ╔═══════════════════════════════════════════════════════════════╗
-          ║       ROSA HCP Control Plane Upgrade                         ║
+          ║       ROSA HCP Machine Pool Upgrade                         ║
           ╚═══════════════════════════════════════════════════════════════╝
 
           Cluster: {{ cluster_name }}
+          Machine Pool: {{ pool_name }}
           Namespace: {{ capi_namespace }}
-          Current Version: {{ current_version }}
+          Current Pool Version: {{ current_version }}
+          Control Plane Version: {{ control_plane_version }}
           Available Upgrades: {{ available_upgrades | join(', ') if available_upgrades | length > 0 else 'None' }}
 
     - name: Validate available upgrades exist
       fail:
         msg: |
-          No available upgrades for cluster {{ cluster_name }}.
+          No available upgrades for machine pool {{ pool_name }}.
           Current version: {{ current_version }}
-          The cluster is already at the latest version or upgrade paths
+          Control plane version: {{ control_plane_version }}
+          The machine pool is already at the latest version or upgrade paths
           have not been populated yet. Check:
-            oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} -o jsonpath='{.status.availableUpgrades}'
+            oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} -o jsonpath='{.status.availableUpgrades}'
       when: available_upgrades | length == 0
 
     - name: Set requested version (auto-detect first available)
@@ -115,14 +152,16 @@
     - name: Display upgrade plan
       debug:
         msg: |
-          Upgrading ROSAControlPlane:
+          Upgrading ROSAMachinePool:
           • Cluster: {{ cluster_name }}
+          • Pool: {{ pool_name }}
           • From: {{ current_version }}
           • To:   {{ requested_version }}
+          • Control Plane: {{ control_plane_version }}
 
-    - name: Patch ROSAControlPlane with new version
+    - name: Patch ROSAMachinePool with new version
       shell: |
-        oc patch rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
+        oc patch rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
           --type=merge \
           -p '{"spec": {"version": "{{ requested_version }}"}}'
       register: patch_result
@@ -138,7 +177,7 @@
 
     - name: Wait for upgrade to begin
       shell: |
-        oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
+        oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
           -o jsonpath='{.status.ready}'
       register: upgrade_status
       until: upgrade_status.stdout == "false" or upgrade_status.stdout == "true"
@@ -147,19 +186,21 @@
       failed_when: false
       changed_when: false
 
-    - name: Wait for ROSAControlPlane upgrade to complete
+    - name: Wait for ROSAMachinePool upgrade to complete
       shell: |
-        STATUS_VERSION=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
+        STATUS_VERSION=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
           -o jsonpath='{.status.version}' 2>/dev/null || echo "unknown")
-        READY=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
+        READY=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
           -o jsonpath='{.status.ready}' 2>/dev/null || echo "false")
-        UPGRADE_STATE=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
-          -o jsonpath='{.status.conditions[?(@.type=="ROSAControlPlaneUpgrading")].reason}' 2>/dev/null || echo "unknown")
+        REPLICAS=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
+          -o jsonpath='{.status.replicas}' 2>/dev/null || echo "0")
+        READY_REPLICAS=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
+          -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
         ELAPSED=$(( $(date +%s) - {{ patch_epoch }} ))
         MINS=$((ELAPSED / 60))
         SECS=$((ELAPSED % 60))
-        echo "[${MINS}m${SECS}s] Upgrade progress: version=${STATUS_VERSION} ready=${READY} state=${UPGRADE_STATE}" >&2
-        echo "${STATUS_VERSION}|${READY}|${UPGRADE_STATE}"
+        echo "[${MINS}m${SECS}s] Upgrade progress: version=${STATUS_VERSION} ready=${READY} replicas=${READY_REPLICAS}/${REPLICAS}" >&2
+        echo "${STATUS_VERSION}|${READY}|${REPLICAS}|${READY_REPLICAS}"
       register: upgrade_check
       until: >
         upgrade_check.stdout is defined and
@@ -174,17 +215,21 @@
       set_fact:
         final_version: "{{ upgrade_check.stdout.split('|')[0] | default('unknown') }}"
         final_ready: "{{ upgrade_check.stdout.split('|')[1] | default('false') }}"
+        final_replicas: "{{ upgrade_check.stdout.split('|')[2] | default('0') }}"
+        final_ready_replicas: "{{ upgrade_check.stdout.split('|')[3] | default('0') }}"
 
     - name: Verify upgrade completed successfully
       fail:
         msg: |
-          ROSAControlPlane upgrade did not complete within 60 minutes.
+          ROSAMachinePool upgrade did not complete within 60 minutes.
+          Pool: {{ pool_name }}
           status.version: {{ final_version }}
           Ready: {{ final_ready }}
+          Replicas: {{ final_replicas }} ({{ final_ready_replicas }} ready)
           Expected version: {{ requested_version }}
 
           Check upgrade status:
-            oc describe rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }}
+            oc describe rosamachinepool {{ pool_name }} -n {{ capi_namespace }}
       when: final_version != requested_version or final_ready != "true"
 
     - name: Calculate total upgrade time
@@ -195,14 +240,16 @@
       debug:
         msg: |
           ╔═══════════════════════════════════════════════════════════════╗
-          ║       ✅  UPGRADE COMPLETE!                                   ║
+          ║       ✅  MACHINE POOL UPGRADE COMPLETE!                     ║
           ╚═══════════════════════════════════════════════════════════════╝
 
           Cluster: {{ cluster_name }}
+          Machine Pool: {{ pool_name }}
           Previous Version: {{ current_version }}
           New Version: {{ requested_version }}
+          Replicas: {{ final_replicas }} ({{ final_ready_replicas }} ready)
           Status: Ready
           Total Upgrade Time: {{ (total_seconds | int // 60) }}m {{ (total_seconds | int % 60) }}s
 
           Verify:
-            oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }}
+            oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }}
