@@ -543,12 +543,9 @@ const WorkflowBuilder = () => {
     return matchesSearch && matchesCategory;
   });
 
-  const groupedPlaybooks = filteredPlaybooks.reduce((groups, suite) => {
-    const cat = categorizePlaybook(suite);
-    if (!groups[cat]) groups[cat] = [];
-    groups[cat].push(suite);
-    return groups;
-  }, {});
+  const sortedPlaybooks = [...filteredPlaybooks].sort((a, b) =>
+    (a.name || '').localeCompare(b.name || '')
+  );
 
   // ---- Add step to workflow ----
   const addStep = useCallback((suite) => {
@@ -1008,25 +1005,18 @@ const WorkflowBuilder = () => {
               <ArrowPathIcon className="h-6 w-6 text-gray-400 mx-auto animate-spin" />
               <p className="text-xs text-gray-500 mt-2">Loading...</p>
             </div>
-          ) : Object.keys(groupedPlaybooks).length === 0 ? (
+          ) : sortedPlaybooks.length === 0 ? (
             <p className="text-xs text-gray-500 text-center py-4">No playbooks found</p>
           ) : (
-            Object.entries(groupedPlaybooks).map(([category, suites]) => (
-              <div key={category}>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                  {category} ({suites.length})
-                </h4>
-                <div className="space-y-1.5">
-                  {suites.map((suite) => (
-                    <PlaybookPaletteItem
-                      key={suite.name}
-                      suite={suite}
-                      onAdd={addStep}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))
+            <div className="space-y-1.5">
+              {sortedPlaybooks.map((suite) => (
+                <PlaybookPaletteItem
+                  key={suite.name}
+                  suite={suite}
+                  onAdd={addStep}
+                />
+              ))}
+            </div>
           )}
         </div>
       </div>
