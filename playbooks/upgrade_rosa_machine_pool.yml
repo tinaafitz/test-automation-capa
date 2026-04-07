@@ -188,24 +188,29 @@
 
     - name: Wait for ROSAMachinePool upgrade to complete
       shell: |
-        STATUS_VERSION=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
-          -o jsonpath='{.status.version}' 2>/dev/null || echo "unknown")
+        SPEC_VERSION=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
+          -o jsonpath='{.spec.version}' 2>/dev/null || echo "unknown")
         READY=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
           -o jsonpath='{.status.ready}' 2>/dev/null || echo "false")
         REPLICAS=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
           -o jsonpath='{.status.replicas}' 2>/dev/null || echo "0")
         READY_REPLICAS=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
           -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+        UPGRADE_STATE=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
+          -o jsonpath='{.status.conditions[?(@.type=="RosaMachinePoolUpgrading")].reason}' 2>/dev/null || echo "unknown")
+        UPGRADING=$(oc get rosamachinepool {{ pool_name }} -n {{ capi_namespace }} \
+          -o jsonpath='{.status.conditions[?(@.type=="RosaMachinePoolUpgrading")].status}' 2>/dev/null || echo "True")
         ELAPSED=$(( $(date +%s) - {{ patch_epoch }} ))
         MINS=$((ELAPSED / 60))
         SECS=$((ELAPSED % 60))
-        echo "[${MINS}m${SECS}s] Upgrade progress: version=${STATUS_VERSION} ready=${READY} replicas=${READY_REPLICAS}/${REPLICAS}" >&2
-        echo "${STATUS_VERSION}|${READY}|${REPLICAS}|${READY_REPLICAS}"
+        echo "[${MINS}m${SECS}s] Upgrade progress: ready=${READY} replicas=${READY_REPLICAS}/${REPLICAS} state=${UPGRADE_STATE}" >&2
+        echo "${UPGRADE_STATE}|${UPGRADING}|${READY}|${REPLICAS}|${READY_REPLICAS}"
       register: upgrade_check
       until: >
         upgrade_check.stdout is defined and
-        upgrade_check.stdout.split('|')[0] == requested_version and
-        upgrade_check.stdout.split('|')[1] == 'true'
+        upgrade_check.stdout.split('|')[0] == 'upgraded' and
+        upgrade_check.stdout.split('|')[1] == 'False' and
+        upgrade_check.stdout.split('|')[2] == 'true'
       retries: 120
       delay: 30
       failed_when: false
@@ -213,24 +218,25 @@
 
     - name: Parse final upgrade status
       set_fact:
-        final_version: "{{ upgrade_check.stdout.split('|')[0] | default('unknown') }}"
-        final_ready: "{{ upgrade_check.stdout.split('|')[1] | default('false') }}"
-        final_replicas: "{{ upgrade_check.stdout.split('|')[2] | default('0') }}"
-        final_ready_replicas: "{{ upgrade_check.stdout.split('|')[3] | default('0') }}"
+        final_state: "{{ upgrade_check.stdout.split('|')[0] | default('unknown') }}"
+        final_upgrading: "{{ upgrade_check.stdout.split('|')[1] | default('True') }}"
+        final_ready: "{{ upgrade_check.stdout.split('|')[2] | default('false') }}"
+        final_replicas: "{{ upgrade_check.stdout.split('|')[3] | default('0') }}"
+        final_ready_replicas: "{{ upgrade_check.stdout.split('|')[4] | default('0') }}"
 
     - name: Verify upgrade completed successfully
       fail:
         msg: |
           ROSAMachinePool upgrade did not complete within 60 minutes.
           Pool: {{ pool_name }}
-          status.version: {{ final_version }}
+          Upgrade State: {{ final_state }}
           Ready: {{ final_ready }}
           Replicas: {{ final_replicas }} ({{ final_ready_replicas }} ready)
           Expected version: {{ requested_version }}
 
           Check upgrade status:
             oc describe rosamachinepool {{ pool_name }} -n {{ capi_namespace }}
-      when: final_version != requested_version or final_ready != "true"
+      when: final_state != "upgraded" or final_ready != "true"
 
     - name: Calculate total upgrade time
       set_fact:
