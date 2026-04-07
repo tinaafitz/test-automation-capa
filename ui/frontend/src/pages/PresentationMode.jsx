@@ -524,6 +524,71 @@ const slides = [
     ),
   },
 
+  // Slide: Test Coverage & Code Quality
+  {
+    id: 'test-coverage',
+    title: 'Test Coverage & Code Quality',
+    subtitle: 'Nearly 600 automated tests across agents, backend, and frontend — plus real-world operational experience encoded directly into the framework',
+    content: (
+      <div className="max-w-5xl mx-auto space-y-8">
+        {/* Operational experience banner - top of page */}
+        <div className="rounded-2xl p-6 text-white" style={{background: 'linear-gradient(135deg, #232f3e 0%, #37475a 40%, #527fff 100%)'}}>
+          <h3 className="text-2xl font-bold mb-3">Operational Experience Built Into the Framework</h3>
+          <p className="text-base font-light leading-relaxed opacity-95">
+            This framework was designed and built from hands-on experience &mdash; not just the AI agents, but the entire UI structure, feature set, and workflow design. Every dashboard layout, every sidebar grouping, every workflow step reflects how a QE engineer actually works with ROSA HCP clusters. The failure patterns, remediation strategies, and confidence thresholds were all discovered through real debugging and encoded into the framework to automate what used to require manual investigation and intervention.
+          </p>
+        </div>
+
+        {/* Full-width UI design card */}
+        <div className="rounded-xl p-5 border-2" style={{backgroundColor: '#f0f4ff', borderColor: '#527fff'}}>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-lg">🎨</span>
+            <span className="text-sm font-bold text-gray-900">UI and Features Designed Around Real Workflows</span>
+          </div>
+          <p className="text-sm text-gray-600">
+            The entire UI structure &mdash; separate MCE and Minikube environments, credential flow into playbooks, the workflow builder chaining verify-configure-provision-test-delete, live log streaming with agent panels, one-click operations &mdash; was designed around how a QE engineer actually works day-to-day. The framework was taught how to behave through iterative building, testing, and refinement.
+          </p>
+        </div>
+
+        {/* Test coverage */}
+        <div className="rounded-2xl p-5 text-center text-white" style={{background: 'linear-gradient(135deg, #1a8f53 0%, #15803d 50%, #232f3e 100%)'}}>
+          <p className="text-4xl font-bold mb-1">599 Automated Tests</p>
+          <p className="text-base font-light opacity-90">
+            Covering agents, backend API, and React components
+          </p>
+        </div>
+
+        {/* Coverage breakdown */}
+        <div className="grid grid-cols-3 gap-5">
+          <div className="rounded-xl p-5 border-2 text-center" style={{borderColor: '#8b5cf6', backgroundColor: '#f5f0ff'}}>
+            <div className="text-3xl font-bold mb-1" style={{color: '#8b5cf6'}}>164</div>
+            <div className="text-sm font-semibold text-gray-900">Agent Tests</div>
+            <div className="text-xs text-gray-500 mt-1">~90% coverage</div>
+            <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+              <div className="h-2 rounded-full" style={{width: '90%', backgroundColor: '#8b5cf6'}}></div>
+            </div>
+          </div>
+          <div className="rounded-xl p-5 border-2 text-center" style={{borderColor: '#ff9900', backgroundColor: '#fff8ee'}}>
+            <div className="text-3xl font-bold mb-1" style={{color: '#ff9900'}}>276</div>
+            <div className="text-sm font-semibold text-gray-900">Backend Tests</div>
+            <div className="text-xs text-gray-500 mt-1">~55% coverage</div>
+            <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+              <div className="h-2 rounded-full" style={{width: '55%', backgroundColor: '#ff9900'}}></div>
+            </div>
+          </div>
+          <div className="rounded-xl p-5 border-2 text-center" style={{borderColor: '#527fff', backgroundColor: '#f0f4ff'}}>
+            <div className="text-3xl font-bold mb-1" style={{color: '#527fff'}}>159</div>
+            <div className="text-sm font-semibold text-gray-900">Frontend Tests</div>
+            <div className="text-xs text-gray-500 mt-1">14 test suites</div>
+            <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+              <div className="h-2 rounded-full" style={{width: '45%', backgroundColor: '#527fff'}}></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    ),
+  },
+
   // Slide: At a Glance Dashboard
   {
     id: 'at-a-glance',
