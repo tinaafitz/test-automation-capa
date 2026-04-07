@@ -1,5 +1,5 @@
 {
-  "name": "ROSA HCP Machine Pool Upgrade",
+  "name": "Upgrade ROSA HCP Machine Pool",
   "description": "Upgrade a ROSA HCP cluster machine pool to the next available OpenShift version via ROSAMachinePool spec.version patch",
   "version": "1.0.0",
   "tags": ["rosa", "hcp", "upgrade", "machine-pool"],
