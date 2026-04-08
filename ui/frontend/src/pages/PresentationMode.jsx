@@ -174,10 +174,10 @@ const slides = [
   // Slide 1: Intro
   {
     id: 'intro',
-    title: 'Welcome to the CAPA Automation Framework',
+    title: 'CAPA Automation Framework',
     subtitle: null,
     content: (
-      <div className="max-w-5xl mx-auto space-y-10">
+      <div className="max-w-5xl mx-auto space-y-6">
         {/* Hero banner */}
         <div className="rounded-2xl p-8 text-center text-white" style={{background: 'linear-gradient(135deg, #232f3e 0%, #37475a 40%, #527fff 100%)'}}>
           <p className="text-2xl leading-relaxed font-light">
@@ -193,31 +193,36 @@ const slides = [
           </p>
         </div>
 
+        {/* Keyboard hint */}
+        <div className="text-center">
+          <span className="text-xs text-gray-400">Use <kbd className="px-1.5 py-0.5 rounded border border-gray-300 bg-gray-100 text-gray-500 font-mono text-xs">&#x2190;</kbd> <kbd className="px-1.5 py-0.5 rounded border border-gray-300 bg-gray-100 text-gray-500 font-mono text-xs">&#x2192;</kbd> arrow keys to navigate &middot; <kbd className="px-1.5 py-0.5 rounded border border-gray-300 bg-gray-100 text-gray-500 font-mono text-xs">Esc</kbd> to exit</span>
+        </div>
+
         {/* Feature cards */}
         <div className="grid grid-cols-3 gap-5">
           <div className="rounded-xl p-5 border-l-4 shadow-sm" style={{borderColor: '#527fff', backgroundColor: '#f0f4ff'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#527fff'}}>MCE + Minikube</div>
+            <div className="flex items-center gap-2 text-2xl font-bold mb-2" style={{color: '#527fff'}}><span>&#x1F5A5;</span> MCE + Minikube</div>
             <p className="text-sm text-gray-600">Two environments &mdash; MCE for full OpenShift Hub testing, Minikube for fast local dev</p>
           </div>
           <div className="rounded-xl p-5 border-l-4 shadow-sm" style={{borderColor: '#ff9900', backgroundColor: '#fff8ee'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#ff9900'}}>AWS Monitoring</div>
+            <div className="flex items-center gap-2 text-2xl font-bold mb-2" style={{color: '#ff9900'}}><span>&#x2601;</span> AWS Monitoring</div>
             <p className="text-sm text-gray-600">Track quota, usage trends, and resource costs across accounts in real time</p>
           </div>
           <div className="rounded-xl p-5 border-l-4 shadow-sm" style={{borderColor: '#1a8f53', backgroundColor: '#f0faf4'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#1a8f53'}}>GitHub + Jenkins</div>
+            <div className="flex items-center gap-2 text-2xl font-bold mb-2" style={{color: '#1a8f53'}}><span>&#x1F4C8;</span> GitHub + Jenkins</div>
             <p className="text-sm text-gray-600">View repo activity, pull request status, and test result trends at a glance</p>
           </div>
           <div className="rounded-xl p-5 border-l-4 shadow-sm" style={{borderColor: '#d13212', backgroundColor: '#fef5f2'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#d13212'}}>Workflow Builder</div>
+            <div className="flex items-center gap-2 text-2xl font-bold mb-2" style={{color: '#d13212'}}><span>&#x2699;</span> Workflow Builder</div>
             <p className="text-sm text-gray-600">Drag-and-drop multi-step pipelines &mdash; chain verify, provision, test, and delete</p>
           </div>
           <div className="rounded-xl p-5 border-l-4 shadow-sm" style={{borderColor: '#8b5cf6', backgroundColor: '#f5f0ff'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#8b5cf6'}}>AI Agents</div>
+            <div className="flex items-center gap-2 text-2xl font-bold mb-2" style={{color: '#8b5cf6'}}><span>&#x1F916;</span> AI Agents</div>
             <p className="text-sm text-gray-600">Monitor, diagnose, remediate, and learn from failures &mdash; automatically</p>
           </div>
           <div className="rounded-xl p-5 border-l-4 shadow-sm" style={{borderColor: '#232f3e', backgroundColor: '#f4f5f7'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#232f3e'}}>And More...</div>
-            <p className="text-sm text-gray-600">Live log streaming, credential management, notifications, AI chat assistant</p>
+            <div className="flex items-center gap-2 text-2xl font-bold mb-2" style={{color: '#232f3e'}}><span>&#x1F514;</span> Notifications</div>
+            <p className="text-sm text-gray-600">Email and Slack alerts on provision, deletion, and failure events &mdash; with AI diagnostic summaries</p>
           </div>
         </div>
       </div>
@@ -233,11 +238,11 @@ const slides = [
       <div className="max-w-3xl mx-auto space-y-5">
         <div className="rounded-xl p-5 text-center text-white mb-2" style={{background: 'linear-gradient(135deg, #232f3e 0%, #527fff 100%)'}}>
           <p className="text-xl font-semibold">
-            Automate everything &mdash; and the framework learns from every run.
+            Every cluster operation &mdash; from provisioning to cleanup &mdash; is automated, monitored by AI, and improved from run to run.
           </p>
         </div>
         <div className="flex items-start gap-6 py-5 border-b border-gray-200">
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-bold text-lg" style={{backgroundColor: '#ff9900'}}>1</div>
+          <div className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl" style={{backgroundColor: '#fff8ee'}}>&#x1F4CA;</div>
           <div>
             <h3 className="text-xl font-bold text-gray-900">Full Visibility</h3>
             <p className="text-base text-gray-600 mt-1">
@@ -247,7 +252,7 @@ const slides = [
           </div>
         </div>
         <div className="flex items-start gap-6 py-5 border-b border-gray-200">
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-bold text-2xl" style={{backgroundColor: '#8b5cf6'}}>2</div>
+          <div className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl" style={{backgroundColor: '#f5f0ff'}}>&#x26A1;</div>
           <div>
             <h3 className="text-xl font-bold text-gray-900">One-Click Workflows</h3>
             <p className="text-base text-gray-600 mt-1">
@@ -257,7 +262,7 @@ const slides = [
           </div>
         </div>
         <div className="flex items-start gap-6 py-5 border-b border-gray-200">
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-bold text-lg" style={{backgroundColor: '#527fff'}}>3</div>
+          <div className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl" style={{backgroundColor: '#f0f4ff'}}>&#x1F916;</div>
           <div>
             <h3 className="text-xl font-bold text-gray-900">Automated Diagnostics</h3>
             <p className="text-base text-gray-600 mt-1">
@@ -267,7 +272,7 @@ const slides = [
           </div>
         </div>
         <div className="flex items-start gap-6 py-5">
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-bold text-lg" style={{backgroundColor: '#1a8f53'}}>4</div>
+          <div className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 text-2xl" style={{backgroundColor: '#f0faf4'}}>&#x1F9F9;</div>
           <div>
             <h3 className="text-xl font-bold text-gray-900">Automatic Resource Cleanup</h3>
             <p className="text-base text-gray-600 mt-1">
@@ -280,11 +285,195 @@ const slides = [
     ),
   },
 
-  // Slide 3: Claude API & AI Agents
+  // Slide: Architecture
+  {
+    id: 'architecture',
+    title: 'Architecture',
+    subtitle: 'Three layers working together to automate the full cluster lifecycle',
+    content: (
+      <div className="max-w-5xl mx-auto space-y-5">
+        {/* Description */}
+        <p className="text-center text-sm text-gray-500">
+          Built with modern, production-ready technologies &mdash; each layer is independently testable and connects through well-defined APIs.
+        </p>
+
+        {/* Top layer - UI */}
+        <div className="rounded-xl p-5 shadow-md" style={{background: 'linear-gradient(135deg, #527fff 0%, #3b5ee6 100%)'}}>
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-white opacity-90">UI Layer</h3>
+            <span className="text-xs font-mono ml-auto text-white opacity-60">React + Tailwind CSS</span>
+          </div>
+          <div className="grid grid-cols-4 gap-3">
+            {['At a Glance Dashboard', 'MCE Environment', 'Minikube Environment', 'Workflow Builder'].map((item) => (
+              <div key={item} className="rounded-lg p-3 text-center text-sm font-medium shadow-sm" style={{color: '#527fff', backgroundColor: 'rgba(255,255,255,0.95)'}}>
+                {item}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Arrow down */}
+        <div className="flex flex-col items-center gap-1">
+          <div className="w-0.5 h-3" style={{backgroundColor: '#cbd5e1'}}></div>
+          <div className="flex items-center gap-2">
+            <div className="h-0.5 w-8" style={{backgroundColor: '#cbd5e1'}}></div>
+            <span className="text-xs font-mono px-3 py-1 rounded-full font-semibold" style={{color: '#475569', backgroundColor: '#e2e8f0'}}>REST API + WebSocket</span>
+            <div className="h-0.5 w-8" style={{backgroundColor: '#cbd5e1'}}></div>
+          </div>
+          <div style={{width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '8px solid #cbd5e1'}}></div>
+        </div>
+
+        {/* Middle layer - Backend */}
+        <div className="rounded-xl p-5 shadow-md" style={{background: 'linear-gradient(135deg, #ff9900 0%, #e88a00 100%)'}}>
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-white opacity-90">Backend Layer</h3>
+            <span className="text-xs font-mono ml-auto text-white opacity-60">Python + FastAPI + Ansible</span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { name: 'FastAPI Server', desc: 'Job management, credential handling' },
+              { name: 'Ansible Runner', desc: 'Playbook execution engine' },
+              { name: 'AI Agent Pipeline', desc: 'Monitor > Diagnose > Remediate > Learn' },
+            ].map((item) => (
+              <div key={item.name} className="rounded-lg p-3 shadow-sm" style={{backgroundColor: 'rgba(255,255,255,0.95)'}}>
+                <div className="text-sm font-medium" style={{color: '#232f3e'}}>{item.name}</div>
+                <div className="text-xs mt-1" style={{color: '#b45309'}}>{item.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Arrow down */}
+        <div className="flex flex-col items-center gap-1">
+          <div className="w-0.5 h-3" style={{backgroundColor: '#cbd5e1'}}></div>
+          <div className="flex items-center gap-2">
+            <div className="h-0.5 w-8" style={{backgroundColor: '#cbd5e1'}}></div>
+            <span className="text-xs font-mono px-3 py-1 rounded-full font-semibold" style={{color: '#475569', backgroundColor: '#e2e8f0'}}>kubectl + aws CLI + boto3</span>
+            <div className="h-0.5 w-8" style={{backgroundColor: '#cbd5e1'}}></div>
+          </div>
+          <div style={{width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '8px solid #cbd5e1'}}></div>
+        </div>
+
+        {/* Bottom layer - Infrastructure */}
+        <div className="rounded-xl p-5 shadow-md" style={{background: 'linear-gradient(135deg, #232f3e 0%, #37475a 100%)'}}>
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-white opacity-90">Infrastructure</h3>
+            <span className="text-xs font-mono ml-auto text-white opacity-60">AWS + OpenShift + Minikube</span>
+          </div>
+          <div className="grid grid-cols-4 gap-3">
+            {['OpenShift Hub Cluster', 'ROSA HCP Clusters', 'AWS (CF, VPC, IAM)', 'Minikube (local dev)'].map((item) => (
+              <div key={item} className="rounded-lg p-3 text-center text-sm font-medium shadow-sm" style={{color: '#232f3e', backgroundColor: 'rgba(255,255,255,0.95)'}}>
+                {item}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    ),
+  },
+
+  // Slide: Operational Experience
+  {
+    id: 'operational-experience',
+    title: 'Operational Experience Built Into the Framework',
+    subtitle: 'Built from real operational knowledge — not theory, not templates',
+    content: (
+      <div className="max-w-5xl mx-auto space-y-6">
+        {/* Hero statement */}
+        <div className="rounded-2xl p-6 text-white" style={{background: 'linear-gradient(135deg, #232f3e 0%, #37475a 40%, #527fff 100%)'}}>
+          <p className="text-base font-light leading-relaxed opacity-95">
+            This framework was designed and built from hands-on experience &mdash; the feature set, dashboard layouts, sidebar groupings, and workflow design were all shaped to streamline and simplify working with ROSA HCP clusters. Failure patterns, remediation strategies, and confidence thresholds were discovered through real debugging and encoded into the framework &mdash; replacing hours of manual investigation and repetitive cleanup with automated detection and resolution, refined through iterative building and testing.
+          </p>
+        </div>
+
+        {/* Before / After comparison */}
+        <div className="grid grid-cols-2 gap-5">
+          <div className="rounded-xl p-5 border-2" style={{borderColor: '#d13212', backgroundColor: '#fef5f2'}}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-xl">&#x1F6D1;</span>
+              <span className="text-lg font-bold" style={{color: '#d13212'}}>Before &mdash; Manual Process</span>
+            </div>
+            <div className="space-y-2 text-sm text-gray-700">
+              <div className="flex items-start gap-2">
+                <span style={{color: '#d13212'}}>&#x2717;</span>
+                <span>SSH into clusters to read logs and diagnose failures</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span style={{color: '#d13212'}}>&#x2717;</span>
+                <span>Manually identify orphaned CloudFormation stacks</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span style={{color: '#d13212'}}>&#x2717;</span>
+                <span>Hand-delete security groups, ENIs, and VPC dependencies in order</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span style={{color: '#d13212'}}>&#x2717;</span>
+                <span>Run provision, test, and delete steps one at a time</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span style={{color: '#d13212'}}>&#x2717;</span>
+                <span>Check AWS console for quota and resource usage</span>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-xl p-5 border-2" style={{borderColor: '#1a8f53', backgroundColor: '#f0faf4'}}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-xl">&#x1F680;</span>
+              <span className="text-lg font-bold" style={{color: '#1a8f53'}}>After &mdash; Automated Framework</span>
+            </div>
+            <div className="space-y-2 text-sm text-gray-700">
+              <div className="flex items-start gap-2">
+                <span style={{color: '#1a8f53'}}>&#x2713;</span>
+                <span>AI agents monitor logs and diagnose failures in real time</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span style={{color: '#1a8f53'}}>&#x2713;</span>
+                <span>Automatic detection of orphaned stacks and failed deletions</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span style={{color: '#1a8f53'}}>&#x2713;</span>
+                <span>Automated cleanup of SGs, ENIs, VPC endpoints in correct order</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span style={{color: '#1a8f53'}}>&#x2713;</span>
+                <span>One-click workflows chain entire lifecycle together</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span style={{color: '#1a8f53'}}>&#x2713;</span>
+                <span>Live AWS quota and usage dashboard with cost tracking</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Metrics */}
+        <div className="grid grid-cols-4 gap-4">
+          <div className="rounded-xl p-4 text-center border-2" style={{borderColor: '#527fff', backgroundColor: '#f0f4ff'}}>
+            <div className="text-2xl font-bold" style={{color: '#527fff'}}>~2 hrs</div>
+            <div className="text-xs text-gray-600 mt-1">Manual debugging saved per failed deletion</div>
+          </div>
+          <div className="rounded-xl p-4 text-center border-2" style={{borderColor: '#ff9900', backgroundColor: '#fff8ee'}}>
+            <div className="text-2xl font-bold" style={{color: '#ff9900'}}>~$139/mo</div>
+            <div className="text-xs text-gray-600 mt-1">Saved per orphaned stack cleaned up</div>
+          </div>
+          <div className="rounded-xl p-4 text-center border-2" style={{borderColor: '#1a8f53', backgroundColor: '#f0faf4'}}>
+            <div className="text-2xl font-bold" style={{color: '#1a8f53'}}>12+</div>
+            <div className="text-xs text-gray-600 mt-1">Failure patterns encoded from real incidents</div>
+          </div>
+          <div className="rounded-xl p-4 text-center border-2" style={{borderColor: '#8b5cf6', backgroundColor: '#f5f0ff'}}>
+            <div className="text-2xl font-bold" style={{color: '#8b5cf6'}}>40+</div>
+            <div className="text-xs text-gray-600 mt-1">Ansible playbooks automating manual steps</div>
+          </div>
+        </div>
+      </div>
+    ),
+  },
+
+  // Slide: Claude API & AI Agents
   {
     id: 'ai-agents',
     title: 'Claude API & AI Agents',
-    subtitle: 'A 4-stage AI pipeline — Monitor, Diagnose, Remediate, Learn — that runs autonomously during every cluster operation',
+    subtitle: null,
     content: (
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Claude API banner */}
@@ -378,51 +567,42 @@ const slides = [
     title: 'AI Assistant',
     subtitle: 'A built-in Claude-powered chat that understands your clusters, logs, and operations — ask it anything without leaving the dashboard',
     content: (
-      <div className="max-w-5xl mx-auto space-y-8">
-        {/* Hero */}
-        <div className="rounded-2xl p-6 text-center text-white" style={{background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 50%, #232f3e 100%)'}}>
-          <p className="text-xl font-light leading-relaxed">
-            A built-in <span className="font-bold">Claude-powered chat assistant</span> that understands your
-            clusters, environments, and operations &mdash; available right inside the dashboard.
-          </p>
-        </div>
-
-        {/* Features */}
-        <div className="grid grid-cols-2 gap-6">
-          <div className="rounded-xl p-6 border-2 shadow-sm" style={{borderColor: '#8b5cf6', backgroundColor: '#f5f0ff'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#8b5cf6'}}>Context-Aware</div>
-            <p className="text-sm text-gray-600">
-              Knows about your active clusters, recent operations, credential status,
-              and environment configuration. No need to paste logs or explain your setup.
+      <div className="max-w-5xl mx-auto space-y-5">
+        {/* Features - 4 compact cards */}
+        <div className="grid grid-cols-4 gap-4">
+          <div className="rounded-xl p-4 border-2 shadow-sm" style={{borderColor: '#8b5cf6', backgroundColor: '#f5f0ff'}}>
+            <div className="text-lg font-bold mb-1" style={{color: '#8b5cf6'}}>Context-Aware</div>
+            <p className="text-xs text-gray-600">
+              Knows your active clusters, recent operations, and credential status automatically.
             </p>
           </div>
-          <div className="rounded-xl p-6 border-2 shadow-sm" style={{borderColor: '#527fff', backgroundColor: '#f0f4ff'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#527fff'}}>Debug Failures</div>
-            <p className="text-sm text-gray-600">
-              Ask it why a cluster failed to provision, what a CloudFormation error means,
-              or how to fix a specific issue. It analyzes logs and suggests solutions.
+          <div className="rounded-xl p-4 border-2 shadow-sm" style={{borderColor: '#527fff', backgroundColor: '#f0f4ff'}}>
+            <div className="text-lg font-bold mb-1" style={{color: '#527fff'}}>Debug Failures</div>
+            <p className="text-xs text-gray-600">
+              Ask why a cluster failed, what an error means, or how to fix it. Analyzes logs and suggests solutions.
             </p>
           </div>
-          <div className="rounded-xl p-6 border-2 shadow-sm" style={{borderColor: '#ff9900', backgroundColor: '#fff8ee'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#ff9900'}}>Guided Workflows</div>
-            <p className="text-sm text-gray-600">
-              Get step-by-step guidance on configuring credentials, setting up environments,
-              running test suites, or building custom workflows.
+          <div className="rounded-xl p-4 border-2 shadow-sm" style={{borderColor: '#ff9900', backgroundColor: '#fff8ee'}}>
+            <div className="text-lg font-bold mb-1" style={{color: '#ff9900'}}>Guided Workflows</div>
+            <p className="text-xs text-gray-600">
+              Step-by-step guidance on credentials, environments, test suites, and custom workflows.
             </p>
           </div>
-          <div className="rounded-xl p-6 border-2 shadow-sm" style={{borderColor: '#1a8f53', backgroundColor: '#f0faf4'}}>
-            <div className="text-2xl font-bold mb-2" style={{color: '#1a8f53'}}>Zero Context Switching</div>
-            <p className="text-sm text-gray-600">
-              Built right into the UI &mdash; no switching to a separate tool or terminal.
-              Chat alongside your dashboards, logs, and cluster views.
+          <div className="rounded-xl p-4 border-2 shadow-sm" style={{borderColor: '#1a8f53', backgroundColor: '#f0faf4'}}>
+            <div className="text-lg font-bold mb-1" style={{color: '#1a8f53'}}>Zero Context Switching</div>
+            <p className="text-xs text-gray-600">
+              Built into the UI &mdash; chat alongside your dashboards, logs, and cluster views.
             </p>
           </div>
         </div>
 
         {/* Example conversation mockup */}
-        <div className="rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="px-4 py-2 text-sm font-semibold text-white" style={{backgroundColor: '#232f3e'}}>AI Assistant</div>
+        <div className="rounded-xl border border-gray-200 shadow-md overflow-hidden">
+          <div className="px-4 py-2 text-sm font-semibold text-white flex items-center gap-2" style={{backgroundColor: '#232f3e'}}>
+            <span style={{color: '#8b5cf6'}}>&#x2B24;</span> AI Assistant
+          </div>
           <div className="p-4 space-y-3" style={{backgroundColor: '#fafafa'}}>
+            {/* Conversation 1 */}
             <div className="flex justify-end">
               <div className="rounded-lg px-4 py-2 text-sm max-w-md text-white" style={{backgroundColor: '#527fff'}}>
                 Why did my e2e-rosa-hcp cluster fail to delete?
@@ -436,88 +616,19 @@ const slides = [
                 and retried the stack deletion successfully.
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-    ),
-  },
-
-  // Slide 5: Architecture
-  {
-    id: 'architecture',
-    title: 'Architecture',
-    subtitle: 'React frontend, FastAPI backend, Ansible playbooks, and AI agents — connected via REST API and WebSocket',
-    content: (
-      <div className="max-w-5xl mx-auto space-y-5">
-        {/* Top layer - UI */}
-        <div className="rounded-xl p-5 shadow-md" style={{background: 'linear-gradient(135deg, #527fff 0%, #3b5ee6 100%)'}}>
-          <div className="flex items-center gap-2 mb-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-white opacity-90">UI Layer</h3>
-            <span className="text-xs font-mono ml-auto text-white opacity-60">React + Tailwind CSS</span>
-          </div>
-          <div className="grid grid-cols-4 gap-3">
-            {['At a Glance Dashboard', 'MCE Environment', 'Minikube Environment', 'Workflow Builder'].map((item) => (
-              <div key={item} className="rounded-lg p-3 text-center text-sm font-medium shadow-sm" style={{color: '#527fff', backgroundColor: 'rgba(255,255,255,0.95)'}}>
-                {item}
+            <div className="border-t border-gray-200 my-1"></div>
+            {/* Conversation 2 */}
+            <div className="flex justify-end">
+              <div className="rounded-lg px-4 py-2 text-sm max-w-md text-white" style={{backgroundColor: '#527fff'}}>
+                What&apos;s the current AWS quota usage for my account?
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Arrow down */}
-        <div className="flex flex-col items-center gap-1">
-          <div className="w-0.5 h-3" style={{backgroundColor: '#cbd5e1'}}></div>
-          <div className="flex items-center gap-2">
-            <div className="h-0.5 w-8" style={{backgroundColor: '#cbd5e1'}}></div>
-            <span className="text-xs font-mono px-3 py-1 rounded-full font-semibold" style={{color: '#475569', backgroundColor: '#e2e8f0'}}>REST API + WebSocket</span>
-            <div className="h-0.5 w-8" style={{backgroundColor: '#cbd5e1'}}></div>
-          </div>
-          <div style={{width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '8px solid #cbd5e1'}}></div>
-        </div>
-
-        {/* Middle layer - Backend */}
-        <div className="rounded-xl p-5 shadow-md" style={{background: 'linear-gradient(135deg, #ff9900 0%, #e88a00 100%)'}}>
-          <div className="flex items-center gap-2 mb-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-white opacity-90">Backend Layer</h3>
-            <span className="text-xs font-mono ml-auto text-white opacity-60">Python + FastAPI + Ansible</span>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { name: 'FastAPI Server', desc: 'Job management, credential handling' },
-              { name: 'Ansible Runner', desc: 'Playbook execution engine' },
-              { name: 'AI Agent Pipeline', desc: 'Monitor > Diagnose > Remediate > Learn' },
-            ].map((item) => (
-              <div key={item.name} className="rounded-lg p-3 shadow-sm" style={{backgroundColor: 'rgba(255,255,255,0.95)'}}>
-                <div className="text-sm font-medium" style={{color: '#232f3e'}}>{item.name}</div>
-                <div className="text-xs mt-1" style={{color: '#b45309'}}>{item.desc}</div>
+            </div>
+            <div className="flex justify-start">
+              <div className="rounded-lg px-4 py-2 text-sm max-w-lg bg-white border border-gray-200 text-gray-700">
+                Your account is using 14 of 20 VPCs (70%), 3 of 5 Elastic IPs (60%), and 28 of 50 EC2 instances (56%).
+                You have room for 2 more ROSA HCP clusters before hitting VPC limits.
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Arrow down */}
-        <div className="flex flex-col items-center gap-1">
-          <div className="w-0.5 h-3" style={{backgroundColor: '#cbd5e1'}}></div>
-          <div className="flex items-center gap-2">
-            <div className="h-0.5 w-8" style={{backgroundColor: '#cbd5e1'}}></div>
-            <span className="text-xs font-mono px-3 py-1 rounded-full font-semibold" style={{color: '#475569', backgroundColor: '#e2e8f0'}}>kubectl + aws CLI + boto3</span>
-            <div className="h-0.5 w-8" style={{backgroundColor: '#cbd5e1'}}></div>
-          </div>
-          <div style={{width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '8px solid #cbd5e1'}}></div>
-        </div>
-
-        {/* Bottom layer - Infrastructure */}
-        <div className="rounded-xl p-5 shadow-md" style={{background: 'linear-gradient(135deg, #232f3e 0%, #37475a 100%)'}}>
-          <div className="flex items-center gap-2 mb-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-white opacity-90">Infrastructure</h3>
-            <span className="text-xs font-mono ml-auto text-white opacity-60">AWS + OpenShift + Minikube</span>
-          </div>
-          <div className="grid grid-cols-4 gap-3">
-            {['OpenShift Hub Cluster', 'ROSA HCP Clusters', 'AWS (CF, VPC, IAM)', 'Minikube (local dev)'].map((item) => (
-              <div key={item} className="rounded-lg p-3 text-center text-sm font-medium shadow-sm" style={{color: '#232f3e', backgroundColor: 'rgba(255,255,255,0.95)'}}>
-                {item}
-              </div>
-            ))}
+            </div>
           </div>
         </div>
       </div>
@@ -528,28 +639,9 @@ const slides = [
   {
     id: 'test-coverage',
     title: 'Test Coverage & Code Quality',
-    subtitle: 'Over 1,000 automated tests across agents, backend, and frontend — plus real-world operational experience encoded directly into the framework',
+    subtitle: 'Over 1,000 automated tests across agents, backend, and frontend',
     content: (
-      <div className="max-w-5xl mx-auto space-y-8">
-        {/* Operational experience banner - top of page */}
-        <div className="rounded-2xl p-6 text-white" style={{background: 'linear-gradient(135deg, #232f3e 0%, #37475a 40%, #527fff 100%)'}}>
-          <h3 className="text-2xl font-bold mb-3">Operational Experience Built Into the Framework</h3>
-          <p className="text-base font-light leading-relaxed opacity-95">
-            This framework was designed and built from hands-on experience &mdash; not just the AI agents, but the entire UI structure, feature set, and workflow design. Every dashboard layout, every sidebar grouping, every workflow step reflects how a QE engineer actually works with ROSA HCP clusters. The failure patterns, remediation strategies, and confidence thresholds were all discovered through real debugging and encoded into the framework to automate what used to require manual investigation and intervention.
-          </p>
-        </div>
-
-        {/* Full-width UI design card */}
-        <div className="rounded-xl p-5 border-2" style={{backgroundColor: '#f0f4ff', borderColor: '#527fff'}}>
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-lg">🎨</span>
-            <span className="text-sm font-bold text-gray-900">UI and Features Designed Around Real Workflows</span>
-          </div>
-          <p className="text-sm text-gray-600">
-            The entire UI structure &mdash; separate MCE and Minikube environments, credential flow into playbooks, the workflow builder chaining verify-configure-provision-test-delete, live log streaming with agent panels, one-click operations &mdash; was designed around how a QE engineer actually works day-to-day. The framework was taught how to behave through iterative building, testing, and refinement.
-          </p>
-        </div>
-
+      <div className="max-w-5xl mx-auto space-y-6">
         {/* Test coverage */}
         <div className="rounded-2xl p-5 text-center text-white" style={{background: 'linear-gradient(135deg, #1a8f53 0%, #15803d 50%, #232f3e 100%)'}}>
           <p className="text-4xl font-bold mb-1">1,030 Automated Tests</p>
@@ -585,6 +677,40 @@ const slides = [
             </div>
           </div>
         </div>
+
+        {/* What's tested */}
+        <div className="rounded-xl p-5 border border-gray-200 shadow-sm">
+          <div className="text-sm font-bold text-gray-900 mb-3">What&apos;s Covered</div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span style={{color: '#8b5cf6'}}>&#x2713;</span> Agent pipeline end-to-end flows
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span style={{color: '#8b5cf6'}}>&#x2713;</span> All 4 agent stages + learning
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span style={{color: '#8b5cf6'}}>&#x2713;</span> Confidence scoring + thresholds
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span style={{color: '#ff9900'}}>&#x2713;</span> All 40+ REST API endpoints
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span style={{color: '#ff9900'}}>&#x2713;</span> Credential + job management
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span style={{color: '#ff9900'}}>&#x2713;</span> WebSocket + async operations
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span style={{color: '#527fff'}}>&#x2713;</span> Every UI component + page
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span style={{color: '#527fff'}}>&#x2713;</span> Workflow builder interactions
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span style={{color: '#527fff'}}>&#x2713;</span> Dashboard + sidebar navigation
+            </div>
+          </div>
+        </div>
       </div>
     ),
   },
@@ -593,83 +719,160 @@ const slides = [
   {
     id: 'at-a-glance',
     title: 'At a Glance Dashboard',
-    subtitle: 'A unified view of ROSA HCP clusters, recent tasks, Jenkins test results, AWS resource quotas, and GitHub activity — all in one place',
-    content: <MainScreenshotViewer />,
+    subtitle: 'Clusters, tasks, Jenkins trends, AWS quotas, and GitHub activity — all in one place',
+    content: (
+      <div className="space-y-4">
+        <div className="flex items-center justify-center gap-6 text-xs text-gray-500">
+          <span className="flex items-center gap-1"><span style={{color: '#527fff'}}>&#x25CF;</span> Cluster Status</span>
+          <span className="flex items-center gap-1"><span style={{color: '#ff9900'}}>&#x25CF;</span> AWS Quota</span>
+          <span className="flex items-center gap-1"><span style={{color: '#1a8f53'}}>&#x25CF;</span> Jenkins Trends</span>
+          <span className="flex items-center gap-1"><span style={{color: '#8b5cf6'}}>&#x25CF;</span> GitHub Activity</span>
+          <span className="flex items-center gap-1"><span style={{color: '#d13212'}}>&#x25CF;</span> Recent Tasks</span>
+        </div>
+        <MainScreenshotViewer />
+      </div>
+    ),
   },
 
   // Slide: MCE Environment Tour
   {
     id: 'mce-tour',
     title: 'MCE Environment',
-    subtitle: 'Manage credentials, verify CAPI/CAPA controllers, provision and delete ROSA HCP clusters on a full OpenShift Hub',
-    content: <MCEScreenshotViewer />,
+    subtitle: 'Credentials, controller verification, provisioning, and deletion on a full OpenShift Hub',
+    content: (
+      <div className="space-y-4">
+        <div className="flex items-center justify-center gap-6 text-xs text-gray-500">
+          <span className="flex items-center gap-1"><span style={{color: '#ff9900'}}>&#x25CF;</span> Credentials</span>
+          <span className="flex items-center gap-1"><span style={{color: '#1a8f53'}}>&#x25CF;</span> Verify Controllers</span>
+          <span className="flex items-center gap-1"><span style={{color: '#527fff'}}>&#x25CF;</span> Provision</span>
+          <span className="flex items-center gap-1"><span style={{color: '#d13212'}}>&#x25CF;</span> Delete</span>
+          <span className="flex items-center gap-1"><span style={{color: '#8b5cf6'}}>&#x25CF;</span> AI Agents</span>
+        </div>
+        <MCEScreenshotViewer />
+      </div>
+    ),
   },
 
   // Slide: Minikube Environment Tour
   {
     id: 'minikube-tour',
     title: 'Minikube Environment',
-    subtitle: 'Spin up a local Minikube cluster to test custom CAPA provider images from open PRs — fast iteration without needing a full Hub',
-    content: <MinikubeScreenshotViewer />,
+    subtitle: 'Test custom CAPA provider images from open PRs — fast local iteration without a full Hub',
+    content: (
+      <div className="space-y-4">
+        <div className="flex items-center justify-center gap-6 text-xs text-gray-500">
+          <span className="flex items-center gap-1"><span style={{color: '#527fff'}}>&#x25CF;</span> Start Minikube</span>
+          <span className="flex items-center gap-1"><span style={{color: '#ff9900'}}>&#x25CF;</span> Custom Images</span>
+          <span className="flex items-center gap-1"><span style={{color: '#1a8f53'}}>&#x25CF;</span> PR Testing</span>
+          <span className="flex items-center gap-1"><span style={{color: '#8b5cf6'}}>&#x25CF;</span> Local Dev</span>
+        </div>
+        <MinikubeScreenshotViewer />
+      </div>
+    ),
   },
 
   // Slide: Workflow Builder Screenshots
   {
     id: 'workflow-screenshots',
     title: 'Workflow Builder in Action',
-    subtitle: 'Drag-and-drop playbooks into multi-step pipelines — configure variables, set failure policies, and execute with one click',
-    content: <ScreenshotCarousel />,
+    subtitle: 'Drag-and-drop playbooks into multi-step pipelines — configure, chain, and execute with one click',
+    content: (
+      <div className="space-y-4">
+        <div className="flex items-center justify-center gap-6 text-xs text-gray-500">
+          <span className="flex items-center gap-1"><span style={{color: '#527fff'}}>&#x25CF;</span> Drag &amp; Drop</span>
+          <span className="flex items-center gap-1"><span style={{color: '#ff9900'}}>&#x25CF;</span> Configure Variables</span>
+          <span className="flex items-center gap-1"><span style={{color: '#1a8f53'}}>&#x25CF;</span> Set Failure Policy</span>
+          <span className="flex items-center gap-1"><span style={{color: '#8b5cf6'}}>&#x25CF;</span> One-Click Execute</span>
+        </div>
+        <ScreenshotCarousel />
+      </div>
+    ),
   },
 
-  // Slide: Overview / What You'll See
+  // Slide: Closing
   {
-    id: 'overview',
-    title: 'What You\'ll See',
-    subtitle: 'A summary of the key features covered in this tour — dashboards, environments, workflows, and AI agents',
+    id: 'closing',
+    title: 'Ready to Explore',
+    subtitle: null,
+    darkSlide: true,
     content: (
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="space-y-4">
-          <div className="flex items-start gap-5 bg-blue-50 rounded-xl p-5 border border-blue-200">
-            <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center text-lg font-bold flex-shrink-0">1</div>
-            <div>
-              <h3 className="text-lg font-bold text-blue-900">At a Glance Dashboard</h3>
-              <p className="text-sm text-blue-700 mt-1">Unified view of all ROSA HCP clusters across environments, task history, Jenkins trends, and AWS quota</p>
-            </div>
+      <div className="max-w-4xl mx-auto space-y-8">
+        {/* Tagline */}
+        <div className="text-center">
+          <p className="text-2xl font-light leading-relaxed text-gray-300">
+            One framework. Two environments. Full lifecycle automation.
+          </p>
+          <p className="text-base mt-3 text-gray-500">
+            From provisioning to deletion, from failure detection to automated cleanup &mdash; built to save time and prevent costly mistakes.
+          </p>
+        </div>
+
+        {/* Key takeaways */}
+        <div className="grid grid-cols-3 gap-5">
+          <div className="rounded-xl p-5 text-center border" style={{borderColor: '#3b4f6a', backgroundColor: 'rgba(82, 127, 255, 0.1)'}}>
+            <div className="text-3xl font-bold mb-2" style={{color: '#527fff'}}>40+</div>
+            <div className="text-sm font-semibold text-gray-300">Ansible Playbooks</div>
+            <div className="text-xs text-gray-500 mt-1">Automating every manual step</div>
           </div>
-          <div className="flex items-start gap-5 bg-green-50 rounded-xl p-5 border border-green-200">
-            <div className="w-10 h-10 rounded-full bg-green-600 text-white flex items-center justify-center text-lg font-bold flex-shrink-0">2</div>
-            <div>
-              <h3 className="text-lg font-bold text-green-900">Environment Management</h3>
-              <p className="text-sm text-green-700 mt-1">Configure credentials, verify connectivity, and manage MCE and Minikube environments independently</p>
-            </div>
+          <div className="rounded-xl p-5 text-center border" style={{borderColor: '#2d5a3e', backgroundColor: 'rgba(26, 143, 83, 0.1)'}}>
+            <div className="text-3xl font-bold mb-2" style={{color: '#1a8f53'}}>1,030</div>
+            <div className="text-sm font-semibold text-gray-300">Automated Tests</div>
+            <div className="text-xs text-gray-500 mt-1">Agents, backend, and frontend</div>
           </div>
-          <div className="flex items-start gap-5 bg-indigo-50 rounded-xl p-5 border border-indigo-200">
-            <div className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center text-lg font-bold flex-shrink-0">3</div>
-            <div>
-              <h3 className="text-lg font-bold text-indigo-900">Cluster Lifecycle</h3>
-              <p className="text-sm text-indigo-700 mt-1">Provision and delete ROSA HCP clusters with real-time log streaming and progress tracking</p>
-            </div>
+          <div className="rounded-xl p-5 text-center border" style={{borderColor: '#5a4020', backgroundColor: 'rgba(255, 153, 0, 0.1)'}}>
+            <div className="text-3xl font-bold mb-2" style={{color: '#ff9900'}}>~$139/mo</div>
+            <div className="text-sm font-semibold text-gray-300">Saved Per Cleanup</div>
+            <div className="text-xs text-gray-500 mt-1">Orphaned AWS resources caught automatically</div>
           </div>
-          <div className="flex items-start gap-5 bg-purple-50 rounded-xl p-5 border border-purple-200">
-            <div className="w-10 h-10 rounded-full bg-purple-600 text-white flex items-center justify-center text-lg font-bold flex-shrink-0">4</div>
-            <div>
-              <h3 className="text-lg font-bold text-purple-900">AI Agent Monitoring</h3>
-              <p className="text-sm text-purple-700 mt-1">Watch the AI pipeline detect issues in real-time, diagnose root causes, and auto-remediate failures</p>
-            </div>
+        </div>
+
+        {/* Capabilities summary */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="flex items-center gap-3 rounded-lg p-3" style={{backgroundColor: 'rgba(255,255,255,0.05)'}}>
+            <span className="text-lg" style={{color: '#527fff'}}>&#x2713;</span>
+            <span className="text-sm text-gray-400">MCE + Minikube environments with credential management</span>
           </div>
-          <div className="flex items-start gap-5 bg-amber-50 rounded-xl p-5 border border-amber-200">
-            <div className="w-10 h-10 rounded-full bg-amber-600 text-white flex items-center justify-center text-lg font-bold flex-shrink-0">5</div>
-            <div>
-              <h3 className="text-lg font-bold text-amber-900">Workflow Builder</h3>
-              <p className="text-sm text-amber-700 mt-1">Drag-and-drop multi-step workflows: chain verify, provision, test, and delete into automated pipelines</p>
-            </div>
+          <div className="flex items-center gap-3 rounded-lg p-3" style={{backgroundColor: 'rgba(255,255,255,0.05)'}}>
+            <span className="text-lg" style={{color: '#527fff'}}>&#x2713;</span>
+            <span className="text-sm text-gray-400">Drag-and-drop workflow builder with one-click execution</span>
           </div>
+          <div className="flex items-center gap-3 rounded-lg p-3" style={{backgroundColor: 'rgba(255,255,255,0.05)'}}>
+            <span className="text-lg" style={{color: '#527fff'}}>&#x2713;</span>
+            <span className="text-sm text-gray-400">4-stage AI pipeline: Monitor, Diagnose, Remediate, Learn</span>
+          </div>
+          <div className="flex items-center gap-3 rounded-lg p-3" style={{backgroundColor: 'rgba(255,255,255,0.05)'}}>
+            <span className="text-lg" style={{color: '#527fff'}}>&#x2713;</span>
+            <span className="text-sm text-gray-400">Real-time dashboards with AWS quota and cost tracking</span>
+          </div>
+          <div className="flex items-center gap-3 rounded-lg p-3" style={{backgroundColor: 'rgba(255,255,255,0.05)'}}>
+            <span className="text-lg" style={{color: '#527fff'}}>&#x2713;</span>
+            <span className="text-sm text-gray-400">Claude-powered AI assistant for interactive troubleshooting</span>
+          </div>
+          <div className="flex items-center gap-3 rounded-lg p-3" style={{backgroundColor: 'rgba(255,255,255,0.05)'}}>
+            <span className="text-lg" style={{color: '#527fff'}}>&#x2713;</span>
+            <span className="text-sm text-gray-400">Live log streaming with Ansible syntax highlighting</span>
+          </div>
+        </div>
+
+        {/* CTA */}
+        <div className="text-center pt-2">
+          <p className="text-sm text-gray-500">Click <span className="font-semibold text-gray-400">Start Exploring</span> below to jump into the dashboard</p>
         </div>
       </div>
     ),
     showStartDemo: true,
   },
 ];
+
+const slideTransitionStyle = `
+  @keyframes slideFadeIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .slide-animate {
+    animation: slideFadeIn 0.4s ease-out;
+  }
+`;
 
 const PresentationMode = () => {
   const navigate = useNavigate();
@@ -707,39 +910,54 @@ const PresentationMode = () => {
   const slide = slides[currentSlide];
 
   return (
-    <div className="h-screen w-screen bg-white flex flex-col overflow-hidden">
+    <div className={`h-screen w-screen flex flex-col overflow-hidden transition-colors duration-500 ${slide.darkSlide ? 'bg-gray-900' : 'bg-white'}`}>
+      <style>{slideTransitionStyle}</style>
       {/* Top bar */}
-      <div className="flex items-center justify-between px-6 py-3 bg-gradient-to-r from-gray-900 to-gray-800 text-white flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-mono opacity-70">CAPA Framework</span>
+      <div className="flex flex-col flex-shrink-0">
+        <div className="flex items-center justify-between px-6 py-3 bg-gradient-to-r from-gray-900 to-gray-800 text-white">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-mono opacity-70">CAPA Framework</span>
+            <span className="text-xs opacity-40">|</span>
+            <span className="text-sm opacity-50">{slide.title}</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-sm opacity-70">
+              {currentSlide + 1} / {slides.length}
+            </span>
+            <button
+              onClick={() => navigate('/')}
+              className="p-1.5 hover:bg-gray-700 rounded transition-colors"
+              title="Exit presentation (Esc)"
+            >
+              <XMarkIcon className="h-5 w-5" />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm opacity-70">
-            {currentSlide + 1} / {slides.length}
-          </span>
-          <button
-            onClick={() => navigate('/')}
-            className="p-1.5 hover:bg-gray-700 rounded transition-colors"
-            title="Exit presentation (Esc)"
-          >
-            <XMarkIcon className="h-5 w-5" />
-          </button>
+        {/* Progress bar */}
+        <div className="w-full h-1 bg-gray-200">
+          <div
+            className="h-1 transition-all duration-500 ease-out"
+            style={{
+              width: `${((currentSlide + 1) / slides.length) * 100}%`,
+              background: 'linear-gradient(90deg, #527fff 0%, #8b5cf6 100%)',
+            }}
+          />
         </div>
       </div>
 
       {/* Slide content */}
-      <div className="flex-1 flex flex-col items-center justify-center px-12 py-8 overflow-y-auto">
-        <div className="w-full max-w-6xl">
+      <div className="flex-1 flex flex-col items-center justify-start px-12 py-4 overflow-y-auto">
+        <div key={slide.id} className="w-full max-w-6xl slide-animate">
           {/* Title */}
-          <div className="text-center mb-8">
-            <h1 className="text-5xl font-bold text-gray-900 tracking-tight">{slide.title}</h1>
+          <div className="text-center mb-4">
+            <h1 className={`font-bold tracking-tight ${slide.darkSlide ? 'text-6xl text-white' : 'text-4xl text-gray-900'}`}>{slide.title}</h1>
             {slide.subtitle && (
-              <p className="text-xl text-gray-500 mt-3">{slide.subtitle}</p>
+              <p className={`text-lg mt-2 ${slide.darkSlide ? 'text-gray-400' : 'text-gray-500'}`}>{slide.subtitle}</p>
             )}
           </div>
 
           {/* Content */}
-          <div className="mt-4">
+          <div className="mt-2">
             {slide.content}
           </div>
 
@@ -747,31 +965,31 @@ const PresentationMode = () => {
       </div>
 
       {/* Navigation bar */}
-      <div className="flex items-center justify-between px-6 py-4 bg-gray-50 border-t border-gray-200 flex-shrink-0">
+      <div className={`flex items-center justify-between px-6 py-4 border-t flex-shrink-0 transition-colors duration-500 ${slide.darkSlide ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
         <button
           onClick={goPrev}
           disabled={currentSlide === 0}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
             currentSlide === 0
-              ? 'text-gray-300 cursor-not-allowed'
-              : 'text-gray-700 hover:bg-gray-200'
+              ? `${slide.darkSlide ? 'text-gray-600' : 'text-gray-300'} cursor-not-allowed`
+              : `${slide.darkSlide ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-200'}`
           }`}
         >
           <ChevronLeftIcon className="h-5 w-5" />
           Previous
         </button>
 
-        {/* Slide dots */}
-        <div className="flex items-center gap-2">
+        {/* Slide indicators */}
+        <div className="flex items-center gap-1.5">
           {slides.map((s, i) => (
             <button
               key={s.id}
               onClick={() => setCurrentSlide(i)}
-              className={`w-3 h-3 rounded-full transition-all ${
-                i === currentSlide
-                  ? 'bg-blue-600 scale-125'
-                  : 'bg-gray-300 hover:bg-gray-400'
-              }`}
+              className="h-1.5 rounded-full transition-all duration-300"
+              style={{
+                width: i === currentSlide ? '24px' : '8px',
+                backgroundColor: i === currentSlide ? '#527fff' : i < currentSlide ? '#93a3b8' : '#d1d5db',
+              }}
               title={s.title}
             />
           ))}
@@ -779,10 +997,10 @@ const PresentationMode = () => {
 
         <button
           onClick={currentSlide === slides.length - 1 ? () => navigate('/') : goNext}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+          className={`flex items-center gap-2 rounded-lg font-medium transition-all ${
             currentSlide === slides.length - 1
-              ? 'bg-blue-600 text-white hover:bg-blue-700'
-              : 'text-gray-700 hover:bg-gray-200'
+              ? 'px-6 py-2.5 text-lg bg-blue-500 text-white hover:bg-blue-400 shadow-lg shadow-blue-500/30'
+              : `px-4 py-2 ${slide.darkSlide ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-200'}`
           }`}
         >
           {currentSlide === slides.length - 1 ? 'Start Exploring' : 'Next'}
