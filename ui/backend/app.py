@@ -471,7 +471,7 @@ def run_minikube_init_playbook(
         env = os.environ.copy()
         env["MINIKUBE_PROFILE"] = cluster_name
         env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
-        env["CAPI_INSTALL_METHOD"] = install_method
+        env["CAPI_INSTALL_METHOD"] = "clusterctl"
 
         # Add AWS credentials to environment
         if credentials:
@@ -485,7 +485,7 @@ def run_minikube_init_playbook(
             env["CUSTOM_CAPA_SOURCE_PATH"] = custom_capa_image.get("sourcePath", "")
             jobs[job_id][
                 "message"
-            ] = f"Configuring CAPI/CAPA on Minikube cluster '{cluster_name}' using {method_name} with custom image {custom_capa_image['repository']}:{custom_capa_image['tag']}"
+            ] = f"Configuring CAPI/CAPA on Minikube cluster '{cluster_name}' using clusterctl with custom image {custom_capa_image['repository']}:{custom_capa_image['tag']}"
 
         # Build ansible-playbook command with AWS credentials as extra vars
         cmd = ["ansible-playbook", playbook_path, "-vv"]
@@ -5323,7 +5323,7 @@ async def initialize_minikube_capi(request: Request, background_tasks: Backgroun
             "id": job_id,
             "status": "pending",
             "progress": 0,
-            "message": f"{action}ing CAPI/CAPA on Minikube cluster '{cluster_name}' using {method_name}",
+            "message": f"{action}ing CAPI/CAPA on Minikube cluster '{cluster_name}' using clusterctl",
             "started_at": datetime.now(),
             "logs": [],
             "environment": "minikube",
@@ -5343,7 +5343,7 @@ async def initialize_minikube_capi(request: Request, background_tasks: Backgroun
         return {
             "success": True,
             "job_id": job_id,
-            "message": f"CAPI/CAPA configuration started for cluster '{cluster_name}' using {method_name}",
+            "message": f"CAPI/CAPA configuration started for cluster '{cluster_name}' using clusterctl",
         }
 
     except Exception as e:
