@@ -29,7 +29,6 @@ const initialAppState = {
     'test-suite-runner',
     'mce-terminal',
     'minikube-terminal',
-    'helm-chart-tests',
   ]),
   showSetupPrompt: false,
   sectionOrder:
@@ -42,8 +41,7 @@ const initialAppState = {
           'test-suite-dashboard',
           'test-suite-runner',
           'minikube-terminal',
-          'helm-chart-tests',
-        ]
+              ]
       : [
           'mce-configuration',
           'task-summary',
@@ -199,8 +197,7 @@ const appReducer = (state, action) => {
               'test-suite-dashboard',
               'test-suite-runner',
               'minikube-terminal',
-              'helm-chart-tests',
-            ]
+                      ]
           : [
               'mce-configuration',
               'task-summary',
@@ -405,8 +402,7 @@ export const AppProvider = ({ children }) => {
                 'test-suite-dashboard',
                 'test-suite-runner',
                 'minikube-terminal',
-                'helm-chart-tests',
-              ]
+                          ]
             : [
                 'mce-configuration',
                 'task-summary',

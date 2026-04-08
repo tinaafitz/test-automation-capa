@@ -412,7 +412,6 @@ const AWSUsageDashboard = ({ inline = false }) => {
     onTestSuiteDashboardClick: () => navigate('/mce'),
     onTestAutomationClick: () => navigate('/mce'),
     onAIAssistantClick: () => navigate('/mce'),
-    onHelmChartMatrixClick: () => navigate('/mce'),
     onTerminalClick: () => navigate('/mce'),
     onNotificationsClick: () => navigate('/mce'),
     onRecentTasksClick: () => navigate('/mce'),
