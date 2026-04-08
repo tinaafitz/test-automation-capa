@@ -62,7 +62,6 @@ CAPA Automation UI provides a visual, user-friendly interface for managing the c
 
 ### Test Suite Dashboard
 
-- **Test Matrix**: Visualize Helm chart test results across versions
 - **Test Execution**: Run test suites with configurable parameters
 - **Results Tracking**: Historical test data with pass/fail analytics
 - **Jira Integration**: Link test cases to Jira tickets
@@ -86,7 +85,7 @@ Interactive form for creating new ROSA clusters with YAML preview and editing.
 Categorized playbook library with real-time execution and log streaming.
 
 ### Test Suite Dashboard
-Test matrix showing results across different Helm chart versions and configurations.
+Test suite runner with configurable parameters and result tracking.
 
 ## Quick Start
 
@@ -240,9 +239,6 @@ LOG_LEVEL=info
 # Ansible Configuration
 ANSIBLE_PLAYBOOK_DIR=/path/to/playbooks
 ANSIBLE_VAULT_PASSWORD_FILE=/path/to/vault/password
-
-# Database
-DATABASE_URL=sqlite:///./helm_tests.db
 
 # Notification Services (Optional)
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL

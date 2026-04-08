@@ -419,17 +419,15 @@ def run_minikube_init_playbook(
     playbook_path: str,
     cluster_name: str,
     job_id: str,
-    install_method: str = "clusterctl",
     custom_capa_image: dict = None,
 ):
     """Run Minikube CAPI initialization playbook (sync, called via asyncio.to_thread)"""
     try:
         jobs[job_id]["status"] = "running"
         jobs[job_id]["progress"] = 10
-        method_name = "Helm Charts" if install_method == "helm" else "clusterctl"
         jobs[job_id][
             "message"
-        ] = f"Configuring CAPI/CAPA on Minikube cluster '{cluster_name}' using {method_name}"
+        ] = f"Configuring CAPI/CAPA on Minikube cluster '{cluster_name}' using clusterctl"
 
         # Get project root
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -4596,7 +4594,7 @@ async def get_capi_component_versions(cluster_name: str = None, environment: str
 
 @app.get("/api/capi/cli-versions")
 async def get_capi_cli_versions():
-    """Get versions of CAPI-related CLI tools (clusterctl, minikube, kubectl, helm)"""
+    """Get versions of CAPI-related CLI tools (clusterctl, minikube, kubectl)"""
     tools = {}
 
     # clusterctl version
@@ -4657,21 +4655,6 @@ async def get_capi_cli_versions():
         tools["kubectl"] = {"installed": False, "version": None}
     except Exception:
         tools["kubectl"] = {"installed": False, "version": None}
-
-    # helm version
-    try:
-        result = subprocess.run(
-            ["helm", "version", "--short"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            tools["helm"] = {"installed": True, "version": result.stdout.strip()}
-        else:
-            tools["helm"] = {"installed": False, "version": None}
-    except FileNotFoundError:
-        tools["helm"] = {"installed": False, "version": None}
-    except Exception:
-        tools["helm"] = {"installed": False, "version": None}
 
     # podman version
     try:
@@ -5230,41 +5213,7 @@ async def verify_minikube_cluster(request: dict):
                     )
 
                 cluster_info["components"] = components
-
-                # Detect installation method (helm vs clusterctl)
-                install_method = "clusterctl"  # Default
-                try:
-                    # Check for Helm releases related to CAPI
-                    helm_check = subprocess.run(
-                        [
-                            "helm",
-                            "list",
-                            "-A",
-                            "-o",
-                            "json",
-                            "--kubeconfig",
-                            os.path.expanduser("~/.kube/config"),
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    if helm_check.returncode == 0:
-                        import json
-
-                        helm_releases = json.loads(helm_check.stdout)
-                        # Look for CAPI-related Helm releases
-                        capi_helm_releases = [
-                            r
-                            for r in helm_releases
-                            if "cluster-api" in r.get("name", "").lower()
-                            or "capi" in r.get("chart", "").lower()
-                        ]
-                        if capi_helm_releases:
-                            install_method = "helm"
-                except:
-                    # If Helm check fails, stick with default (clusterctl)
-                    pass
+                install_method = "clusterctl"
 
                 return {
                     "exists": True,
@@ -5329,14 +5278,14 @@ async def initialize_minikube_capi(request: Request, background_tasks: Backgroun
             }
 
         # Validate install method
-        if install_method not in ["clusterctl", "helm"]:
+        if install_method != "clusterctl":
             return {
                 "success": False,
-                "message": f"Invalid install method: {install_method}. Must be 'clusterctl' or 'helm'",
+                "message": f"Invalid install method: {install_method}. Must be 'clusterctl'",
             }
 
-        # Validate custom image config if provided (only for clusterctl)
-        if custom_capa_image and install_method == "clusterctl":
+        # Validate custom image config if provided
+        if custom_capa_image:
             if not isinstance(custom_capa_image, dict):
                 return {
                     "success": False,
@@ -5348,28 +5297,22 @@ async def initialize_minikube_capi(request: Request, background_tasks: Backgroun
                     "message": "custom_capa_image requires both repository and tag",
                 }
 
-        # Determine which task file to use based on install method
+        # Determine which task file to use
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-        if install_method == "helm":
-            playbook_path = os.path.join(project_root, "tasks", "helm_install_capi.yml")
-        else:
-            playbook_path = os.path.join(project_root, "tasks", "clusterctl_install_capi.yml")
+        playbook_path = os.path.join(project_root, "tasks", "clusterctl_install_capi.yml")
 
         if not os.path.exists(playbook_path):
             return {
                 "success": False,
                 "message": f"Initialization playbook not found at: {playbook_path}",
-                "suggestion": f"Ensure {install_method} installation task file exists",
+                "suggestion": "Ensure clusterctl installation task file exists",
             }
 
         # Generate unique job ID
         job_id = str(uuid.uuid4())
-        method_name = "Helm Charts" if install_method == "helm" else "clusterctl"
-
         # Build description with custom image info
         action = "Reconfigure" if custom_capa_image else "Configure"
-        description = f"{action} CAPI/CAPA on Minikube: {cluster_name} ({method_name})"
+        description = f"{action} CAPI/CAPA on Minikube: {cluster_name} (clusterctl)"
         if custom_capa_image:
             description += (
                 f" [Custom Image: {custom_capa_image['repository']}:{custom_capa_image['tag']}]"
@@ -5394,7 +5337,6 @@ async def initialize_minikube_capi(request: Request, background_tasks: Backgroun
             playbook_path,
             cluster_name,
             job_id,
-            install_method,
             custom_capa_image,
         ))
 

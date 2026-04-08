@@ -64,7 +64,6 @@ ui/frontend/
 │   │   ├── sections/           # Page sections
 │   │   │   ├── TestSuiteSection.jsx      # Playbook runner
 │   │   │   ├── RosaHcpClustersSection.jsx # Cluster management
-│   │   │   ├── HelmChartTestDashboard.jsx # Test matrix
 │   │   │   └── TaskSummarySection.jsx     # Activity tracking
 │   │   │
 │   │   ├── sidebar/           # Navigation components
@@ -105,9 +104,6 @@ ui/backend/
 │   ├── ai_assistant_service.py     # AI chat integration
 │   ├── email_notification_service.py # Email notifications
 │   └── slack_notification_service.py # Slack notifications
-│
-└── Database/
-    └── helm_tests.db               # SQLite for test results
 ```
 
 ## Data Flow Architecture
@@ -276,10 +272,6 @@ FastAPI Backend (Port 8000)
 ├── /api/notification-settings       # Notification configuration
 │   ├── GET  - Get settings
 │   └── POST - Update settings
-│
-└── /api/helm-tests                  # Helm chart test matrix
-    ├── GET /results - Get test results
-    └── POST /run - Execute tests
 ```
 
 ### WebSocket Endpoints
@@ -499,7 +491,6 @@ Theme Configuration (themes.js)
 - Job history tracking
 
 ### Test Suite Dashboard
-- Helm chart test matrix
 - Test result visualization
 - Historical test data
 - Pass/fail analytics
