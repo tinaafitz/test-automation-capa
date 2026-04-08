@@ -135,7 +135,7 @@ const MCEEnvironmentSelector = ({
     jira: '',
     polarion: '',
     notes: '',
-    installMethod: 'clusterctl', // For Minikube: clusterctl or helm
+    installMethod: 'clusterctl',
   });
 
   // Fetch environments on mount

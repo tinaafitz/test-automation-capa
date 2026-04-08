@@ -175,8 +175,6 @@ class TestCLIVersions:
                 return MagicMock(returncode=0, stdout=json.dumps({
                     "clientVersion": {"gitVersion": "v1.30.0"}
                 }))
-            if "helm" in cmd:
-                return MagicMock(returncode=0, stdout="v3.14.0")
             if "podman" in cmd:
                 return MagicMock(returncode=0, stdout="4.9.0")
             return MagicMock(returncode=0, stdout="")

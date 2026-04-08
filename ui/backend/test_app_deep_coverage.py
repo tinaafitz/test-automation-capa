@@ -211,20 +211,6 @@ class TestMinikubeInitializeCapi:
         if data["job_id"] in app_module.jobs:
             del app_module.jobs[data["job_id"]]
 
-    @patch("app.asyncio.create_task")
-    @patch("os.path.exists", return_value=True)
-    def test_helm_success(self, mock_exists, mock_task):
-        resp = client.post("/api/minikube/initialize-capi", json={
-            "cluster_name": "sat-minikube",
-            "install_method": "helm",
-        })
-        data = resp.json()
-        assert data["success"] is True
-        assert "Helm" in data["message"]
-        # Clean up
-        if data["job_id"] in app_module.jobs:
-            del app_module.jobs[data["job_id"]]
-
     @patch("os.path.exists", return_value=False)
     def test_playbook_not_found(self, mock_exists):
         resp = client.post("/api/minikube/initialize-capi", json={

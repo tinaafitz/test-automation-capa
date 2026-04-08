@@ -510,18 +510,6 @@ class TestTestSuitesExtended:
 
 
 # ---------------------------------------------------------------------------
-# Helm tests status
-# ---------------------------------------------------------------------------
-
-class TestHelmTestsExtended:
-    def test_helm_tests_structure(self, client):
-        resp = client.get("/api/helm-tests/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, dict)
-
-
-# ---------------------------------------------------------------------------
 # Jenkins and GitHub extended
 # ---------------------------------------------------------------------------
 

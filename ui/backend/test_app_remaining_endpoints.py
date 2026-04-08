@@ -1,6 +1,6 @@
 """
 Tests for remaining untested endpoints: ansible run-role, minikube verify-cluster,
-helm test logs, and helm test status.
+and minikube verify-cluster.
 """
 
 import importlib
@@ -132,79 +132,6 @@ class TestMinikubeVerifyCluster:
         data = resp.json()
         assert data["exists"] is True
         assert data["accessible"] is True
-
-
-# =============================================
-# GET /api/helm-tests/status
-# =============================================
-
-
-class TestHelmTestStatus:
-    @patch("app.sqlite3.connect")
-    def test_empty_database(self, mock_connect):
-        mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = []
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = mock_cursor
-        mock_connect.return_value = mock_conn
-
-        resp = client.get("/api/helm-tests/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert "matrix" in data
-
-    @patch("app.sqlite3.connect")
-    def test_with_results(self, mock_connect):
-        mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = [
-            ("capi", "OpenShift", "install", "passed", 120, 100, "2026-04-01T10:00:00", "helm_repo", None, "helm_repo"),
-        ]
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = mock_cursor
-        mock_connect.return_value = mock_conn
-
-        resp = client.get("/api/helm-tests/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        matrix = data["matrix"]
-        assert "capi" in matrix
-
-
-# =============================================
-# GET /api/helm-tests/logs/{provider}/{environment}/{test_type}
-# =============================================
-
-
-class TestHelmTestLogs:
-    @patch("app.sqlite3.connect")
-    def test_logs_found(self, mock_connect):
-        mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (
-            "passed", 120, 100, None, "All tests passed", "2026-04-01T10:00:00"
-        )
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = mock_cursor
-        mock_connect.return_value = mock_conn
-
-        resp = client.get("/api/helm-tests/logs/capi/OpenShift/install")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert data["status"] == "passed"
-
-    @patch("app.sqlite3.connect")
-    def test_logs_not_found(self, mock_connect):
-        mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = None
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = mock_cursor
-        mock_connect.return_value = mock_conn
-
-        resp = client.get("/api/helm-tests/logs/capi/OpenShift/install")
-        data = resp.json()
-        assert data["success"] is False
 
 
 # =============================================

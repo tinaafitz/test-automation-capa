@@ -419,17 +419,15 @@ def run_minikube_init_playbook(
     playbook_path: str,
     cluster_name: str,
     job_id: str,
-    install_method: str = "clusterctl",
     custom_capa_image: dict = None,
 ):
     """Run Minikube CAPI initialization playbook (sync, called via asyncio.to_thread)"""
     try:
         jobs[job_id]["status"] = "running"
         jobs[job_id]["progress"] = 10
-        method_name = "Helm Charts" if install_method == "helm" else "clusterctl"
         jobs[job_id][
             "message"
-        ] = f"Configuring CAPI/CAPA on Minikube cluster '{cluster_name}' using {method_name}"
+        ] = f"Configuring CAPI/CAPA on Minikube cluster '{cluster_name}' using clusterctl"
 
         # Get project root
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -4596,7 +4594,7 @@ async def get_capi_component_versions(cluster_name: str = None, environment: str
 
 @app.get("/api/capi/cli-versions")
 async def get_capi_cli_versions():
-    """Get versions of CAPI-related CLI tools (clusterctl, minikube, kubectl, helm)"""
+    """Get versions of CAPI-related CLI tools (clusterctl, minikube, kubectl)"""
     tools = {}
 
     # clusterctl version
@@ -4657,21 +4655,6 @@ async def get_capi_cli_versions():
         tools["kubectl"] = {"installed": False, "version": None}
     except Exception:
         tools["kubectl"] = {"installed": False, "version": None}
-
-    # helm version
-    try:
-        result = subprocess.run(
-            ["helm", "version", "--short"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            tools["helm"] = {"installed": True, "version": result.stdout.strip()}
-        else:
-            tools["helm"] = {"installed": False, "version": None}
-    except FileNotFoundError:
-        tools["helm"] = {"installed": False, "version": None}
-    except Exception:
-        tools["helm"] = {"installed": False, "version": None}
 
     # podman version
     try:
@@ -5230,41 +5213,7 @@ async def verify_minikube_cluster(request: dict):
                     )
 
                 cluster_info["components"] = components
-
-                # Detect installation method (helm vs clusterctl)
-                install_method = "clusterctl"  # Default
-                try:
-                    # Check for Helm releases related to CAPI
-                    helm_check = subprocess.run(
-                        [
-                            "helm",
-                            "list",
-                            "-A",
-                            "-o",
-                            "json",
-                            "--kubeconfig",
-                            os.path.expanduser("~/.kube/config"),
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    if helm_check.returncode == 0:
-                        import json
-
-                        helm_releases = json.loads(helm_check.stdout)
-                        # Look for CAPI-related Helm releases
-                        capi_helm_releases = [
-                            r
-                            for r in helm_releases
-                            if "cluster-api" in r.get("name", "").lower()
-                            or "capi" in r.get("chart", "").lower()
-                        ]
-                        if capi_helm_releases:
-                            install_method = "helm"
-                except:
-                    # If Helm check fails, stick with default (clusterctl)
-                    pass
+                install_method = "clusterctl"
 
                 return {
                     "exists": True,
@@ -5329,14 +5278,14 @@ async def initialize_minikube_capi(request: Request, background_tasks: Backgroun
             }
 
         # Validate install method
-        if install_method not in ["clusterctl", "helm"]:
+        if install_method != "clusterctl":
             return {
                 "success": False,
-                "message": f"Invalid install method: {install_method}. Must be 'clusterctl' or 'helm'",
+                "message": f"Invalid install method: {install_method}. Must be 'clusterctl'",
             }
 
-        # Validate custom image config if provided (only for clusterctl)
-        if custom_capa_image and install_method == "clusterctl":
+        # Validate custom image config if provided
+        if custom_capa_image:
             if not isinstance(custom_capa_image, dict):
                 return {
                     "success": False,
@@ -5348,28 +5297,22 @@ async def initialize_minikube_capi(request: Request, background_tasks: Backgroun
                     "message": "custom_capa_image requires both repository and tag",
                 }
 
-        # Determine which task file to use based on install method
+        # Determine which task file to use
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-        if install_method == "helm":
-            playbook_path = os.path.join(project_root, "tasks", "helm_install_capi.yml")
-        else:
-            playbook_path = os.path.join(project_root, "tasks", "clusterctl_install_capi.yml")
+        playbook_path = os.path.join(project_root, "tasks", "clusterctl_install_capi.yml")
 
         if not os.path.exists(playbook_path):
             return {
                 "success": False,
                 "message": f"Initialization playbook not found at: {playbook_path}",
-                "suggestion": f"Ensure {install_method} installation task file exists",
+                "suggestion": "Ensure clusterctl installation task file exists",
             }
 
         # Generate unique job ID
         job_id = str(uuid.uuid4())
-        method_name = "Helm Charts" if install_method == "helm" else "clusterctl"
-
         # Build description with custom image info
         action = "Reconfigure" if custom_capa_image else "Configure"
-        description = f"{action} CAPI/CAPA on Minikube: {cluster_name} ({method_name})"
+        description = f"{action} CAPI/CAPA on Minikube: {cluster_name} (clusterctl)"
         if custom_capa_image:
             description += (
                 f" [Custom Image: {custom_capa_image['repository']}:{custom_capa_image['tag']}]"
@@ -5394,7 +5337,6 @@ async def initialize_minikube_capi(request: Request, background_tasks: Backgroun
             playbook_path,
             cluster_name,
             job_id,
-            install_method,
             custom_capa_image,
         ))
 
@@ -8562,20 +8504,6 @@ class TestSuiteRun(BaseModel):
     extra_vars: dict = {}
 
 
-class HelmTestRun(BaseModel):
-    provider: str
-    environment: str
-    test_type: str
-    # Git source configuration (optional)
-    chart_source: str = "helm_repo"  # 'helm_repo' or 'git'
-    git_repo: str = "https://github.com/stolostron/cluster-api-installer.git"
-    git_branch: str = "main"
-
-
-class HelmTestRunAll(BaseModel):
-    provider: str
-
-
 @app.get("/api/test-suites/list")
 async def list_test_suites():
     """List all available test suites"""
@@ -8918,549 +8846,6 @@ async def get_test_suite_history():
             "message": f"Error getting test suite history: {str(e)}",
             "runs": [],
         }
-
-
-# ==============================================================================
-# Helm Chart Test Endpoints
-# ==============================================================================
-
-
-def run_helm_test_playbook(
-    job_id: str,
-    provider: str,
-    environment: str,
-    test_type: str,
-    chart_source: str = "helm_repo",
-    git_repo: str = None,
-    git_branch: str = "main",
-):
-    """
-    Background task to run Helm chart test playbook (sync, called via asyncio.to_thread)
-    Supports both Helm repository and Git-sourced charts
-    """
-    import re  # Import at function start
-
-    try:
-        project_root = os.environ.get("AUTOMATION_PATH") or os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
-
-        task_file = os.path.join(project_root, "tasks", "helm-chart-test.yml")
-
-        print(
-            f"🧪 Running Helm test playbook: {provider}/{environment}/{test_type} (source: {chart_source})"
-        )
-
-        # Update job status
-        if job_id in jobs:
-            jobs[job_id]["status"] = "running"
-            jobs[job_id]["progress"] = 10
-            source_info = f" from {git_branch} branch" if chart_source == "git" else ""
-            jobs[job_id][
-                "message"
-            ] = f"🧪 Executing {test_type} test for {provider}{source_info}..."
-
-        # Build ansible-playbook command with verbose output
-        cmd = [
-            "ansible-playbook",
-            task_file,
-            "-e",
-            f"provider={provider}",
-            "-e",
-            f"environment={environment}",
-            "-e",
-            f"test_type={test_type}",
-            "-e",
-            f"chart_source={chart_source}",
-            "-vv",  # Verbose output for detailed logging
-        ]
-
-        # Add Git source parameters if using Git charts
-        if chart_source == "git" and git_repo:
-            cmd.extend(["-e", f"git_repo={git_repo}", "-e", f"git_branch={git_branch}"])
-
-        # Execute playbook
-        process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=project_root
-        )
-
-        stdout, stderr = process.communicate()
-        returncode = process.returncode
-
-        # Parse output for results
-        output_text = stdout + "\n" + stderr
-
-        # Format output with header like Minikube CAPI initialization
-        full_output = f"=== HELM TEST PLAYBOOK OUTPUT ===\n\n"
-        full_output += f"Provider: {provider}\n"
-        full_output += f"Environment: {environment}\n"
-        full_output += f"Test Type: {test_type}\n\n"
-        full_output += f"=== ANSIBLE OUTPUT ===\n\n{stdout}\n\n"
-        if stderr:
-            full_output += f"=== STDERR ===\n\n{stderr}\n\n"
-
-        # Update job with formatted output as logs array
-        if job_id in jobs:
-            jobs[job_id]["logs"] = full_output.split("\n")
-            jobs[job_id]["output"] = full_output
-            jobs[job_id]["progress"] = 90
-
-        # Determine test result
-        # Check for actual test result in Ansible output (not just playbook success)
-        # The playbook can succeed (returncode=0, failed=0) but the test itself can fail
-        result_match = re.search(r"Result:\s+(pass|fail)", output_text, re.IGNORECASE)
-        if result_match:
-            test_status = result_match.group(1).lower()
-            test_passed = test_status == "pass"
-        else:
-            # Fallback to returncode check if no explicit result found
-            test_passed = returncode == 0 and "failed=0" in output_text
-            test_status = "pass" if test_passed else "fail"
-
-        # Extract duration and pass rate from output (or use defaults)
-        duration = None
-        pass_rate = None
-
-        # Try to extract duration from output
-        duration_match = re.search(r"Duration:\s+(\d+)", output_text)
-        if duration_match:
-            duration = int(duration_match.group(1))
-        else:
-            duration = 60 + (hash(f"{provider}{test_type}") % 240)  # 60-300s range
-
-        # Try to extract pass rate from output
-        pass_rate_match = re.search(r"Pass Rate:\s+(\d+)%", output_text)
-        if pass_rate_match:
-            pass_rate = int(pass_rate_match.group(1))
-        else:
-            pass_rate = 70 + (hash(f"{provider}{test_type}") % 30)  # 70-100% range
-
-        # Update database with results
-        db_path = os.path.join(os.path.dirname(__file__), "helm_tests.db")
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO helm_test_results
-            (provider, environment, test_type, status, duration, pass_rate, error_message, logs, timestamp,
-             chart_source, git_branch, install_method)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                provider,
-                environment,
-                test_type,
-                test_status,
-                duration,
-                pass_rate,
-                None if test_passed else stderr[:500],
-                output_text,
-                datetime.now().isoformat(),
-                chart_source,
-                git_branch if chart_source == "git" else None,
-                "git" if chart_source == "git" else "helm_repo",
-            ),
-        )
-
-        conn.commit()
-        conn.close()
-
-        # Update job to completed
-        if job_id in jobs:
-            jobs[job_id]["status"] = "completed" if test_passed else "failed"
-            jobs[job_id]["progress"] = 100
-            jobs[job_id]["message"] = (
-                f"✅ Test completed: {test_status}"
-                if test_passed
-                else f"❌ Test completed: {test_status}"
-            )
-            jobs[job_id]["completed_at"] = datetime.now().isoformat()
-
-        print(f"✅ Helm test completed: {provider}/{environment}/{test_type} = {test_status}")
-
-    except Exception as e:
-        print(f"❌ Error in Helm test playbook: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
-
-        # Format error output
-        error_output = f"=== HELM TEST ERROR ===\n\n"
-        error_output += f"Error: {str(e)}\n\n"
-        error_output += f"=== TRACEBACK ===\n\n{traceback.format_exc()}"
-
-        # Update job to failed
-        if job_id in jobs:
-            jobs[job_id]["status"] = "failed"
-            jobs[job_id]["progress"] = 100
-            jobs[job_id]["message"] = f"❌ Test failed: {str(e)}"
-            jobs[job_id]["logs"] = error_output.split("\n")
-            jobs[job_id]["output"] = error_output
-            jobs[job_id]["completed_at"] = datetime.now().isoformat()
-
-        # Update database with failure
-        db_path = os.path.join(os.path.dirname(__file__), "helm_tests.db")
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO helm_test_results
-            (provider, environment, test_type, status, duration, pass_rate, error_message, logs, timestamp,
-             chart_source, git_branch, install_method)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                provider,
-                environment,
-                test_type,
-                "fail",
-                None,
-                None,
-                str(e)[:500],
-                str(e),
-                datetime.now().isoformat(),
-                chart_source,
-                git_branch if chart_source == "git" else None,
-                "git" if chart_source == "git" else "helm_repo",
-            ),
-        )
-
-        conn.commit()
-        conn.close()
-
-
-@app.get("/api/helm-tests/status")
-async def get_helm_test_status():
-    """
-    Get the current status of Helm chart tests across all providers and environments.
-    Returns a matrix of test results showing installation, compliance, upgrade, and functionality tests.
-    """
-    try:
-        # Initialize database connection
-        db_path = os.path.join(os.path.dirname(__file__), "helm_tests.db")
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Create table if it doesn't exist
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS helm_test_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider TEXT NOT NULL,
-                environment TEXT NOT NULL,
-                test_type TEXT NOT NULL,
-                status TEXT NOT NULL,
-                duration INTEGER,
-                pass_rate INTEGER,
-                error_message TEXT,
-                logs TEXT,
-                timestamp TEXT NOT NULL,
-                chart_source TEXT DEFAULT 'helm_repo',
-                git_branch TEXT,
-                install_method TEXT,
-                UNIQUE(provider, environment, test_type)
-            )
-        """)
-        conn.commit()
-
-        # Fetch all test results including Git source information
-        cursor.execute("""
-            SELECT provider, environment, test_type, status, duration, pass_rate, timestamp,
-                   chart_source, git_branch, install_method
-            FROM helm_test_results
-            ORDER BY timestamp DESC
-        """)
-
-        results = cursor.fetchall()
-        conn.close()
-
-        # Build matrix structure
-        providers = ["capi", "capa", "capz", "cap-metal3", "capoa"]
-        environments = ["OpenShift", "Kubernetes"]
-        test_types = ["install", "compliance", "upgrade", "functionality"]
-
-        matrix = {}
-        for provider in providers:
-            matrix[provider] = {}
-            for env in environments:
-                matrix[provider][env] = {}
-                for test_type in test_types:
-                    # Find matching result
-                    matching_result = None
-                    for result in results:
-                        if result[0] == provider and result[1] == env and result[2] == test_type:
-                            matching_result = result
-                            break
-
-                    if matching_result:
-                        matrix[provider][env][test_type] = {
-                            "status": matching_result[3],
-                            "duration": matching_result[4],
-                            "passRate": matching_result[5],
-                            "timestamp": matching_result[6],
-                            "chartSource": (
-                                matching_result[7] if len(matching_result) > 7 else "helm_repo"
-                            ),
-                            "gitBranch": matching_result[8] if len(matching_result) > 8 else None,
-                            "installMethod": (
-                                matching_result[9] if len(matching_result) > 9 else "helm_repo"
-                            ),
-                        }
-                    else:
-                        # Default to pending status
-                        matrix[provider][env][test_type] = {
-                            "status": "pending",
-                            "duration": None,
-                            "passRate": None,
-                            "timestamp": None,
-                            "chartSource": "helm_repo",
-                            "gitBranch": None,
-                            "installMethod": "helm_repo",
-                        }
-
-        return {"success": True, "matrix": matrix}
-
-    except Exception as e:
-        print(f"❌ Error getting Helm test status: {str(e)}")
-        return {"success": False, "message": f"Error getting test status: {str(e)}", "matrix": None}
-
-
-@app.post("/api/helm-tests/run")
-async def run_helm_test(request: HelmTestRun, background_tasks: BackgroundTasks):
-    """
-    Run a specific Helm chart test for a provider, environment, and test type.
-    """
-    try:
-        provider = request.provider
-        environment = request.environment
-        test_type = request.test_type
-
-        # Generate job ID
-        job_id = str(uuid.uuid4())
-
-        # Update status to 'running' in database
-        db_path = os.path.join(os.path.dirname(__file__), "helm_tests.db")
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        timestamp = datetime.now().isoformat()
-
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO helm_test_results
-            (provider, environment, test_type, status, duration, pass_rate, error_message, logs, timestamp,
-             chart_source, git_branch, install_method)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                provider,
-                environment,
-                test_type,
-                "running",
-                None,
-                None,
-                None,
-                None,
-                timestamp,
-                request.chart_source,
-                request.git_branch if request.chart_source == "git" else None,
-                "git" if request.chart_source == "git" else "helm_repo",
-            ),
-        )
-
-        conn.commit()
-        conn.close()
-
-        # Map Helm test environment to UI environment (OpenShift -> mce, Kubernetes -> minikube)
-        ui_environment = "mce" if environment == "OpenShift" else "minikube"
-
-        # Initialize job in jobs system (will appear in Task Summary)
-        jobs[job_id] = {
-            "id": job_id,
-            "type": "helm-test",
-            "provider": provider,
-            "environment": ui_environment,  # Use UI environment for Task Summary display
-            "helm_environment": environment,  # Keep original for playbook execution
-            "test_type": test_type,
-            "yaml_file": "tasks/helm-chart-test.yml",
-            "description": f"🧪 HELM TEST: {provider} - {test_type.capitalize()}",
-            "status": "running",
-            "progress": 0,
-            "message": f"🧪 Running {test_type} test...",
-            "output": "",
-            "created_at": datetime.now().isoformat(),
-            "started_at": datetime.now().isoformat(),
-        }
-
-        # Run Ansible playbook in background (use asyncio.to_thread to avoid blocking event loop)
-        asyncio.create_task(asyncio.to_thread(
-            run_helm_test_playbook,
-            job_id,
-            provider,
-            environment,
-            test_type,
-            request.chart_source,
-            request.git_repo,
-            request.git_branch,
-        ))
-
-        source_info = (
-            f" (Git: {request.git_branch})" if request.chart_source == "git" else " (Helm repo)"
-        )
-        print(
-            f"✅ Started Helm test job {job_id}: {provider}/{environment}/{test_type}{source_info}"
-        )
-
-        return {
-            "success": True,
-            "message": f"Started {test_type} test for {provider} on {environment}",
-            "job_id": job_id,
-        }
-
-    except Exception as e:
-        print(f"❌ Error running Helm test: {str(e)}")
-        return {"success": False, "message": f"Error starting test: {str(e)}"}
-
-
-@app.post("/api/helm-tests/run-all")
-async def run_all_helm_tests(request: HelmTestRunAll, background_tasks: BackgroundTasks):
-    """
-    Run all Helm chart tests for a specific provider across all environments and test types.
-    """
-    try:
-        provider = request.provider
-
-        environments = ["OpenShift", "Kubernetes"]
-        test_types = ["install", "compliance", "upgrade", "functionality"]
-
-        # Update all tests to 'running' status
-        db_path = os.path.join(os.path.dirname(__file__), "helm_tests.db")
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        timestamp = datetime.now().isoformat()
-
-        job_ids = []
-
-        for env in environments:
-            for test_type in test_types:
-                # Generate job ID for each test
-                job_id = str(uuid.uuid4())
-                job_ids.append(job_id)
-
-                # Update database status to running (defaults to helm_repo for backward compatibility)
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO helm_test_results
-                    (provider, environment, test_type, status, duration, pass_rate, error_message, logs, timestamp,
-                     chart_source, git_branch, install_method)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        provider,
-                        env,
-                        test_type,
-                        "running",
-                        None,
-                        None,
-                        None,
-                        None,
-                        timestamp,
-                        "helm_repo",
-                        None,
-                        "helm_repo",
-                    ),
-                )
-
-                # Map Helm test environment to UI environment
-                ui_environment = "mce" if env == "OpenShift" else "minikube"
-
-                # Create job entry
-                jobs[job_id] = {
-                    "id": job_id,
-                    "type": "helm-test",
-                    "provider": provider,
-                    "environment": ui_environment,  # Use UI environment for Task Summary display
-                    "helm_environment": env,  # Keep original for playbook execution
-                    "test_type": test_type,
-                    "yaml_file": "tasks/helm-chart-test.yml",
-                    "description": f"🧪 HELM TEST: {provider} - {test_type.capitalize()}",
-                    "status": "running",
-                    "progress": 0,
-                    "message": f"🧪 Running {test_type} test...",
-                    "output": "",
-                    "created_at": datetime.now().isoformat(),
-                    "started_at": datetime.now().isoformat(),
-                }
-
-                # Queue background task (use asyncio.to_thread to avoid blocking event loop)
-                asyncio.create_task(asyncio.to_thread(
-                    run_helm_test_playbook,
-                    job_id,
-                    provider,
-                    env,
-                    test_type,
-                    "helm_repo",  # chart_source
-                    None,  # git_repo
-                    "main",  # git_branch
-                ))
-
-        conn.commit()
-        conn.close()
-
-        print(f"✅ Started {len(job_ids)} Helm tests for provider: {provider}")
-
-        return {
-            "success": True,
-            "message": f"Started all tests for {provider}",
-            "test_count": len(job_ids),
-            "job_ids": job_ids,
-        }
-
-    except Exception as e:
-        print(f"❌ Error running all Helm tests: {str(e)}")
-        return {"success": False, "message": f"Error starting tests: {str(e)}"}
-
-
-@app.get("/api/helm-tests/logs/{provider}/{environment}/{test_type}")
-async def get_helm_test_logs(provider: str, environment: str, test_type: str):
-    """
-    Get detailed logs for a specific Helm chart test.
-    """
-    try:
-        db_path = os.path.join(os.path.dirname(__file__), "helm_tests.db")
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT status, duration, pass_rate, error_message, logs, timestamp
-            FROM helm_test_results
-            WHERE provider = ? AND environment = ? AND test_type = ?
-        """,
-            (provider, environment, test_type),
-        )
-
-        result = cursor.fetchone()
-        conn.close()
-
-        if result:
-            return {
-                "success": True,
-                "status": result[0],
-                "duration": result[1],
-                "passRate": result[2],
-                "errorMessage": result[3],
-                "logs": result[4],
-                "timestamp": result[5],
-            }
-        else:
-            return {"success": False, "message": "Test result not found"}
-
-    except Exception as e:
-        print(f"❌ Error getting Helm test logs: {str(e)}")
-        return {"success": False, "message": f"Error getting logs: {str(e)}"}
 
 
 # ============================================================================

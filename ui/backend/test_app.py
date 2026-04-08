@@ -757,16 +757,6 @@ class TestRosaClusters:
 
 
 # ---------------------------------------------------------------------------
-# Helm Tests Status
-# ---------------------------------------------------------------------------
-
-class TestHelmTests:
-    def test_helm_tests_status(self, client):
-        resp = client.get("/api/helm-tests/status")
-        assert resp.status_code == 200
-
-
-# ---------------------------------------------------------------------------
 # Test suites history and status
 # ---------------------------------------------------------------------------
 
