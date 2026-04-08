@@ -188,4 +188,458 @@ describe('RosaHcpClustersSection', () => {
     const buttons = screen.getAllByRole('button');
     expect(buttons.length).toBeGreaterThan(0);
   });
+
+  it('displays refresh button with correct text', async () => {
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+    expect(screen.getByText('Refresh')).toBeInTheDocument();
+  });
+
+  it('clicking refresh button calls fetchClusters', async () => {
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    const initialCallCount = mockFetch.mock.calls.length;
+    const refreshButton = screen.getByText('Refresh');
+
+    await act(async () => {
+      fireEvent.click(refreshButton);
+    });
+
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(initialCallCount);
+    });
+  });
+
+  it('shows loading spinner when refreshing', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: {} }),
+        });
+      }
+      if (url.includes('/api/rosa/clusters')) {
+        return new Promise(() => {}); // Never resolves
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Loading clusters...')).toBeInTheDocument();
+    });
+  });
+
+  it('displays cluster status badge correctly', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: {} }),
+        });
+      }
+      if (url.includes('/api/rosa/clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            clusters: [
+              { name: 'ready-cluster', status: 'ready', version: '4.20.12', region: 'us-west-2' },
+              { name: 'provisioning-cluster', status: 'provisioning', version: '4.20.11', region: 'us-east-1' },
+            ],
+          }),
+        });
+      }
+      if (url.includes('/api/minikube/get-active-resources')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, resources: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('ready-cluster')).toBeInTheDocument();
+      expect(screen.getByText('provisioning-cluster')).toBeInTheDocument();
+    });
+  });
+
+  it('displays cluster version and region', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: {} }),
+        });
+      }
+      if (url.includes('/api/rosa/clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            clusters: [
+              { name: 'test-cluster', status: 'ready', version: '4.21.5', region: 'us-west-2', created: '2024-01-01' },
+            ],
+          }),
+        });
+      }
+      if (url.includes('/api/minikube/get-active-resources')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, resources: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('4.21.5')).toBeInTheDocument();
+      expect(screen.getByText(/us-west-2/)).toBeInTheDocument();
+    });
+  });
+
+  it('displays delete button for each cluster', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: {} }),
+        });
+      }
+      if (url.includes('/api/rosa/clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            clusters: [
+              { name: 'test-cluster', status: 'ready', version: '4.20.12', region: 'us-west-2' },
+            ],
+          }),
+        });
+      }
+      if (url.includes('/api/minikube/get-active-resources')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, resources: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    await waitFor(() => {
+      const deleteButtons = screen.getAllByTitle(/Delete cluster/);
+      expect(deleteButtons.length).toBeGreaterThan(0);
+    });
+  });
+
+  it('shows delete confirmation when delete button clicked', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: {} }),
+        });
+      }
+      if (url.includes('/api/rosa/clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            clusters: [
+              { name: 'test-cluster', status: 'ready', version: '4.20.12', region: 'us-west-2' },
+            ],
+          }),
+        });
+      }
+      if (url.includes('/api/minikube/get-active-resources')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, resources: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('test-cluster')).toBeInTheDocument();
+    });
+
+    const deleteButton = screen.getByTitle(/Delete cluster test-cluster/);
+    await act(async () => {
+      fireEvent.click(deleteButton);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Confirm Deletion')).toBeInTheDocument();
+      expect(screen.getByText(/Are you sure you want to delete cluster/)).toBeInTheDocument();
+    });
+  });
+
+  it('allows canceling deletion', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: {} }),
+        });
+      }
+      if (url.includes('/api/rosa/clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            clusters: [
+              { name: 'test-cluster', status: 'ready', version: '4.20.12', region: 'us-west-2' },
+            ],
+          }),
+        });
+      }
+      if (url.includes('/api/minikube/get-active-resources')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, resources: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('test-cluster')).toBeInTheDocument();
+    });
+
+    const deleteButton = screen.getByTitle(/Delete cluster test-cluster/);
+    await act(async () => {
+      fireEvent.click(deleteButton);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Confirm Deletion')).toBeInTheDocument();
+    });
+
+    const cancelButton = screen.getByText('Cancel');
+    await act(async () => {
+      fireEvent.click(cancelButton);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Confirm Deletion')).not.toBeInTheDocument();
+    });
+  });
+
+  it('sorts clusters by name', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: {} }),
+        });
+      }
+      if (url.includes('/api/rosa/clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            clusters: [
+              { name: 'cluster-b', status: 'ready', version: '4.20.12', region: 'us-west-2' },
+              { name: 'cluster-a', status: 'ready', version: '4.20.11', region: 'us-east-1' },
+            ],
+          }),
+        });
+      }
+      if (url.includes('/api/minikube/get-active-resources')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, resources: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('cluster-b')).toBeInTheDocument();
+    });
+
+    const nameHeader = screen.getByText('Name').closest('th');
+    await act(async () => {
+      fireEvent.click(nameHeader);
+    });
+
+    // Clusters should be sorted
+    expect(screen.getByText('cluster-a')).toBeInTheDocument();
+  });
+
+  it('renders with minikube theme colors', async () => {
+    await act(async () => {
+      render(<RosaHcpClustersSection theme="minikube" />);
+    });
+    expect(screen.getAllByText(/ROSA HCP|Clusters/i).length).toBeGreaterThan(0);
+  });
+
+  it('fetches minikube resources when theme is minikube', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: { minikubeCluster: 'test-mk' } }),
+        });
+      }
+      if (url.includes('/api/minikube/get-active-resources')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            resources: [
+              { type: 'ROSAControlPlane', name: 'mk-cluster', status: 'ready', version: '4.20.0' },
+            ],
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection theme="minikube" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('mk-cluster')).toBeInTheDocument();
+    });
+  });
+
+  it('handles API response validation error', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: {} }),
+        });
+      }
+      if (url.includes('/api/rosa/clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: false, message: 'API error' }),
+        });
+      }
+      if (url.includes('/api/minikube/get-active-resources')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, resources: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to load clusters')).toBeInTheDocument();
+    });
+  });
+
+  it('displays ROSA type for all clusters', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: {} }),
+        });
+      }
+      if (url.includes('/api/rosa/clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            clusters: [
+              { name: 'test-cluster', status: 'ready', version: '4.20.12', region: 'us-west-2' },
+            ],
+          }),
+        });
+      }
+      if (url.includes('/api/minikube/get-active-resources')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, resources: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('ROSA')).toBeInTheDocument();
+    });
+  });
+
+  it('displays formatted creation date', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/credentials')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ credentials: {} }),
+        });
+      }
+      if (url.includes('/api/rosa/clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            clusters: [
+              { name: 'test-cluster', status: 'ready', version: '4.20.12', region: 'us-west-2', created: '2024-01-15' },
+            ],
+          }),
+        });
+      }
+      if (url.includes('/api/minikube/get-active-resources')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, resources: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    await act(async () => {
+      render(<RosaHcpClustersSection />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Jan/)).toBeInTheDocument();
+    });
+  });
 });

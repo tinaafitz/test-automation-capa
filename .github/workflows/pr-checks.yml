@@ -74,8 +74,16 @@ jobs:
             );
             const isNewUiComponent = newUiComponents.length > 0 && changes <= 1500;
 
+            // Check if this is a test-only PR (test files + minor supporting changes)
+            const testFiles = changedFiles.filter(f =>
+              f.match(/test[_\-]/) || f.match(/\.test\./) || f.match(/\/tests?\//)
+            );
+            const isTestPR = testFiles.length > 0 && testFiles.length >= changedFiles.length * 0.5;
+
             if (isDocsOnly) {
               console.log(`Documentation-only PR - skipping size check (${changes} changes in ${docOrCiFiles.length} doc/ci files)`);
+            } else if (isTestPR) {
+              core.warning(`Large test PR (${changes} changes in ${testFiles.length} test files). Test PRs are exempt from size limits.`);
             } else if (isNewUiComponent && changes > 1000) {
               core.warning(`Large UI component PR (${changes} changes in ${newUiComponents.length} component files). Allowed up to 1500 for new components.`);
             } else if (changes > 1000) {

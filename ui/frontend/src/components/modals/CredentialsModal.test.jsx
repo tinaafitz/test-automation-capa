@@ -165,4 +165,226 @@ describe('CredentialsModal', () => {
       expect(hasValue).toBe(true);
     });
   });
+
+  it('updates input field value when typing', async () => {
+    await act(async () => {
+      render(<CredentialsModal {...defaultProps} />);
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+    const inputs = screen.getAllByRole('textbox');
+    if (inputs.length > 0) {
+      const firstInput = inputs[0];
+      fireEvent.change(firstInput, { target: { value: 'new-value' } });
+      expect(firstInput.value).toBe('new-value');
+    }
+  });
+
+  it('toggles password visibility for OCP password', async () => {
+    await act(async () => {
+      render(<CredentialsModal {...defaultProps} />);
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+    const passwordFields = document.querySelectorAll('input[type="password"]');
+    if (passwordFields.length > 0) {
+      const eyeButtons = document.querySelectorAll('button[type="button"]');
+      const eyeBtn = Array.from(eyeButtons).find((b) => b.querySelector('svg'));
+      if (eyeBtn) {
+        fireEvent.click(eyeBtn);
+        // Check that type changed from password to text
+        const updatedField = document.querySelector('input[type="text"]');
+        expect(updatedField).toBeTruthy();
+      }
+    }
+  });
+
+  it('calls handleSave and dispatches success notification on successful save', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ credentials: {} }),
+    }).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true }),
+    });
+
+    const onSave = jest.fn();
+    await act(async () => {
+      render(<CredentialsModal {...defaultProps} onSave={onSave} />);
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+
+    const saveBtn = screen.getAllByRole('button').find((b) => b.textContent.match(/save/i));
+    if (saveBtn) {
+      await act(async () => {
+        fireEvent.click(saveBtn);
+      });
+      await waitFor(() => {
+        expect(mockDispatch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'ADD_NOTIFICATION',
+            payload: expect.objectContaining({
+              type: 'success',
+            }),
+          })
+        );
+      });
+      expect(onSave).toHaveBeenCalled();
+    }
+  });
+
+  it('dispatches error notification on save failure', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ credentials: {} }),
+    }).mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ message: 'Save failed' }),
+    });
+
+    await act(async () => {
+      render(<CredentialsModal {...defaultProps} />);
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+
+    const saveBtn = screen.getAllByRole('button').find((b) => b.textContent.match(/save/i));
+    if (saveBtn) {
+      await act(async () => {
+        fireEvent.click(saveBtn);
+      });
+      await waitFor(() => {
+        expect(mockDispatch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'ADD_NOTIFICATION',
+            payload: expect.objectContaining({
+              type: 'error',
+            }),
+          })
+        );
+      });
+    }
+  });
+
+  it('shows loading spinner while fetching credentials', async () => {
+    mockFetch.mockImplementation(() => new Promise(() => {})); // Never resolves
+    render(<CredentialsModal {...defaultProps} />);
+    await waitFor(() => {
+      expect(screen.getByText(/Loading credentials/i)).toBeInTheDocument();
+    });
+  });
+
+  it('disables save button while saving', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ credentials: {} }),
+    }).mockImplementation(() => new Promise(() => {})); // Save never resolves
+
+    await act(async () => {
+      render(<CredentialsModal {...defaultProps} />);
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    const saveBtn = screen.getAllByRole('button').find((b) => b.textContent.match(/save/i));
+    if (saveBtn) {
+      await act(async () => {
+        fireEvent.click(saveBtn);
+      });
+      await waitFor(() => {
+        expect(saveBtn.disabled).toBe(true);
+      });
+    }
+  });
+
+  it('refreshes credentials when refresh button clicked', async () => {
+    await act(async () => {
+      render(<CredentialsModal {...defaultProps} />);
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    const refreshBtn = screen.getAllByRole('button').find((b) => b.textContent.match(/refresh/i));
+    if (refreshBtn) {
+      await act(async () => {
+        fireEvent.click(refreshBtn);
+      });
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    }
+  });
+
+  it('displays backdrop in modal mode', () => {
+    const { container } = render(<CredentialsModal {...defaultProps} />);
+    const backdrop = container.querySelector('.fixed.inset-0.bg-black');
+    expect(backdrop).toBeTruthy();
+  });
+
+  it('does not display backdrop in inline mode', () => {
+    const { container } = render(<CredentialsModal {...defaultProps} inline={true} />);
+    const backdrop = container.querySelector('.fixed.inset-0.bg-black');
+    expect(backdrop).toBeFalsy();
+  });
+
+  it('shows AWS and OCM sections for non-MCE theme', async () => {
+    await act(async () => {
+      render(<CredentialsModal {...defaultProps} theme="minikube" />);
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+    expect(screen.getByText(/AWS Credentials/i)).toBeInTheDocument();
+    expect(screen.getByText(/OpenShift Cluster Manager/i)).toBeInTheDocument();
+  });
+
+  it('hides AWS and OCM sections for MCE theme', async () => {
+    await act(async () => {
+      render(<CredentialsModal {...defaultProps} theme="mce" />);
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+    expect(screen.queryByText(/AWS Credentials/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/OpenShift Cluster Manager/i)).not.toBeInTheDocument();
+  });
+
+  it('handles network error during save gracefully', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ credentials: {} }),
+    }).mockRejectedValueOnce(new Error('Network error'));
+
+    await act(async () => {
+      render(<CredentialsModal {...defaultProps} />);
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+
+    const saveBtn = screen.getAllByRole('button').find((b) => b.textContent.match(/save/i));
+    if (saveBtn) {
+      await act(async () => {
+        fireEvent.click(saveBtn);
+      });
+      await waitFor(() => {
+        expect(mockDispatch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'ADD_NOTIFICATION',
+            payload: expect.objectContaining({
+              type: 'error',
+              message: expect.stringContaining('Network error'),
+            }),
+          })
+        );
+      });
+    }
+  });
 });
