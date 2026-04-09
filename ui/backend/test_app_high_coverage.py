@@ -6272,5 +6272,500 @@ class TestGetSupportedVersionsErrors:
         assert len(result.get("versions", [])) > 0
 
 
+###############################################################################
+# Test _get_rosa_status_sync error branches (lines 1702-1742)
+###############################################################################
+class TestRosaStatusSyncErrors:
+    """Test _get_rosa_status_sync timeout, FileNotFoundError, etc."""
+
+    def _clear_rosa_cache(self):
+        app_module.rosa_status_cache["data"] = None
+        app_module.rosa_status_cache["timestamp"] = 0
+
+    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="rosa", timeout=5))
+    def test_timeout(self, mock_run):
+        self._clear_rosa_cache()
+        result = app_module._get_rosa_status_sync()
+        assert result["authenticated"] is False
+        assert result["status"] == "timeout"
+
+    @patch("subprocess.run", side_effect=FileNotFoundError("rosa not found"))
+    def test_rosa_not_installed(self, mock_run):
+        self._clear_rosa_cache()
+        result = app_module._get_rosa_status_sync()
+        assert result["authenticated"] is False
+        assert result["status"] == "not_installed"
+
+    @patch("subprocess.run")
+    def test_command_not_found_error(self, mock_run):
+        self._clear_rosa_cache()
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="command not found")
+        result = app_module._get_rosa_status_sync()
+        assert result["authenticated"] is False
+
+    @patch("subprocess.run")
+    def test_not_logged_in_error(self, mock_run):
+        self._clear_rosa_cache()
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not logged in to OCM")
+        result = app_module._get_rosa_status_sync()
+        assert result["authenticated"] is False
+        assert "login" in result.get("fix_command", "").lower() or "login" in result.get("suggestion", "").lower()
+
+    @patch("subprocess.run", side_effect=RuntimeError("unexpected"))
+    def test_generic_exception(self, mock_run):
+        self._clear_rosa_cache()
+        result = app_module._get_rosa_status_sync()
+        assert result["authenticated"] is False
+        assert result["status"] == "error"
+
+    def test_cache_hit(self):
+        """When cache is fresh, subprocess should not be called"""
+        import time
+        app_module.rosa_status_cache["data"] = {"authenticated": True, "cached": True}
+        app_module.rosa_status_cache["timestamp"] = time.time()
+        result = app_module._get_rosa_status_sync()
+        assert result.get("cached") is True
+        # Clean up
+        app_module.rosa_status_cache["data"] = None
+        app_module.rosa_status_cache["timestamp"] = 0
+
+
+###############################################################################
+# Test _get_ocp_connection_status_sync branches (lines 1946-2219)
+###############################################################################
+class TestOcpConnectionStatusSync:
+    """Test _get_ocp_connection_status_sync various branches"""
+
+    def _clear_ocp_cache(self):
+        app_module.ocp_status_cache["data"] = None
+        app_module.ocp_status_cache["timestamp"] = 0
+
+    @patch("app.os.path.exists", return_value=False)
+    def test_config_missing(self, mock_exists):
+        self._clear_ocp_cache()
+        result = app_module._get_ocp_connection_status_sync()
+        assert result["connected"] is False
+        assert result["status"] == "config_missing"
+
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: ''\nOCP_HUB_CLUSTER_USER: ''"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_empty_credentials(self, mock_exists):
+        self._clear_ocp_cache()
+        result = app_module._get_ocp_connection_status_sync()
+        assert result["connected"] is False
+
+    @patch("subprocess.run")
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: 'https://api.test:6443'\nOCP_HUB_CLUSTER_USER: 'admin'\nOCP_HUB_CLUSTER_PASSWORD: 'pass123'"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_login_unauthorized(self, mock_exists, mock_run):
+        self._clear_ocp_cache()
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="Login failed (401 Unauthorized)"
+        )
+        result = app_module._get_ocp_connection_status_sync()
+        assert result["connected"] is False
+        assert result["status"] == "invalid_credentials"
+
+    @patch("subprocess.run")
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: 'https://api.test:6443'\nOCP_HUB_CLUSTER_USER: 'admin'\nOCP_HUB_CLUSTER_PASSWORD: 'pass123'"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_login_connection_failed(self, mock_exists, mock_run):
+        self._clear_ocp_cache()
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="connection refused"
+        )
+        result = app_module._get_ocp_connection_status_sync()
+        assert result["connected"] is False
+        assert result["status"] == "connection_failed"
+
+    @patch("subprocess.run")
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: 'https://api.test:6443'\nOCP_HUB_CLUSTER_USER: 'admin'\nOCP_HUB_CLUSTER_PASSWORD: 'pass123'"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_login_tls_error(self, mock_exists, mock_run):
+        self._clear_ocp_cache()
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="certificate signed by unknown authority"
+        )
+        result = app_module._get_ocp_connection_status_sync()
+        assert result["connected"] is False
+        assert result["status"] == "tls_error"
+
+    @patch("subprocess.run")
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: 'https://api.test:6443'\nOCP_HUB_CLUSTER_USER: 'admin'\nOCP_HUB_CLUSTER_PASSWORD: 'pass123'"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_login_generic_failure(self, mock_exists, mock_run):
+        self._clear_ocp_cache()
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="some unknown error"
+        )
+        result = app_module._get_ocp_connection_status_sync()
+        assert result["connected"] is False
+        assert result["status"] == "login_failed"
+
+    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="oc", timeout=30))
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: 'https://api.test:6443'\nOCP_HUB_CLUSTER_USER: 'admin'\nOCP_HUB_CLUSTER_PASSWORD: 'pass123'"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_timeout(self, mock_exists, mock_run):
+        self._clear_ocp_cache()
+        result = app_module._get_ocp_connection_status_sync()
+        assert result["connected"] is False
+        assert result["status"] == "timeout"
+
+
+###############################################################################
+# Test _check_configuration_status branches (lines 1796-1841)
+###############################################################################
+class TestCheckConfigurationStatus:
+    """Test GET /api/config/status various branches"""
+
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: 'https://test'\nOCP_HUB_CLUSTER_USER: 'admin'\nOCP_HUB_CLUSTER_PASSWORD: 'pass'\nAWS_REGION: 'us-east-1'\nAWS_ACCESS_KEY_ID: 'AKIA'\nAWS_SECRET_ACCESS_KEY: 'secret'\nOCM_CLIENT_ID: 'id'\nOCM_CLIENT_SECRET: 'secret'"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_fully_configured(self, mock_exists):
+        resp = client.get("/api/config/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["configured"] is True
+        assert data["status"] == "fully_configured"
+
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: 'https://test'\nOCP_HUB_CLUSTER_USER: ''"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_partially_configured(self, mock_exists):
+        resp = client.get("/api/config/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["configured"] is False
+
+    @patch("app.os.path.exists", return_value=False)
+    def test_missing_config_file(self, mock_exists):
+        resp = client.get("/api/config/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["configured"] is False
+        assert data["status"] == "missing"
+
+    @patch("app.yaml.safe_load", side_effect=yaml.YAMLError("bad yaml"))
+    @patch("builtins.open", mock_open(read_data="{{bad"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_invalid_yaml(self, mock_exists, mock_yaml):
+        resp = client.get("/api/config/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["configured"] is False
+        assert data["status"] == "invalid_yaml"
+
+
+###############################################################################
+# Test job status/logs/cancel 404 paths (lines 1102, 1111, 1120)
+###############################################################################
+class TestJobEndpoints404:
+    """Test job endpoints with non-existent job IDs"""
+
+    def test_get_job_status_not_found(self):
+        resp = client.get("/api/jobs/nonexistent-job-id")
+        assert resp.status_code == 404
+
+    def test_get_job_logs_not_found(self):
+        resp = client.get("/api/jobs/nonexistent-job-id/logs")
+        assert resp.status_code == 404
+
+    def test_cancel_job_not_found(self):
+        resp = client.post("/api/jobs/nonexistent-job-id/cancel")
+        assert resp.status_code == 404
+
+
+###############################################################################
+# Test send_cluster_notifications inner branches (lines 379-412)
+###############################################################################
+class TestSendClusterNotificationsBranches:
+    """Test send_cluster_notifications with various operation/status combos"""
+
+    @patch("app.os.path.exists", return_value=False)
+    def test_no_config_file(self, mock_exists):
+        """When notification_config.yml doesn't exist, should silently return"""
+        app_module.send_cluster_notifications(
+            cluster_name="test", region="us-east-1", version="4.20",
+            job_id="j1", status="started", operation_type="provision"
+        )
+        # No error raised
+
+    @patch("builtins.open", mock_open(read_data="notify_provision_start: true\nnotify_provision_success: true\nslack_enabled: false\nemail_enabled: false"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_provision_started_no_services(self, mock_exists):
+        app_module.send_cluster_notifications(
+            cluster_name="test", region="us-east-1", version="4.20",
+            job_id="j1", status="started", operation_type="provision"
+        )
+
+    @patch("builtins.open", mock_open(read_data="notify_delete_failure: true\nslack_enabled: false\nemail_enabled: false"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_delete_failed(self, mock_exists):
+        app_module.send_cluster_notifications(
+            cluster_name="test", region="us-east-1", version="4.20",
+            job_id="j1", status="failed", operation_type="delete",
+            error="CF stack failed"
+        )
+
+
+###############################################################################
+# Test diagnostics endpoint (lines 1524-1575)
+###############################################################################
+class TestRunDiagnostics:
+    """Test POST /api/diagnostics/run"""
+
+    def test_aws_credentials_check(self):
+        resp = client.post("/api/diagnostics/run", json={"checks": ["aws_credentials"]})
+        assert resp.status_code == 200
+
+    @patch("subprocess.run")
+    def test_rosa_auth_check_authenticated(self, mock_run):
+        app_module.rosa_status_cache["data"] = None
+        app_module.rosa_status_cache["timestamp"] = 0
+        mock_run.return_value = MagicMock(returncode=0, stdout="User: test", stderr="")
+        resp = client.post("/api/diagnostics/run", json={"checks": ["rosa_auth"]})
+        assert resp.status_code == 200
+
+    def test_openshift_version_check(self):
+        resp = client.post("/api/diagnostics/run", json={"checks": ["openshift_version"]})
+        assert resp.status_code == 200
+
+
+###############################################################################
+# Test save credentials (lines 1901-1927)
+###############################################################################
+class TestSaveCredentials:
+    """Test POST /api/credentials"""
+
+    @patch("builtins.open", mock_open())
+    @patch("app.os.path.exists", return_value=True)
+    @patch("app.yaml.safe_load", return_value={"existing": "value"})
+    @patch("app.yaml.dump")
+    def test_save_success(self, mock_dump, mock_load, mock_exists):
+        resp = client.post("/api/credentials", json={
+            "credentials": {"AWS_REGION": "us-west-2"}
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+
+    @patch("builtins.open", side_effect=PermissionError("cannot write"))
+    @patch("app.os.path.exists", return_value=True)
+    @patch("app.yaml.safe_load", return_value={})
+    def test_save_permission_error(self, mock_load, mock_exists, mock_file):
+        resp = client.post("/api/credentials", json={
+            "credentials": {"AWS_REGION": "us-west-2"}
+        })
+        assert resp.status_code == 500
+
+
+###############################################################################
+# Test MCE environment error paths (lines 8978-8983, 9067-9072, 9109-9114)
+###############################################################################
+class TestMceEnvironmentErrors:
+    """Test MCE environment endpoint error branches"""
+
+    def test_get_nonexistent_environment(self):
+        resp = client.get("/api/mce-environments/nonexistent-cluster-999")
+        assert resp.status_code in (200, 404, 500)
+
+    def test_update_status_invalid_value(self):
+        resp = client.post("/api/mce-environments/nonexistent-cluster-999/status", json={
+            "status": "tested",
+            "notes": "test"
+        })
+        assert resp.status_code == 400
+
+    def test_update_status_valid_value(self):
+        resp = client.post("/api/mce-environments/nonexistent-cluster-999/status", json={
+            "status": "pass",
+            "notes": "test"
+        })
+        assert resp.status_code in (200, 404, 500)
+
+
+###############################################################################
+# Test AI assistant chat with cluster data (lines 8435, 8445-8451)
+###############################################################################
+class TestAiChatWithClusterStatus:
+    """Test AI assistant with actual cluster data context"""
+
+    def test_chat_about_specific_cluster(self):
+        resp = client.post("/api/ai-assistant/chat", json={
+            "message": "what is the status of my-cluster?",
+            "context": {"clusters": [{
+                "name": "my-cluster",
+                "status": "provisioning",
+                "progress": 50,
+                "namespace": "ns-rosa-hcp",
+                "region": "us-east-1",
+                "version": "4.20.12",
+                "created": "2026-01-01T00:00:00Z"
+            }]}
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "response" in data
+
+    def test_chat_about_failed_cluster(self):
+        resp = client.post("/api/ai-assistant/chat", json={
+            "message": "why did my-cluster fail?",
+            "context": {"clusters": [{
+                "name": "my-cluster",
+                "status": "failed",
+                "progress": 0,
+                "namespace": "ns-rosa-hcp",
+                "region": "us-east-1",
+                "version": "4.20.12",
+                "error_message": "CloudFormation stack failed"
+            }]}
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "response" in data
+
+
+###############################################################################
+# Test test-suites list endpoint (lines 8510-8531)
+###############################################################################
+class TestListTestSuites:
+    """Test GET /api/test-suites/list"""
+
+    def test_list_suites(self):
+        resp = client.get("/api/test-suites/list")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("success") is True
+        assert "suites" in data
+
+    @patch("app.os.path.exists", return_value=False)
+    def test_list_suites_no_directory(self, mock_exists):
+        resp = client.get("/api/test-suites/list")
+        assert resp.status_code == 200
+
+
+###############################################################################
+# Test health and root endpoints (lines 688, 694)
+###############################################################################
+class TestBasicEndpoints:
+    """Test root and health endpoints"""
+
+    def test_root(self):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "message" in data
+
+    def test_health(self):
+        resp = client.get("/api/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "healthy"
+
+
+###############################################################################
+# Test prerequisites/setup-wizard (lines 2392-2412)
+###############################################################################
+class TestSetupWizard:
+    """Test GET /api/guided-setup/status"""
+
+    @patch("subprocess.run")
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: ''\nAWS_REGION: ''"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_prerequisites_not_met(self, mock_exists, mock_run):
+        app_module.rosa_status_cache["data"] = None
+        app_module.rosa_status_cache["timestamp"] = 0
+        app_module.ocp_status_cache["data"] = None
+        app_module.ocp_status_cache["timestamp"] = 0
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not logged in")
+        resp = client.get("/api/guided-setup/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "current_step" in data
+        assert data.get("all_prerequisites_met") is False
+
+
+###############################################################################
+# Test MCE YAML error paths (lines 9151-9156, 9206-9211)
+###############################################################################
+class TestMceEnvironmentStats:
+    """Test GET /api/mce-environments/stats/summary"""
+
+    def test_get_stats(self):
+        resp = client.get("/api/mce-environments/stats/summary")
+        assert resp.status_code == 200
+
+
+###############################################################################
+# Test verify minikube empty cluster name (line 4905)
+###############################################################################
+class TestVerifyMinikubeEmpty:
+    """Test POST /api/minikube/verify-cluster with empty name"""
+
+    def test_empty_cluster_name(self):
+        resp = client.post("/api/minikube/verify-cluster", json={"cluster_name": ""})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["exists"] is False
+        assert "required" in data.get("message", "").lower()
+
+    @patch("subprocess.run")
+    def test_minikube_not_installed(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="command not found")
+        resp = client.post("/api/minikube/verify-cluster", json={"cluster_name": "test"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["exists"] is False
+
+
+###############################################################################
+# Test normalize_timestamp with ISO string (line 1048-1049, 1058-1059)
+###############################################################################
+class TestNormalizeTimestampMore:
+    """Additional normalize_timestamp edge cases"""
+
+    def test_iso_format_with_z(self):
+        result = app_module.normalize_timestamp("2026-01-01T00:00:00Z")
+        assert isinstance(result, datetime)
+        assert result.year == 2026
+
+    def test_invalid_iso_string(self):
+        result = app_module.normalize_timestamp("not-a-date")
+        assert result == datetime.min
+
+    def test_negative_number(self):
+        # Negative number should return datetime.min or raise
+        result = app_module.normalize_timestamp(-1)
+        assert isinstance(result, datetime)
+
+
+###############################################################################
+# Test get_active_minikube_profile (line 4790, 4804-4805)
+###############################################################################
+class TestGetActiveMinikubeProfile:
+    """Test GET /api/minikube/active-profile"""
+
+    @patch("subprocess.run")
+    def test_active_profile_found(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps({"valid": [{"Name": "capa-test", "Status": "Running"}]}), stderr=""
+        )
+        resp = client.get("/api/minikube/active-profile")
+        assert resp.status_code == 200
+
+    @patch("subprocess.run")
+    def test_no_profiles(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps({"valid": []}), stderr=""
+        )
+        resp = client.get("/api/minikube/active-profile")
+        assert resp.status_code == 200
+
+    @patch("subprocess.run", side_effect=Exception("minikube not found"))
+    def test_minikube_error(self, mock_run):
+        resp = client.get("/api/minikube/active-profile")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("active_profile") is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
