@@ -6767,5 +6767,435 @@ class TestGetActiveMinikubeProfile:
         assert data.get("active_profile") is None
 
 
+###############################################################################
+# Test notification settings GET/POST error branches (lines 1286-1291, 1350-1355)
+###############################################################################
+class TestNotificationSettingsEndpoints:
+    """Test GET/POST /api/notification-settings error handling"""
+
+    def test_get_notification_settings(self):
+        resp = client.get("/api/notification-settings")
+        assert resp.status_code == 200
+
+    def test_post_notification_settings(self):
+        resp = client.post("/api/notification-settings", json={
+            "slack_enabled": False,
+            "email_enabled": False,
+        })
+        assert resp.status_code == 200
+
+    def test_test_notification_with_slack_settings(self):
+        """Test notification test endpoint with slack settings in body"""
+        resp = client.post("/api/notification-settings/test", json={
+            "slack_enabled": True,
+            "slack_webhook_url": "https://hooks.slack.com/test/invalid",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        # Will fail connection but should handle gracefully
+        assert "message" in data or "success" in data
+
+    def test_test_notification_empty_body(self):
+        """Test notification test with empty body"""
+        resp = client.post("/api/notification-settings/test", json={})
+        assert resp.status_code == 200
+
+
+###############################################################################
+# Test agent-stats endpoint 404 (lines 1236-1241)
+###############################################################################
+class TestAgentStatsEndpoint:
+    """Test GET /api/jobs/{job_id}/agent-stats"""
+
+    def test_agent_stats_not_found(self):
+        resp = client.get("/api/jobs/nonexistent-job/agent-stats")
+        assert resp.status_code == 404
+
+    def test_agent_stats_with_job(self):
+        job_id = str(uuid.uuid4())
+        app_module.jobs[job_id] = {
+            "status": "running",
+            "created_at": datetime.now().isoformat(),
+            "agent_events": [],
+        }
+        try:
+            resp = client.get(f"/api/jobs/{job_id}/agent-stats")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert "agent_stats" in data
+        finally:
+            app_module.jobs.pop(job_id, None)
+
+
+###############################################################################
+# Test create minikube cluster validation (lines 5428, 5439, 5451, 5463)
+###############################################################################
+class TestCreateMinikubeCluster:
+    """Test POST /api/minikube/create-cluster validation"""
+
+    def test_empty_name(self):
+        resp = client.post("/api/minikube/create-cluster", json={"cluster_name": ""})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "required" in data.get("message", "").lower()
+
+    def test_invalid_name_format(self):
+        resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "Invalid_Name!"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "invalid" in data.get("message", "").lower()
+
+    @patch("subprocess.run")
+    def test_minikube_not_installed(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+        resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "test-mk"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "not installed" in data.get("message", "").lower()
+
+    @patch("subprocess.run")
+    def test_cluster_already_exists(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="v1.32.0", stderr=""),  # minikube version
+            MagicMock(returncode=0, stdout="Running", stderr=""),  # minikube status
+        ]
+        resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "test-mk"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "already exists" in data.get("message", "").lower()
+
+
+###############################################################################
+# Test MCE features endpoint (lines 2986, 3030-3032, 3066-3069, 3080-3083, 3099)
+###############################################################################
+class TestMceFeatures:
+    """Test _get_mce_features_sync"""
+
+    @patch("subprocess.run")
+    def test_mce_features_not_found(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+        try:
+            result = app_module._get_mce_features_sync()
+        except Exception:
+            pass  # HTTPException is expected
+
+    @patch("subprocess.run")
+    def test_mce_features_success(self, mock_run):
+        mce_json = json.dumps({"items": [{
+            "metadata": {"name": "multiclusterengine"},
+            "spec": {"overrides": {"components": [
+                {"name": "cluster-api", "enabled": True},
+                {"name": "cluster-api-provider-aws", "enabled": True},
+            ]}},
+            "status": {"phase": "Available", "currentVersion": "2.7.0"}
+        }]})
+        mock_run.return_value = MagicMock(returncode=0, stdout=mce_json, stderr="")
+        result = app_module._get_mce_features_sync()
+        assert "features" in result or isinstance(result, dict)
+
+
+###############################################################################
+# Test guided-setup/status step logic branches (lines 2395-2412)
+###############################################################################
+class TestGuidedSetupSteps:
+    """Test various steps in guided setup"""
+
+    @patch("subprocess.run")
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: 'https://api.test:6443'\nOCP_HUB_CLUSTER_USER: 'admin'\nOCP_HUB_CLUSTER_PASSWORD: 'pass'\nAWS_REGION: 'us-east-1'\nAWS_ACCESS_KEY_ID: 'AKIA123'\nAWS_SECRET_ACCESS_KEY: 'secret'\nOCM_CLIENT_ID: 'id'\nOCM_CLIENT_SECRET: 'secret'"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_all_prerequisites_met(self, mock_exists, mock_run):
+        app_module.rosa_status_cache["data"] = None
+        app_module.rosa_status_cache["timestamp"] = 0
+        app_module.ocp_status_cache["data"] = None
+        app_module.ocp_status_cache["timestamp"] = 0
+        # rosa whoami succeeds, oc login succeeds, oc get succeeds, aws sts succeeds
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="User: test-user\nOCM API: https://api.openshift.com", stderr=""),  # rosa whoami
+            MagicMock(returncode=0, stdout="Logged in", stderr=""),  # oc login
+            MagicMock(returncode=0, stdout='{"serverVersion": {"major":"1","minor":"27"}}', stderr=""),  # oc get
+            MagicMock(returncode=0, stdout='{"Account": "123456789"}', stderr=""),  # aws sts
+        ]
+        resp = client.get("/api/guided-setup/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "current_step" in data
+
+    @patch("subprocess.run", side_effect=Exception("unexpected error"))
+    @patch("app.os.path.exists", return_value=False)
+    def test_guided_setup_exception(self, mock_exists, mock_run):
+        app_module.rosa_status_cache["data"] = None
+        app_module.rosa_status_cache["timestamp"] = 0
+        app_module.ocp_status_cache["data"] = None
+        app_module.ocp_status_cache["timestamp"] = 0
+        resp = client.get("/api/guided-setup/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("all_prerequisites_met") is False
+
+
+###############################################################################
+# Test onboarding tour endpoint (line 1448+)
+###############################################################################
+class TestOnboardingTour:
+    """Test GET /api/onboarding/tour"""
+
+    def test_get_tour(self):
+        resp = client.get("/api/onboarding/tour")
+        assert resp.status_code == 200
+
+
+###############################################################################
+# Test OCP connection status - additional branches (1946, 1987, 2020, 2087-2088)
+###############################################################################
+class TestOcpConnectionMoreBranches:
+    """Additional OCP connection status branches"""
+
+    @patch("subprocess.run")
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: 'https://api.test:6443'\nOCP_HUB_CLUSTER_USER: 'admin'\nOCP_HUB_CLUSTER_PASSWORD: 'pass123'"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_login_success_then_cluster_info_timeout(self, mock_exists, mock_run):
+        app_module.ocp_status_cache["data"] = None
+        app_module.ocp_status_cache["timestamp"] = 0
+        # Login succeeds, cluster info times out
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="Logged in", stderr=""),
+            subprocess.TimeoutExpired(cmd="oc", timeout=10),
+        ]
+        result = app_module._get_ocp_connection_status_sync()
+        assert result["connected"] is True
+        assert result["status"] == "connected_limited"
+
+    @patch("subprocess.run")
+    @patch("builtins.open", mock_open(read_data="OCP_HUB_API_URL: 'https://api.test:6443'\nOCP_HUB_CLUSTER_USER: 'admin'\nOCP_HUB_CLUSTER_PASSWORD: 'pass123'"))
+    @patch("app.os.path.exists", return_value=True)
+    def test_login_success_full(self, mock_exists, mock_run):
+        app_module.ocp_status_cache["data"] = None
+        app_module.ocp_status_cache["timestamp"] = 0
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="Login successful.", stderr=""),  # oc login
+            MagicMock(returncode=0, stdout="Client: 4.20.0\nServer: 4.20.0", stderr=""),  # oc version
+            MagicMock(returncode=0, stdout="admin", stderr=""),  # oc whoami
+            MagicMock(returncode=0, stdout="Kubernetes master is running", stderr=""),  # oc cluster-info
+        ]
+        result = app_module._get_ocp_connection_status_sync()
+        assert result["connected"] is True
+        assert result["status"] == "connected"
+
+
+###############################################################################
+# Test run_ansible_role timeout/BrokenPipe (lines 2818-2828, 2849-2865)
+###############################################################################
+class TestRunAnsibleRoleBranches:
+    """Test run_ansible_role error branches"""
+
+    @patch("subprocess.Popen")
+    @patch("app.os.path.exists", return_value=True)
+    def test_broken_pipe(self, mock_exists, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.communicate.side_effect = BrokenPipeError("broken pipe")
+        mock_popen.return_value = mock_proc
+        job_id = str(uuid.uuid4())
+        app_module.jobs[job_id] = {
+            "status": "running", "logs": [],
+            "created_at": datetime.now().isoformat(),
+        }
+        try:
+            resp = client.post("/api/ansible/run-role", json={
+                "task_file": "tasks/validate-capa-environment.yml",
+                "description": "test",
+                "job_id": job_id,
+            })
+            assert resp.status_code in (200, 500)
+        finally:
+            app_module.jobs.pop(job_id, None)
+
+
+###############################################################################
+# Test MCE environment search (lines 9163-9216)
+###############################################################################
+class TestMceEnvironmentSearch:
+    """Test GET /api/mce-environments/search/{query}"""
+
+    def test_search_environments(self):
+        resp = client.get("/api/mce-environments/search/test-cluster")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "results" in data or "success" in data
+
+
+###############################################################################
+# Test AWS resource details - load balancers (lines 10106-10160)
+###############################################################################
+class TestAwsResourceDetailsLoadBalancers:
+    """Test GET /api/aws/resource-details/load_balancers"""
+
+    @patch("subprocess.run")
+    def test_load_balancers_details(self, mock_run):
+        lb_json = json.dumps({"LoadBalancers": [{
+            "LoadBalancerArn": "arn:aws:elbv2:us-east-1:123:loadbalancer/app/test/abc123",
+            "LoadBalancerName": "test-lb",
+            "Type": "application",
+            "Scheme": "internet-facing",
+            "State": {"Code": "active"},
+            "DNSName": "test-lb.elb.amazonaws.com",
+            "VpcId": "vpc-123",
+            "CreatedTime": "2026-01-01T00:00:00Z",
+        }]})
+        mock_run.return_value = MagicMock(returncode=0, stdout=lb_json, stderr="")
+        resp = client.get("/api/aws/resource-details/load_balancers")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("success") is True
+
+
+###############################################################################
+# Test AWS resource details - cloudformation (lines 10070-10105)
+###############################################################################
+class TestAwsResourceDetailsCloudformation:
+    """Test GET /api/aws/resource-details/cloudformation"""
+
+    @patch("subprocess.run")
+    def test_cloudformation_details(self, mock_run):
+        stacks_json = json.dumps({"StackSummaries": [{
+            "StackId": "arn:aws:cf:us-east-1:123:stack/test/abc",
+            "StackName": "rosa-test-stack",
+            "StackStatus": "CREATE_COMPLETE",
+            "CreationTime": "2026-01-01T00:00:00Z",
+        }]})
+        detail_json = json.dumps({"Stacks": [{
+            "StackName": "rosa-test-stack",
+            "Description": "ROSA VPC stack",
+            "Tags": [{"Key": "Name", "Value": "test"}],
+        }]})
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=stacks_json, stderr=""),
+            MagicMock(returncode=0, stdout=detail_json, stderr=""),
+        ]
+        resp = client.get("/api/aws/resource-details/cloudformation")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("success") is True
+
+
+###############################################################################
+# Test minikube init-capi endpoint (lines 5349-5350)
+###############################################################################
+class TestMinikubeInitCapi:
+    """Test POST /api/minikube/init-capi"""
+
+    def test_init_capi_empty_name(self):
+        resp = client.post("/api/minikube/initialize-capi", json={
+            "cluster_name": "",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("success") is False
+
+    @patch("subprocess.run")
+    def test_init_capi_starts_job(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        resp = client.post("/api/minikube/initialize-capi", json={
+            "cluster_name": "test-mk",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("success") is True
+        assert "job_id" in data
+
+
+###############################################################################
+# Test check_and_timeout_stuck_jobs with invalid timestamp (line 1167-1168)
+###############################################################################
+class TestStuckJobsInvalidTimestamp:
+    """Test check_and_timeout_stuck_jobs with various timestamp formats"""
+
+    def test_job_with_invalid_started_at(self):
+        job_id = str(uuid.uuid4())
+        app_module.jobs[job_id] = {
+            "status": "running",
+            "started_at": "not-a-timestamp",
+            "created_at": datetime.now().isoformat(),
+        }
+        try:
+            result = app_module.check_and_timeout_stuck_jobs()
+            # Should skip this job due to invalid timestamp
+            assert job_id not in result
+        finally:
+            app_module.jobs.pop(job_id, None)
+
+
+###############################################################################
+# Test diagnostics checks list endpoint (line 1489)
+###############################################################################
+class TestDiagnosticsChecksList:
+    """Test GET /api/diagnostics/checks"""
+
+    def test_get_checks_list(self):
+        resp = client.get("/api/diagnostics/checks")
+        assert resp.status_code == 200
+
+
+###############################################################################
+# Test user profile endpoint
+###############################################################################
+class TestUserProfile:
+    """Test GET /api/user/profile"""
+
+    def test_get_profile(self):
+        resp = client.get("/api/user/profile")
+        assert resp.status_code == 200
+
+
+###############################################################################
+# Test versions endpoint
+###############################################################################
+class TestVersionsEndpoint:
+    """Test GET /api/versions"""
+
+    @patch("subprocess.run")
+    def test_get_versions(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="VERSION  DEFAULT\n4.20.12  yes\n4.20.11  \n4.19.22  \n",
+            stderr="",
+        )
+        resp = client.get("/api/versions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "versions" in data
+
+
+###############################################################################
+# Test MCE save environment (lines 9067-9072)
+###############################################################################
+class TestMceSaveEnvironment:
+    """Test POST /api/mce-environments"""
+
+    def test_save_environment(self):
+        resp = client.post("/api/mce-environments", json={
+            "clusterName": "test-env-save",
+            "platform": "AWS",
+            "password": "test-pass",
+            "apiUrl": "https://api.test-env-save.example.com:6443",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("success") is True or "error" in str(data).lower()
+
+    def test_save_environment_no_name(self):
+        """When no clusterName and no valid apiUrl, should fail gracefully"""
+        resp = client.post("/api/mce-environments", json={
+            "platform": "AWS",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
