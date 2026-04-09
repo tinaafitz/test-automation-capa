@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+import yaml
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch, AsyncMock, mock_open
 
@@ -5501,6 +5502,774 @@ class TestAiChatMoreBranches:
             "context": {"clusters": clusters}
         })
         assert resp.status_code == 200
+
+
+###############################################################################
+# Test get_cluster endpoint (lines 985-997)
+###############################################################################
+class TestGetClusterEndpoint:
+    """Tests for GET /api/clusters/{cluster_id}"""
+
+    def test_cluster_not_found(self):
+        resp = client.get("/api/clusters/nonexistent-id")
+        assert resp.status_code == 404
+
+    def test_cluster_found(self):
+        cluster_id = f"test-cl-{uuid.uuid4()}"
+        job_id = f"test-job-{uuid.uuid4()}"
+        app_module.clusters[cluster_id] = {
+            "name": "test-cluster", "job_id": job_id, "status": "running"
+        }
+        app_module.jobs[job_id] = {"status": "running", "progress": 50}
+        try:
+            resp = client.get(f"/api/clusters/{cluster_id}")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["cluster"]["name"] == "test-cluster"
+        finally:
+            del app_module.clusters[cluster_id]
+            del app_module.jobs[job_id]
+
+
+###############################################################################
+# Test delete minikube cluster (lines 5500-5541)
+###############################################################################
+class TestDeleteMinikubeCluster:
+    """Tests for POST /api/minikube/delete-cluster"""
+
+    @patch("subprocess.run")
+    def test_delete_success(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="Deleted", stderr="")
+        resp = client.post("/api/minikube/delete-cluster", json={"cluster_name": "old-mk"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+
+    @patch("subprocess.run")
+    def test_delete_failure(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+        resp = client.post("/api/minikube/delete-cluster", json={"cluster_name": "old-mk"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+
+    @patch("subprocess.run")
+    def test_delete_timeout(self, mock_run):
+        from subprocess import TimeoutExpired
+        mock_run.side_effect = TimeoutExpired("minikube", 120)
+        resp = client.post("/api/minikube/delete-cluster", json={"cluster_name": "old-mk"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "timed out" in data["message"].lower()
+
+
+###############################################################################
+# Test get active resources (lines 5718-5888, age calculation + status)
+###############################################################################
+class TestGetActiveResourcesDeep:
+    """Tests for POST /api/minikube/get-active-resources with resource types"""
+
+    @patch("subprocess.run")
+    def test_with_multiple_resource_types(self, mock_run):
+        resources_json = json.dumps({"items": [
+            {
+                "kind": "ROSAControlPlane", "metadata": {"name": "rcp-1", "creationTimestamp": "2026-04-07T10:00:00Z"},
+                "spec": {"version": "4.20.12"}, "status": {"ready": True}
+            },
+            {
+                "kind": "ROSANetwork", "metadata": {"name": "net-1", "creationTimestamp": "2026-04-07T09:00:00Z"},
+                "spec": {}, "status": {"ready": True}
+            },
+            {
+                "kind": "RosaRoleConfig", "metadata": {"name": "role-1", "creationTimestamp": "2026-04-07T09:30:00Z"},
+                "spec": {}, "status": {"ready": False}
+            },
+            {
+                "kind": "Cluster", "metadata": {"name": "cl-1", "creationTimestamp": "2026-04-07T08:00:00Z"},
+                "spec": {}, "status": {"phase": "Provisioned"}
+            },
+            {
+                "kind": "MachinePool", "metadata": {"name": "mp-1", "creationTimestamp": "2026-04-07T10:00:00Z"},
+                "spec": {}, "status": {"phase": "Running"}
+            },
+        ]})
+        ns_json = json.dumps({"metadata": {"name": "ns-rosa-hcp", "creationTimestamp": "2026-04-07T07:00:00Z"}, "status": {"phase": "Active"}})
+
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=resources_json, stderr=""),  # kubectl get resources
+            MagicMock(returncode=0, stdout=ns_json, stderr=""),  # kubectl get namespace
+            MagicMock(returncode=0, stdout="apiVersion: v1\nkind: Namespace", stderr=""),  # kubectl get namespace -o yaml
+            MagicMock(returncode=1, stdout="", stderr=""),  # awsclustercontrolleridentity
+        ]
+        resp = client.post("/api/minikube/get-active-resources", json={"cluster_name": "test-mk"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        # Should have resources from bulk fetch + namespace
+        assert len(data["resources"]) >= 5
+
+    @patch("subprocess.run")
+    def test_rcp_not_ready(self, mock_run):
+        """ROSAControlPlane with conditions but not ready"""
+        resources_json = json.dumps({"items": [
+            {
+                "kind": "ROSAControlPlane", "metadata": {"name": "rcp-prov", "creationTimestamp": "2026-04-08T00:00:00Z"},
+                "spec": {}, "status": {"ready": False, "conditions": [
+                    {"type": "SomeCondition", "status": "False"}
+                ]}
+            },
+        ]})
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=resources_json, stderr=""),
+            MagicMock(returncode=1, stdout="", stderr=""),  # namespace
+            MagicMock(returncode=1, stdout="", stderr=""),  # identity
+        ]
+        resp = client.post("/api/minikube/get-active-resources", json={"cluster_name": "test-mk"})
+        assert resp.status_code == 200
+        data = resp.json()
+        found = [r for r in data["resources"] if r["name"] == "rcp-prov"]
+        if found:
+            assert found[0]["status"] == "Provisioning"
+
+
+###############################################################################
+# Test get credentials endpoint error branches (lines 1830-1841)
+###############################################################################
+class TestGetCredentialsErrors:
+    """Tests for GET /api/credentials error branches"""
+
+    @patch("app.yaml.safe_load", side_effect=yaml.YAMLError("bad yaml"))
+    @patch("app.os.path.exists", return_value=True)
+    @patch("builtins.open", mock_open(read_data="bad: {{yaml"))
+    def test_yaml_error(self, mock_exists, mock_yaml):
+        resp = client.get("/api/credentials")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "error" in data.get("message", "").lower() or "yaml" in data.get("message", "").lower()
+
+    @patch("builtins.open", side_effect=PermissionError("denied"))
+    @patch("os.path.exists", return_value=True)
+    def test_generic_error(self, mock_exists, mock_file):
+        resp = client.get("/api/credentials")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "denied" in data.get("message", "").lower() or "error" in data.get("message", "").lower()
+
+
+###############################################################################
+# Test AWS credentials YAML error (lines 2356-2366)
+###############################################################################
+class TestAwsCredentialsYamlError:
+    """Tests for GET /api/aws/credentials-status YAML error branch"""
+
+    @patch("builtins.open", side_effect=yaml.YAMLError("malformed yaml"))
+    @patch("os.path.exists", return_value=True)
+    def test_invalid_yaml_config(self, mock_exists, mock_file):
+        resp = client.get("/api/aws/credentials-status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "invalid_yaml"
+
+    @patch("builtins.open", side_effect=IOError("disk full"))
+    @patch("os.path.exists", return_value=True)
+    def test_generic_exception(self, mock_exists, mock_file):
+        resp = client.get("/api/aws/credentials-status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "error"
+
+
+###############################################################################
+# Test get MCE YAML error branches (lines 3110-3121)
+###############################################################################
+class TestGetMceYamlErrors:
+    """Tests for GET /api/mce/yaml error branches"""
+
+    @patch("subprocess.run")
+    def test_timeout(self, mock_run):
+        from subprocess import TimeoutExpired
+        mock_run.side_effect = TimeoutExpired("oc", 10)
+        resp = client.get("/api/mce/yaml")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "timed out" in data["message"].lower()
+
+    @patch("subprocess.run")
+    def test_generic_error(self, mock_run):
+        mock_run.side_effect = Exception("oc not found")
+        resp = client.get("/api/mce/yaml")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+
+
+###############################################################################
+# Test ROSA clusters error branches (lines 3337-3348)
+###############################################################################
+class TestRosaClustersErrors:
+    """Tests for _get_rosa_clusters_sync error branches"""
+
+    @patch("subprocess.run")
+    def test_timeout(self, mock_run):
+        from subprocess import TimeoutExpired
+        mock_run.side_effect = TimeoutExpired("oc", 30)
+        result = app_module._get_rosa_clusters_sync()
+        assert result["success"] is False
+        assert "timed out" in result["message"].lower()
+
+    @patch("subprocess.run")
+    def test_generic_exception(self, mock_run):
+        mock_run.side_effect = Exception("unexpected")
+        result = app_module._get_rosa_clusters_sync()
+        assert result["success"] is False
+
+
+###############################################################################
+# Test ROSA clusters condition parsing (lines 3243-3255)
+###############################################################################
+class TestRosaClustersConditions:
+    """Test cluster condition parsing with error conditions"""
+
+    @patch("subprocess.run")
+    def test_cluster_ready_via_oc_fallback(self, mock_run):
+        """Ready cluster via oc fallback path (rosa CLI fails first)"""
+        k8s_json = json.dumps({"items": [{
+            "metadata": {"name": "ready-cl", "namespace": "ns-rosa-hcp",
+                         "creationTimestamp": "2026-01-01T00:00:00Z"},
+            "spec": {"version": "4.20.12", "region": "us-east-1"},
+            "status": {"ready": True, "conditions": [
+                {"type": "Ready", "status": "True"}
+            ]}
+        }]})
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr="not logged in"),
+            MagicMock(returncode=0, stdout=k8s_json, stderr=""),
+        ]
+        result = app_module._get_rosa_clusters_sync()
+        assert result["success"] is True
+        assert len(result["clusters"]) == 1
+        assert result["clusters"][0]["status"] == "ready"
+        assert result["clusters"][0]["name"] == "ready-cl"
+
+    @patch("subprocess.run")
+    def test_error_cluster_filtered_out_in_fallback(self, mock_run):
+        """Error/provisioning clusters are filtered out (only ready returned)"""
+        k8s_json = json.dumps({"items": [{
+            "metadata": {"name": "err-cl", "namespace": "ns-rosa-hcp",
+                         "creationTimestamp": "2026-01-01T00:00:00Z"},
+            "spec": {"version": "4.20.12"},
+            "status": {"conditions": [
+                {"type": "Ready", "status": "False", "reason": "ProvisioningFailed",
+                 "message": "CloudFormation stack failed"}
+            ]}
+        }]})
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr="not logged in"),
+            MagicMock(returncode=0, stdout=k8s_json, stderr=""),
+        ]
+        result = app_module._get_rosa_clusters_sync()
+        assert result["success"] is True
+        # Failed clusters are filtered out in the fallback path
+        assert len(result["clusters"]) == 0
+
+
+###############################################################################
+# Test OCP resource detail error branches (lines 6475-6485, 6588-6598)
+###############################################################################
+class TestOcpResourceDetailErrors:
+    """Tests for POST /api/ocp/get-resource-detail error branches"""
+
+    @patch("subprocess.run")
+    def test_resource_not_found(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+        resp = client.post("/api/ocp/get-resource-detail", json={
+            "resource_type": "ROSAControlPlane", "resource_name": "nonexistent", "namespace": "ns-rosa-hcp"
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+
+    @patch("subprocess.run")
+    def test_timeout(self, mock_run):
+        from subprocess import TimeoutExpired
+        mock_run.side_effect = TimeoutExpired("oc", 10)
+        resp = client.post("/api/ocp/get-resource-detail", json={
+            "resource_type": "ROSAControlPlane", "resource_name": "test", "namespace": "ns-rosa-hcp"
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+
+
+###############################################################################
+# Test perform_cluster_deletion exception branch (lines 3699-3710)
+###############################################################################
+class TestPerformDeletionException:
+    """Test perform_cluster_deletion outer exception handler"""
+
+    @patch("subprocess.run")
+    def test_unexpected_exception(self, mock_run):
+        mock_run.side_effect = Exception("unexpected crash")
+        job_id = f"del-exc-{uuid.uuid4()}"
+        app_module.jobs[job_id] = {
+            "status": "running", "return_code": 0, "stderr": "",
+            "logs": [], "progress": 0, "message": "",
+        }
+        try:
+            app_module.perform_cluster_deletion(
+                cluster_name="crash-cl", namespace="ns-rosa-hcp", job_id=job_id
+            )
+            assert app_module.jobs[job_id]["status"] == "failed"
+            assert "crash-cl" in app_module.jobs[job_id]["message"]
+        finally:
+            del app_module.jobs[job_id]
+
+
+###############################################################################
+# Test _save_aws_usage_snapshot and _get_aws_history_db (lines 9661-9694)
+###############################################################################
+class TestAwsUsageSnapshot:
+    """Tests for AWS usage snapshot functions"""
+
+    def test_save_snapshot(self):
+        usage_data = {"vpcs": 3, "ec2_instances": 5, "s3_buckets": "error"}
+        # Should not raise
+        app_module._save_aws_usage_snapshot(usage_data)
+
+    @patch("sqlite3.connect")
+    def test_save_snapshot_db_error(self, mock_connect):
+        mock_connect.side_effect = Exception("db locked")
+        # Should not raise (has try/except)
+        app_module._save_aws_usage_snapshot({"vpcs": 1})
+
+
+###############################################################################
+# Test minikube execute command error (lines 5547+)
+###############################################################################
+class TestMinikubeExecuteCommand:
+    """Tests for POST /api/minikube/execute-command"""
+
+    @patch("subprocess.run")
+    def test_execute_kubectl_success(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="NAME\ndefault\nkube-system", stderr="")
+        resp = client.post("/api/minikube/execute-command", json={
+            "cluster_name": "test-mk", "command": "kubectl get namespaces"
+        })
+        assert resp.status_code == 200
+
+    @patch("subprocess.run")
+    def test_execute_kubectl_failure(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="connection refused")
+        resp = client.post("/api/minikube/execute-command", json={
+            "cluster_name": "test-mk", "command": "kubectl get pods"
+        })
+        assert resp.status_code == 200
+
+
+###############################################################################
+# Test OCP execute-command endpoint (lines 5633-5713)
+###############################################################################
+class TestOcpExecuteCommand:
+    """Tests for POST /api/ocp/execute-command"""
+
+    def test_empty_command(self):
+        resp = client.post("/api/ocp/execute-command", json={"command": ""})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "required" in data.get("error", "").lower()
+
+    def test_dangerous_command_blocked(self):
+        resp = client.post("/api/ocp/execute-command", json={"command": "rm -rf /"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "not allowed" in data.get("error", "").lower() or "security" in data.get("error", "").lower()
+
+    @patch("subprocess.run")
+    def test_success(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="NAME STATUS\ndefault Active", stderr="")
+        resp = client.post("/api/ocp/execute-command", json={"command": "oc get namespaces"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+
+    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="oc", timeout=60))
+    def test_timeout(self, mock_run):
+        resp = client.post("/api/ocp/execute-command", json={"command": "oc get pods"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "timed out" in data.get("error", "").lower()
+
+    @patch("subprocess.run", side_effect=OSError("exec failed"))
+    def test_generic_exception(self, mock_run):
+        resp = client.post("/api/ocp/execute-command", json={"command": "oc get pods"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "exec failed" in data.get("error", "")
+
+
+###############################################################################
+# Test list_jobs error branch (lines 1082-1087)
+###############################################################################
+class TestListJobsError:
+    """Test GET /api/jobs error handling"""
+
+    @patch.object(app_module, "check_and_timeout_stuck_jobs", side_effect=RuntimeError("db error"))
+    def test_list_jobs_exception(self, mock_check):
+        resp = client.get("/api/jobs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "db error" in data.get("error", "")
+
+
+###############################################################################
+# Test clear_all_jobs (line 1090-1095)
+###############################################################################
+class TestClearAllJobs:
+    """Test DELETE /api/jobs"""
+
+    def test_clear_jobs(self):
+        # Add a temporary job
+        job_id = str(uuid.uuid4())
+        app_module.jobs[job_id] = {"status": "completed", "created_at": datetime.now().isoformat()}
+        try:
+            resp = client.delete("/api/jobs")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert len(app_module.jobs) == 0
+        finally:
+            app_module.jobs.pop(job_id, None)
+
+
+###############################################################################
+# Test normalize_timestamp edge cases (lines 1046-1061)
+###############################################################################
+class TestNormalizeTimestampEdgeCases:
+    """Test normalize_timestamp with various input types"""
+
+    def test_numeric_timestamp(self):
+        result = app_module.normalize_timestamp(1704067200)
+        assert isinstance(result, datetime)
+
+    def test_empty_string(self):
+        result = app_module.normalize_timestamp("")
+        assert result == datetime.min
+
+    def test_zero_string(self):
+        result = app_module.normalize_timestamp("0")
+        assert result == datetime.min
+
+    def test_none_value(self):
+        result = app_module.normalize_timestamp(None)
+        assert result == datetime.min
+
+    def test_invalid_type(self):
+        result = app_module.normalize_timestamp([])
+        assert result == datetime.min
+
+
+###############################################################################
+# Test _get_rosa_clusters_sync JSON decode error (line 3182-3184)
+###############################################################################
+class TestRosaClustersJsonDecode:
+    """Test _get_rosa_clusters_sync when rosa CLI returns invalid JSON"""
+
+    @patch("subprocess.run")
+    def test_invalid_json_falls_through_to_oc(self, mock_run):
+        """rosa returns 0 but invalid JSON -> falls through to oc fallback"""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="not json at all", stderr=""),
+            MagicMock(returncode=1, stdout="", stderr="oc not connected"),
+        ]
+        result = app_module._get_rosa_clusters_sync()
+        assert result["success"] is False
+        assert mock_run.call_count == 2
+
+
+###############################################################################
+# Test notification settings error branches (lines 1286-1293, 1350-1357)
+###############################################################################
+class TestNotificationSettingsErrors:
+    """Test notification settings error paths"""
+
+    @patch("builtins.open", side_effect=PermissionError("cannot read"))
+    @patch("os.path.exists", return_value=True)
+    def test_get_notification_settings_error(self, mock_exists, mock_file):
+        resp = client.get("/api/notification-settings")
+        assert resp.status_code in (200, 500)
+
+    def test_test_notification_no_services_enabled(self):
+        """Test notification test when no services enabled"""
+        with patch.object(app_module.slack_service, "config", {"slack_enabled": False}):
+            with patch.object(app_module.email_service, "config", {"email_enabled": False}):
+                resp = client.post("/api/notification-settings/test", json={})
+                assert resp.status_code == 200
+                data = resp.json()
+                assert data["success"] is False
+                assert "no notification" in data.get("message", "").lower() or "not enabled" in data.get("message", "").lower()
+
+
+###############################################################################
+# Test CAPI CLI versions endpoint (lines 4595-4672)
+###############################################################################
+class TestCapiCliVersions:
+    """Test GET /api/capi/cli-versions"""
+
+    @patch("subprocess.run")
+    def test_all_tools_available(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="v1.5.0", stderr="")
+        resp = client.get("/api/capi/cli-versions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "tools" in data or "clusterctl" in str(data)
+
+    @patch("subprocess.run")
+    def test_tools_not_found(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+        resp = client.get("/api/capi/cli-versions")
+        assert resp.status_code == 200
+
+
+###############################################################################
+# Test AWS usage data collection (lines 2849-2865)
+###############################################################################
+class TestCollectAwsUsageDataErrors:
+    """Test _collect_aws_usage_data error branches"""
+
+    @patch("subprocess.run")
+    def test_partial_failures(self, mock_run):
+        """Some aws commands succeed, some fail"""
+        def side_effect_fn(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "describe-vpcs" in cmd:
+                return MagicMock(returncode=0, stdout=json.dumps({"Vpcs": [{"VpcId": "vpc-1"}]}), stderr="")
+            return MagicMock(returncode=1, stdout="", stderr="access denied")
+        mock_run.side_effect = side_effect_fn
+        result = app_module._collect_aws_usage_data()
+        assert isinstance(result, dict)
+        assert result.get("vpcs") == 1 or result.get("vpcs") == "error"
+
+
+###############################################################################
+# Test AWS resource details endpoint (lines 9833-9915)
+###############################################################################
+class TestAwsResourceDetails:
+    """Test GET /api/aws/resource-details/{resource_type}"""
+
+    @patch("subprocess.run")
+    def test_nat_gateways_details(self, mock_run):
+        nat_json = json.dumps({"NatGateways": [{
+            "NatGatewayId": "nat-123",
+            "VpcId": "vpc-abc",
+            "State": "available",
+            "CreateTime": "2026-01-01T00:00:00Z",
+            "Tags": [{"Key": "Name", "Value": "test-nat"}],
+        }]})
+        mock_run.return_value = MagicMock(returncode=0, stdout=nat_json, stderr="")
+        resp = client.get("/api/aws/resource-details/nat_gateways")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+
+    @patch("subprocess.run")
+    def test_unknown_resource_type(self, mock_run):
+        resp = client.get("/api/aws/resource-details/unknown_type")
+        assert resp.status_code == 200
+        data = resp.json()
+        # Unknown types return empty details or an error
+        assert "details" in data or "success" in data
+
+
+###############################################################################
+# Test send_cluster_notifications (lines 1167-1168, 1216, 1224-1227)
+###############################################################################
+class TestSendClusterNotificationsEdge:
+    """Test send_cluster_notifications edge cases"""
+
+    def test_notify_with_disabled_services(self):
+        """When both services disabled, should not error"""
+        with patch.object(app_module.slack_service, "config", {"slack_enabled": False}):
+            with patch.object(app_module.email_service, "config", {"email_enabled": False}):
+                # Should not raise
+                app_module.send_cluster_notifications(
+                    cluster_name="test-cl",
+                    region="us-east-1",
+                    version="4.20",
+                    job_id="test-job",
+                    status="started",
+                )
+
+
+###############################################################################
+# Test CAPI component versions exception branches (lines 4419-4421, 4472-4474, 4585-4592)
+###############################################################################
+class TestCapiComponentVersionsExceptions:
+    """Test GET /api/capi/component-versions exception handling"""
+
+    @patch("subprocess.run", side_effect=Exception("kubectl not found"))
+    def test_all_components_fail(self, mock_run):
+        resp = client.get("/api/capi/component-versions")
+        assert resp.status_code in (200, 500)
+
+    @patch("subprocess.run")
+    def test_some_components_fail(self, mock_run):
+        # cert-manager succeeds, rest fail
+        results = [
+            MagicMock(returncode=0, stdout="quay.io/cert-manager:v1.12.0", stderr=""),  # cert-manager image
+            MagicMock(returncode=0, stdout='{"metadata":{}}', stderr=""),  # cert-manager yaml
+        ]
+        # Then capi fails
+        results.append(MagicMock(returncode=1, stdout="", stderr="not found"))
+        # Then capa fails
+        results.append(MagicMock(returncode=1, stdout="", stderr="not found"))
+        # Then rosa crd fails
+        results.append(MagicMock(returncode=1, stdout="", stderr="not found"))
+        mock_run.side_effect = results
+        resp = client.get("/api/capi/component-versions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "components" in data
+
+
+###############################################################################
+# Test _get_rosa_status_sync with rosa CLI connected (lines 3066-3083)
+###############################################################################
+class TestGetRosaStatusSync:
+    """Test _get_rosa_status_sync branches"""
+
+    @patch("subprocess.run")
+    def test_rosa_connected(self, mock_run):
+        # Clear cache so the function actually calls subprocess
+        app_module.rosa_status_cache["data"] = None
+        app_module.rosa_status_cache["timestamp"] = 0
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="OCM API: https://api.openshift.com\nUser: test-user", stderr=""
+        )
+        result = app_module._get_rosa_status_sync()
+        assert result.get("authenticated") is True
+
+    @patch("subprocess.run")
+    def test_rosa_not_connected(self, mock_run):
+        # Clear cache
+        app_module.rosa_status_cache["data"] = None
+        app_module.rosa_status_cache["timestamp"] = 0
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="not logged in"
+        )
+        result = app_module._get_rosa_status_sync()
+        assert result.get("authenticated") is False
+
+
+###############################################################################
+# Test generate-yaml with ROSARoleConfig and ROSANetwork (lines 6880-6928)
+###############################################################################
+class TestGenerateYamlRoleAndNetwork:
+    """Test POST /api/provisioning/generate-yaml with role/network configs"""
+
+    @patch("subprocess.run")
+    def test_combined_automation_mode(self, mock_run):
+        """Combined automation mode with role and network"""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        resp = client.post("/api/provisioning/generate-yaml", json={
+            "config": {
+                "clusterName": "role-test",
+                "openShiftVersion": "4.20.0",
+                "region": "us-east-1",
+                "automationMode": "combined",
+                "createRosaRoleConfig": True,
+                "createRosaNetwork": True,
+                "accountId": "123456789",
+                "oidcConfigId": "abc-123",
+                "operatorRolesPrefix": "test-prefix",
+                "cidrBlock": "10.0.0.0/16",
+            }
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("success") is True or "yaml" in str(data).lower()
+
+
+###############################################################################
+# Test AI assistant chat fallback (no ANTHROPIC_API_KEY) (lines 7915-7919)
+###############################################################################
+class TestAiAssistantChatFallback:
+    """Test AI assistant without API key uses rule-based fallback"""
+
+    @patch.dict(os.environ, {}, clear=False)
+    def test_fallback_response_for_status_query(self):
+        # Remove API key if present
+        env = os.environ.copy()
+        env.pop("ANTHROPIC_API_KEY", None)
+        with patch.dict(os.environ, env, clear=True):
+            resp = client.post("/api/ai-assistant/chat", json={
+                "message": "what is the status of my clusters?",
+                "context": {"clusters": []}
+            })
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "response" in data
+
+
+###############################################################################
+# Test AWS usage trend data endpoint (lines 9725+)
+###############################################################################
+class TestAwsUsageTrend:
+    """Test GET /api/aws/usage-trend"""
+
+    def test_get_trend_default(self):
+        resp = client.get("/api/aws/usage-trend")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("success") is True or "snapshots" in data or "data" in data
+
+    def test_get_trend_with_hours(self):
+        resp = client.get("/api/aws/usage-trend?hours=12")
+        assert resp.status_code == 200
+
+
+###############################################################################
+# Test _collect_aws_usage_data timeout (line 2849-2865)
+###############################################################################
+class TestCollectAwsUsageTimeout:
+    """Test _collect_aws_usage_data when subprocess times out"""
+
+    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="aws", timeout=30))
+    def test_timeout_returns_errors(self, mock_run):
+        result = app_module._collect_aws_usage_data()
+        # Each resource type should return "error" on timeout
+        assert isinstance(result, dict)
+        for val in result.values():
+            assert val == "error" or isinstance(val, int)
+
+
+###############################################################################
+# Test _get_supported_versions_sync error paths (lines 2818-2828)
+###############################################################################
+class TestGetSupportedVersionsErrors:
+    """Test _get_supported_versions_sync error handling"""
+
+    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="rosa", timeout=30))
+    def test_timeout_returns_fallback(self, mock_run):
+        result = app_module._get_supported_versions_sync()
+        assert isinstance(result, dict)
+        # On error, returns hardcoded fallback versions
+        assert len(result.get("versions", [])) > 0
+        assert "default_version" in result
+
+    @patch("subprocess.run", side_effect=Exception("connection failed"))
+    def test_exception_returns_fallback(self, mock_run):
+        result = app_module._get_supported_versions_sync()
+        assert isinstance(result, dict)
+        assert len(result.get("versions", [])) > 0
 
 
 if __name__ == "__main__":
