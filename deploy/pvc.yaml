@@ -1,0 +1,14 @@
+# Persistent storage for action history, agent knowledge base, etc.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: capa-automation-data
+  namespace: capa-automation
+  labels:
+    app: capa-automation
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

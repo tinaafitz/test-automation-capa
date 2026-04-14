@@ -44,6 +44,7 @@ const CapaSidebar = ({
   onRecentTasksClick,
   onAWSUsageClick,
   onWorkflowsClick,
+  onClusterActionsClick,
   activeSection = 'environments',
   environment = 'mce' // 'mce' or 'minikube'
 }) => {
@@ -151,6 +152,13 @@ const CapaSidebar = ({
       label: 'Workflows',
       icon: <span className="text-lg">&#9776;</span>,
       onClick: onWorkflowsClick
+    },
+    {
+      id: 'cluster-actions',
+      label: 'Cluster Actions',
+      icon: <span className="text-lg">&#9889;</span>,
+      onClick: onClusterActionsClick,
+      showInEnvironments: ['mce']
     },
     {
       id: 'test-suite-dashboard',

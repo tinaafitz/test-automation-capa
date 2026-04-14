@@ -16,6 +16,7 @@ import ResourcesViewer from '../components/ResourcesViewer';
 import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import NotificationSettingsInline from '../components/NotificationSettingsInline';
 import WorkflowBuilder from '../components/WorkflowBuilder';
+import ClusterActions from '../components/ClusterActions';
 import {
   useApiStatusContext,
   useRecentOperationsContext,
@@ -1055,6 +1056,7 @@ const CAPADashboardContent = () => {
     onRecentTasksClick: () => setActiveSection('recent-tasks'),
     onAWSUsageClick: () => navigate('/aws-usage'),
     onWorkflowsClick: () => setActiveSection('workflows'),
+    onClusterActionsClick: () => setActiveSection('cluster-actions'),
   };
 
   // ============================================================================
@@ -1872,6 +1874,11 @@ const CAPADashboardContent = () => {
             </p>
             <WorkflowBuilder />
           </div>
+        );
+
+      case 'cluster-actions':
+        return (
+          <ClusterActions />
         );
 
       case 'ai-assistant':

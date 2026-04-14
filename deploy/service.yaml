@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: capa-automation
+  namespace: capa-automation
+  labels:
+    app: capa-automation
+spec:
+  selector:
+    app: capa-automation
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http
