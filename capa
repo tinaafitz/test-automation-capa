@@ -591,10 +591,8 @@ def load_spec(args, base_dir: Path) -> ClusterAutomationSpec:
                 # Auto-parse booleans and numbers
                 if v.lower() in ("true", "false"):
                     v = v.lower() == "true"
-                try:
+                elif v.isdigit() or (v.startswith("-") and v[1:].isdigit()):
                     v = int(v)
-                except (ValueError, TypeError):
-                    pass
                 overrides[k] = v
 
     # Override from explicit CLI args
