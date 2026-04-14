@@ -1286,7 +1286,7 @@ def main():
     def add_common_args(p):
         p.add_argument("-f", "--file", help="ClusterAutomationSpec YAML file")
         p.add_argument("--profile", "-p", help="Profile name from specs/")
-        p.add_argument("-e", "--extra-vars", nargs="*", metavar="KEY=VAL", help="Override variables")
+        p.add_argument("-e", "--extra-vars", action="append", metavar="KEY=VAL", help="Override variables")
         p.add_argument("--cluster", "-c", help="Cluster name")
         p.add_argument("--namespace", "-n", help="Namespace", default="ns-rosa-hcp")
         p.add_argument("--version", help="OpenShift version")
