@@ -88,12 +88,19 @@ jobs:
             );
             const isFeaturePR = (newUiComponents.length > 0 || infraFiles.length > 0) && changes <= 5000;
 
+            // Check if this is a refactor PR (code movement: additions ≈ deletions)
+            const isRefactorPR = deletions > 0 && additions > 0 &&
+              Math.min(additions, deletions) / Math.max(additions, deletions) > 0.5 &&
+              changes <= 3000;
+
             if (isDocsOnly) {
               console.log(`Documentation-only PR - skipping size check (${changes} changes in ${docOrCiFiles.length} doc/ci files)`);
             } else if (isTestPR) {
               core.warning(`Large test PR (${changes} changes in ${testFiles.length} test files). Test PRs are exempt from size limits.`);
             } else if (isNewUiComponent && changes > 1000) {
               core.warning(`Large UI component PR (${changes} changes in ${newUiComponents.length} component files). Allowed up to 1500 for new components.`);
+            } else if (isRefactorPR && changes > 1000) {
+              core.warning(`Large refactor PR (${changes} changes: +${additions}/-${deletions}). Allowed up to 3000 for balanced refactors.`);
             } else if (isFeaturePR && changes > 1000) {
               core.warning(`Large feature PR (${changes} changes with ${newUiComponents.length} UI components, ${infraFiles.length} infra files). Allowed up to 5000 for feature PRs.`);
             } else if (changes > 1000) {
