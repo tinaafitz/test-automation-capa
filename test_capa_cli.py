@@ -1989,3 +1989,229 @@ class TestCmdWorkflow:
         capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
         out = capsys.readouterr().out
         assert "Already a YAML workflow" in out
+
+
+class TestCmdTrigger:
+    """Tests for the 'capa trigger' command."""
+
+    @pytest.fixture
+    def trigger_env(self, minimal_registry):
+        """Set up a temp dir with a workflow for trigger tests."""
+        base_dir = minimal_registry._registry_path.parent.parent
+
+        # Create a YAML workflow
+        wf_dir = base_dir / "specs" / "workflows"
+        wf_dir.mkdir(parents=True, exist_ok=True)
+        yaml_wf = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "Workflow",
+            "metadata": {"name": "test-wf", "description": "Test workflow"},
+            "spec": {
+                "triggers": [
+                    {"type": "schedule", "name": "nightly", "cron": "0 2 * * *"},
+                    {"type": "webhook", "name": "ci-hook"},
+                ],
+                "vars": {},
+                "steps": [
+                    {"name": "Step 1", "playbook": "playbooks/test.yml", "on_failure": "stop", "timeout": 60},
+                ],
+            },
+        }
+        with open(wf_dir / "test-wf.yml", "w") as f:
+            yaml.dump(yaml_wf, f)
+
+        # Ensure vars dir exists
+        (base_dir / "vars").mkdir(exist_ok=True)
+
+        return base_dir
+
+    def test_list_empty(self, trigger_env, minimal_registry, capsys):
+        args = argparse.Namespace(trigger_action="list", dry_run=False, verbose=False)
+        capa_cli.cmd_trigger(args, trigger_env, minimal_registry)
+        out = capsys.readouterr().out
+        # Should show declared YAML triggers
+        assert "test-wf" in out
+        assert "nightly" in out or "schedule" in out
+
+    def test_create_schedule(self, trigger_env, minimal_registry, capsys):
+        args = argparse.Namespace(
+            trigger_action="create", target="test-wf",
+            type="schedule", cron="0 3 * * *", timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(args, trigger_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "Created schedule trigger" in out
+        assert "test-wf" in out
+        assert "Daily at 3:00" in out
+
+        # Verify state persisted
+        state = capa_cli._load_trigger_state(trigger_env)
+        assert len(state["triggers"]) == 1
+        assert state["triggers"][0]["type"] == "schedule"
+        assert state["triggers"][0]["cron"] == "0 3 * * *"
+        assert state["triggers"][0]["enabled"] is True
+
+    def test_create_webhook(self, trigger_env, minimal_registry, capsys):
+        args = argparse.Namespace(
+            trigger_action="create", target="test-wf",
+            type="webhook", cron=None, timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(args, trigger_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "Created webhook trigger" in out
+        assert "/api/webhooks/trigger/" in out
+
+    def test_create_missing_workflow(self, trigger_env, minimal_registry):
+        args = argparse.Namespace(
+            trigger_action="create", target="nonexistent",
+            type="schedule", cron="0 2 * * *", timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_trigger(args, trigger_env, minimal_registry)
+
+    def test_create_schedule_missing_cron(self, trigger_env, minimal_registry):
+        args = argparse.Namespace(
+            trigger_action="create", target="test-wf",
+            type="schedule", cron=None, timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_trigger(args, trigger_env, minimal_registry)
+
+    def test_list_shows_created_triggers(self, trigger_env, minimal_registry, capsys):
+        # Create a trigger first
+        create_args = argparse.Namespace(
+            trigger_action="create", target="test-wf",
+            type="schedule", cron="30 4 * * *", timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(create_args, trigger_env, minimal_registry)
+        capsys.readouterr()  # clear
+
+        # List
+        list_args = argparse.Namespace(trigger_action="list", dry_run=False, verbose=False)
+        capa_cli.cmd_trigger(list_args, trigger_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "Active Triggers" in out
+        assert "test-wf" in out
+        assert "trg-" in out
+
+    def test_show_trigger(self, trigger_env, minimal_registry, capsys):
+        # Create
+        create_args = argparse.Namespace(
+            trigger_action="create", target="test-wf",
+            type="schedule", cron="0 2 * * *", timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(create_args, trigger_env, minimal_registry)
+        capsys.readouterr()
+
+        state = capa_cli._load_trigger_state(trigger_env)
+        trigger_id = state["triggers"][0]["trigger_id"]
+
+        # Show
+        show_args = argparse.Namespace(
+            trigger_action="show", target=trigger_id,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(show_args, trigger_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert trigger_id in out
+        assert "test-wf" in out
+        assert "schedule" in out
+
+    def test_enable_disable(self, trigger_env, minimal_registry, capsys):
+        # Create
+        create_args = argparse.Namespace(
+            trigger_action="create", target="test-wf",
+            type="schedule", cron="0 2 * * *", timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(create_args, trigger_env, minimal_registry)
+        capsys.readouterr()
+
+        state = capa_cli._load_trigger_state(trigger_env)
+        trigger_id = state["triggers"][0]["trigger_id"]
+
+        # Disable
+        disable_args = argparse.Namespace(
+            trigger_action="disable", target=trigger_id,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(disable_args, trigger_env, minimal_registry)
+        state = capa_cli._load_trigger_state(trigger_env)
+        assert state["triggers"][0]["enabled"] is False
+
+        # Enable
+        enable_args = argparse.Namespace(
+            trigger_action="enable", target=trigger_id,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(enable_args, trigger_env, minimal_registry)
+        state = capa_cli._load_trigger_state(trigger_env)
+        assert state["triggers"][0]["enabled"] is True
+
+    def test_delete_trigger(self, trigger_env, minimal_registry, capsys):
+        # Create
+        create_args = argparse.Namespace(
+            trigger_action="create", target="test-wf",
+            type="schedule", cron="0 2 * * *", timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(create_args, trigger_env, minimal_registry)
+        capsys.readouterr()
+
+        state = capa_cli._load_trigger_state(trigger_env)
+        trigger_id = state["triggers"][0]["trigger_id"]
+
+        # Delete
+        delete_args = argparse.Namespace(
+            trigger_action="delete", target=trigger_id,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(delete_args, trigger_env, minimal_registry)
+        state = capa_cli._load_trigger_state(trigger_env)
+        assert len(state["triggers"]) == 0
+
+    def test_history_empty(self, trigger_env, minimal_registry, capsys):
+        args = argparse.Namespace(
+            trigger_action="history", target=None,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(args, trigger_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "No trigger run history" in out
+
+    def test_cron_to_human(self):
+        assert capa_cli._cron_to_human("0 2 * * *") == "Daily at 2:00"
+        assert capa_cli._cron_to_human("30 14 * * *") == "Daily at 14:30"
+        assert capa_cli._cron_to_human("0 9 * * 1") == "Every Mon at 9:00"
+        assert capa_cli._cron_to_human("15 * * * *") == "Every hour at :15"
+
+    def test_show_not_found(self, trigger_env, minimal_registry):
+        args = argparse.Namespace(
+            trigger_action="show", target="trg-nonexistent",
+            dry_run=False, verbose=False, limit=20,
+        )
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_trigger(args, trigger_env, minimal_registry)
+
+    def test_list_declared_yaml_triggers(self, trigger_env, minimal_registry, capsys):
+        """YAML workflows with spec.triggers should show as declared triggers."""
+        args = argparse.Namespace(trigger_action="list", dry_run=False, verbose=False)
+        capa_cli.cmd_trigger(args, trigger_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "Declared Triggers" in out
+        assert "schedule" in out
+        assert "webhook" in out

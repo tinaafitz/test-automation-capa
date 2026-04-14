@@ -1,5 +1,6 @@
 # Credentials and secrets
 vars/user_vars.yml
+vars/trigger_state.json
 *.pem
 *.key
 *.crt
