@@ -4,6 +4,7 @@ Covers Phases 3 and 3B: pure endpoints, utility functions,
 subprocess endpoints, MCE CRUD, and complex flows.
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -39,6 +40,8 @@ from app import (
     _save_action_history,
     _record_action,
     _build_json_merge_patch,
+    _get_cluster_lock,
+    _cluster_locks,
     CLUSTER_FEATURE_REGISTRY,
     _FEATURE_INDEX,
     ACTION_HISTORY_FILE,
@@ -1502,6 +1505,49 @@ class TestExecutePlaybookPath:
         data = resp.json()
         assert data["results"][0]["status"] == "error"
         assert "Playbook not found" in data["results"][0]["message"]
+
+
+class TestClusterConcurrencyLock:
+    """Tests for per-cluster concurrency locking."""
+
+    def test_get_cluster_lock_creates_lock(self):
+        lock = _get_cluster_lock("lock-test-cluster")
+        assert lock is not None
+        assert isinstance(lock, asyncio.Lock)
+        # Clean up
+        _cluster_locks.pop("lock-test-cluster", None)
+
+    def test_get_cluster_lock_returns_same_lock(self):
+        lock1 = _get_cluster_lock("lock-reuse-cluster")
+        lock2 = _get_cluster_lock("lock-reuse-cluster")
+        assert lock1 is lock2
+        _cluster_locks.pop("lock-reuse-cluster", None)
+
+    def test_different_clusters_get_different_locks(self):
+        lock_a = _get_cluster_lock("lock-cluster-a")
+        lock_b = _get_cluster_lock("lock-cluster-b")
+        assert lock_a is not lock_b
+        _cluster_locks.pop("lock-cluster-a", None)
+        _cluster_locks.pop("lock-cluster-b", None)
+
+    def test_execute_rejects_concurrent_request(self, client):
+        """When a cluster lock is held, a second request gets 409."""
+        lock = _get_cluster_lock("busy-cluster")
+        # Manually acquire the lock to simulate an in-progress operation
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(lock.acquire())
+        try:
+            resp = client.post("/api/cluster-actions/execute", json={
+                "cluster_name": "busy-cluster",
+                "namespace": "ns-rosa-hcp",
+                "actions": [],
+            })
+            assert resp.status_code == 409
+            assert "operation in progress" in resp.json()["detail"]
+        finally:
+            lock.release()
+            loop.close()
+            _cluster_locks.pop("busy-cluster", None)
 
 
 if __name__ == "__main__":
