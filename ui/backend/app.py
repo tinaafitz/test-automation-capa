@@ -9248,6 +9248,20 @@ def _find_feature(feature_id):
     return _get_feature_index().get(feature_id)
 
 
+def _build_json_merge_patch(k8s_field: str, value) -> dict:
+    """Build a JSON merge patch object from a k8s_field path (e.g. '.spec.channelGroup')."""
+    field_parts = [p for p in k8s_field.split(".") if p]
+    patch_obj = {}
+    current = patch_obj
+    for i, part in enumerate(field_parts):
+        if i == len(field_parts) - 1:
+            current[part] = value
+        else:
+            current[part] = {}
+            current = current[part]
+    return patch_obj
+
+
 @app.post("/api/cluster-actions/execute")
 async def execute_cluster_actions(request: ClusterActionRequest):
     """
@@ -9351,27 +9365,7 @@ async def execute_cluster_actions(request: ClusterActionRequest):
 
             if resource and field:
                 try:
-                    # Build JSON patch value
-                    if isinstance(target_value, bool):
-                        patch_val = json.dumps(target_value)
-                    elif isinstance(target_value, (int, float)):
-                        patch_val = str(target_value)
-                    elif isinstance(target_value, dict):
-                        patch_val = json.dumps(target_value)
-                    else:
-                        patch_val = f'"{target_value}"'
-
-                    # Convert k8s_field like .spec.channelGroup to JSON merge patch
-                    field_parts = [p for p in field.split(".") if p]
-                    patch_obj = {}
-                    current = patch_obj
-                    for i, part in enumerate(field_parts):
-                        if i == len(field_parts) - 1:
-                            current[part] = target_value
-                        else:
-                            current[part] = {}
-                            current = current[part]
-
+                    patch_obj = _build_json_merge_patch(field, target_value)
                     patch_json = json.dumps(patch_obj)
                     resource_name = resource.lower()
 
@@ -9877,16 +9871,7 @@ async def execute_cluster_spec(request: Request):
             cluster = step.get("cluster", "")
             namespace = step.get("namespace", "ns-rosa-hcp")
 
-            field_parts = [p for p in field.split(".") if p]
-            patch_obj = {}
-            current = patch_obj
-            for i, part in enumerate(field_parts):
-                if i == len(field_parts) - 1:
-                    current[part] = value
-                else:
-                    current[part] = {}
-                    current = current[part]
-
+            patch_obj = _build_json_merge_patch(field, value)
             cmd = ["oc", "patch", resource, cluster, "-n", namespace,
                    "--type=merge", "-p", json.dumps(patch_obj)]
 

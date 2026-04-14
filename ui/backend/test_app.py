@@ -38,6 +38,7 @@ from app import (
     _load_action_history,
     _save_action_history,
     _record_action,
+    _build_json_merge_patch,
     CLUSTER_FEATURE_REGISTRY,
     _FEATURE_INDEX,
     ACTION_HISTORY_FILE,
@@ -1343,6 +1344,164 @@ class TestFeatureValueValidation:
     def test_action_type_passes(self):
         feat = {"id": "test", "type": "action"}
         assert _validate_feature_value(feat, None) is None
+
+
+class TestBuildJsonMergePatch:
+    """Tests for _build_json_merge_patch helper."""
+
+    def test_simple_field(self):
+        result = _build_json_merge_patch(".spec.channelGroup", "fast")
+        assert result == {"spec": {"channelGroup": "fast"}}
+
+    def test_nested_field(self):
+        result = _build_json_merge_patch(".spec.network.noCNI", True)
+        assert result == {"spec": {"network": {"noCNI": True}}}
+
+    def test_single_level(self):
+        result = _build_json_merge_patch(".version", "4.20.11")
+        assert result == {"version": "4.20.11"}
+
+    def test_dict_value(self):
+        result = _build_json_merge_patch(".spec.additionalTags", {"env": "test"})
+        assert result == {"spec": {"additionalTags": {"env": "test"}}}
+
+
+class TestClusterSpecPlan:
+    """Tests for /api/cluster-specs/plan endpoint."""
+
+    def test_plan_create_spec(self, client):
+        resp = client.post("/api/cluster-specs/plan", json={
+            "spec": {
+                "apiVersion": "capa-automation/v1",
+                "kind": "ClusterAutomationSpec",
+                "metadata": {"name": "test"},
+                "spec": {
+                    "action": "create",
+                    "name_prefix": "test1",
+                    "version": "4.20.11",
+                    "features": {"private_network": True},
+                },
+            },
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["step_count"] >= 1
+        assert data["plan"][0]["type"] == "playbook"
+
+    def test_plan_upgrade_spec(self, client):
+        resp = client.post("/api/cluster-specs/plan", json={
+            "spec": {
+                "apiVersion": "capa-automation/v1",
+                "kind": "ClusterAutomationSpec",
+                "metadata": {"name": "test"},
+                "spec": {
+                    "action": "upgrade",
+                    "cluster": "test-cluster",
+                    "version": "4.20.12",
+                },
+            },
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["step_count"] >= 2  # CP upgrade + MP upgrade
+
+    def test_plan_delete_spec(self, client):
+        resp = client.post("/api/cluster-specs/plan", json={
+            "spec": {
+                "apiVersion": "capa-automation/v1",
+                "kind": "ClusterAutomationSpec",
+                "metadata": {"name": "test"},
+                "spec": {
+                    "action": "delete",
+                    "cluster": "test-cluster",
+                },
+            },
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["step_count"] == 1
+
+    def test_plan_no_spec(self, client):
+        resp = client.post("/api/cluster-specs/plan", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+
+    def test_plan_with_overrides(self, client):
+        resp = client.post("/api/cluster-specs/plan", json={
+            "spec": {
+                "apiVersion": "capa-automation/v1",
+                "kind": "ClusterAutomationSpec",
+                "metadata": {"name": "test"},
+                "spec": {"action": "create", "name_prefix": "orig"},
+            },
+            "overrides": {"version": "4.20.12"},
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+
+
+class TestClusterSpecExecute:
+    """Tests for /api/cluster-specs/execute endpoint."""
+
+    def test_execute_no_spec(self, client):
+        resp = client.post("/api/cluster-specs/execute", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+
+    @patch("app.os.path.exists", return_value=True)
+    @patch("app.asyncio.create_task")
+    def test_execute_create_spec(self, mock_task, mock_exists, client):
+        resp = client.post("/api/cluster-specs/execute", json={
+            "spec": {
+                "apiVersion": "capa-automation/v1",
+                "kind": "ClusterAutomationSpec",
+                "metadata": {"name": "test"},
+                "spec": {"action": "create", "name_prefix": "test1"},
+            },
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert len(data["results"]) >= 1
+        assert data["results"][0]["status"] == "running"
+
+
+class TestExecutePlaybookPath:
+    """Tests for execute endpoint's playbook-backed feature path."""
+
+    @patch("app.os.path.exists", return_value=True)
+    @patch("app.asyncio.create_task")
+    def test_execute_playbook_feature(self, mock_task, mock_exists, client):
+        """Test executing a playbook-backed feature (e.g. control_plane_upgrade)."""
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "test-cluster",
+            "namespace": "ns-rosa-hcp",
+            "actions": [{"feature_id": "control_plane_upgrade", "target_value": "4.20.12"}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["status"] == "running"
+        assert data["results"][0]["playbook"] is not None
+        assert "job_id" in data["results"][0]
+
+    @patch("app.os.path.exists", return_value=False)
+    def test_execute_playbook_not_found(self, mock_exists, client):
+        """Test error when playbook file doesn't exist."""
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "test-cluster",
+            "namespace": "ns-rosa-hcp",
+            "actions": [{"feature_id": "control_plane_upgrade", "target_value": "4.20.12"}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["status"] == "error"
+        assert "Playbook not found" in data["results"][0]["message"]
 
 
 if __name__ == "__main__":
