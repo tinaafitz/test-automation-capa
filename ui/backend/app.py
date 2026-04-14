@@ -9109,11 +9109,27 @@ def _build_feature_index():
     return index
 
 
+# Initial load — these are refreshed on every access via _get_registry() / _get_feature_index()
 CLUSTER_FEATURE_REGISTRY = _load_feature_registry()
 _FEATURE_INDEX = _build_feature_index()
 
 # Cluster name validation: lowercase alphanumeric + hyphens, 1-54 chars (ROSA HCP limit)
 _CLUSTER_NAME_RE = re.compile(r'^[a-z][a-z0-9-]{0,53}$')
+
+
+def _get_registry():
+    """Get the live feature registry (refreshed on file change via mtime cache)."""
+    global CLUSTER_FEATURE_REGISTRY
+    CLUSTER_FEATURE_REGISTRY = _load_feature_registry()
+    return CLUSTER_FEATURE_REGISTRY
+
+
+def _get_feature_index():
+    """Get the live feature index (rebuilt when registry file changes)."""
+    global _FEATURE_INDEX
+    # _build_feature_index calls _load_feature_registry_full which has mtime cache
+    _FEATURE_INDEX = _build_feature_index()
+    return _FEATURE_INDEX
 
 
 def _validate_cluster_name(name: str) -> Optional[str]:
@@ -9127,16 +9143,54 @@ def _validate_cluster_name(name: str) -> Optional[str]:
     return None
 
 
+def _validate_feature_value(feature: dict, value) -> Optional[str]:
+    """Validate target_value matches the feature's declared type. Returns error or None."""
+    feat_type = feature.get("type", "string")
+    feat_id = feature["id"]
+
+    if feat_type == "boolean":
+        if not isinstance(value, bool):
+            return f"Feature '{feat_id}' expects boolean, got {type(value).__name__}"
+    elif feat_type == "select":
+        options = feature.get("options", [])
+        if options and str(value) not in [str(o) for o in options]:
+            return f"Feature '{feat_id}' expects one of {options}, got: {value}"
+    elif feat_type == "number":
+        if not isinstance(value, (int, float)):
+            return f"Feature '{feat_id}' expects number, got {type(value).__name__}"
+    elif feat_type == "string":
+        max_len = feature.get("max_length")
+        if max_len and len(str(value)) > max_len:
+            return f"Feature '{feat_id}' max length is {max_len}, got {len(str(value))} chars"
+    elif feat_type == "version":
+        if not isinstance(value, str) or not re.match(r'^\d+\.\d+\.\d+$', str(value)):
+            return f"Feature '{feat_id}' expects semver (e.g. 4.20.11), got: {value}"
+    elif feat_type == "key_value":
+        if not isinstance(value, dict):
+            return f"Feature '{feat_id}' expects key-value dict, got {type(value).__name__}"
+    elif feat_type == "list":
+        if not isinstance(value, list):
+            return f"Feature '{feat_id}' expects list, got {type(value).__name__}"
+    elif feat_type == "range":
+        if isinstance(value, dict):
+            if "min" not in value or "max" not in value:
+                return f"Feature '{feat_id}' range expects {{min, max}}, got: {value}"
+        else:
+            return f"Feature '{feat_id}' expects range {{min, max}}, got {type(value).__name__}"
+    return None
+
+
 @app.get("/api/cluster-actions/features")
 async def get_feature_registry():
     """Return the full feature registry organized by suite groupings"""
-    return {"success": True, "registry": CLUSTER_FEATURE_REGISTRY}
+    return {"success": True, "registry": _get_registry()}
 
 
 @app.get("/api/cluster-actions/features/{suite_id}")
 async def get_suite_features(suite_id: str):
     """Return features for a specific suite"""
-    for suite in CLUSTER_FEATURE_REGISTRY["suites"]:
+    registry = _get_registry()
+    for suite in registry["suites"]:
         if suite["id"] == suite_id:
             return {"success": True, "suite": suite}
     raise HTTPException(status_code=404, detail=f"Suite '{suite_id}' not found")
@@ -9190,8 +9244,8 @@ def _record_action(cluster_name, namespace, feature_id, feature_name, target_val
 
 
 def _find_feature(feature_id):
-    """Look up a feature in the registry by ID (O(1) index lookup)."""
-    return _FEATURE_INDEX.get(feature_id)
+    """Look up a feature in the registry by ID (O(1) index lookup, auto-refreshed)."""
+    return _get_feature_index().get(feature_id)
 
 
 @app.post("/api/cluster-actions/execute")
@@ -9201,6 +9255,11 @@ async def execute_cluster_actions(request: ClusterActionRequest):
     Playbook-backed actions are run via the job system with live polling.
     K8s patch actions are executed directly via oc patch.
     """
+    # Validate cluster name
+    name_err = _validate_cluster_name(request.cluster_name)
+    if name_err:
+        raise HTTPException(status_code=400, detail=name_err)
+
     results = []
 
     for action in request.actions:
@@ -9215,6 +9274,13 @@ async def execute_cluster_actions(request: ClusterActionRequest):
         if not feature.get("mutable"):
             results.append({"feature_id": feature_id, "status": "error", "message": f"Feature '{feature['name']}' is immutable (set at creation time only)"})
             continue
+
+        # Validate target_value against feature type
+        if target_value is not None:
+            val_err = _validate_feature_value(feature, target_value)
+            if val_err:
+                results.append({"feature_id": feature_id, "status": "error", "message": val_err})
+                continue
 
         # If feature has a playbook, run it through the job system
         if feature.get("playbook"):

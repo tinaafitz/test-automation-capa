@@ -30,8 +30,11 @@ from app import (
     get_agent_stats,
     ai_agent_sessions,
     _validate_cluster_name,
+    _validate_feature_value,
     _find_feature,
     _load_feature_registry_full,
+    _get_registry,
+    _get_feature_index,
     _load_action_history,
     _save_action_history,
     _record_action,
@@ -949,6 +952,46 @@ class TestClusterActionsExecute:
         assert data["cluster_name"] == "my-cluster"
         assert data["namespace"] == "custom-ns"
 
+    def test_execute_rejects_invalid_cluster_name(self, client):
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "INVALID",
+            "namespace": "ns-rosa-hcp",
+            "actions": [],
+        })
+        assert resp.status_code == 400
+
+    def test_execute_rejects_empty_cluster_name(self, client):
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "",
+            "namespace": "ns-rosa-hcp",
+            "actions": [],
+        })
+        assert resp.status_code == 400
+
+    @patch("app.subprocess.run")
+    def test_execute_rejects_invalid_select_value(self, mock_run, client):
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "test-cluster",
+            "namespace": "ns-rosa-hcp",
+            "actions": [{"feature_id": "channel_group", "target_value": "invalid-channel"}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["status"] == "error"
+        assert "expects one of" in data["results"][0]["message"]
+
+    @patch("app.subprocess.run")
+    def test_execute_rejects_wrong_type_value(self, mock_run, client):
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "test-cluster",
+            "namespace": "ns-rosa-hcp",
+            "actions": [{"feature_id": "proxy_enabled", "target_value": "not-a-bool"}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["status"] == "error"
+        assert "expects boolean" in data["results"][0]["message"]
+
 
 class TestClusterActionsProvision:
     """Tests for /api/cluster-actions/provision endpoint."""
@@ -1211,6 +1254,95 @@ class TestFeatureRegistryLoading:
         for suite in data["suites"]:
             for feat in suite["features"]:
                 assert feat["type"] in valid_types, f"Feature {feat['id']} has invalid type: {feat['type']}"
+
+    def test_get_registry_returns_fresh_data(self):
+        """_get_registry returns valid registry data."""
+        registry = _get_registry()
+        assert "suites" in registry
+        assert len(registry["suites"]) > 0
+
+    def test_get_feature_index_returns_fresh_data(self):
+        """_get_feature_index returns a dict with all features."""
+        index = _get_feature_index()
+        assert "private_network" in index
+        assert "channel_group" in index
+
+
+class TestFeatureValueValidation:
+    """Tests for _validate_feature_value helper."""
+
+    def test_boolean_valid(self):
+        feat = {"id": "test", "type": "boolean"}
+        assert _validate_feature_value(feat, True) is None
+        assert _validate_feature_value(feat, False) is None
+
+    def test_boolean_invalid(self):
+        feat = {"id": "test", "type": "boolean"}
+        assert _validate_feature_value(feat, "true") is not None
+        assert _validate_feature_value(feat, 1) is not None
+
+    def test_select_valid(self):
+        feat = {"id": "test", "type": "select", "options": ["stable", "fast", "candidate"]}
+        assert _validate_feature_value(feat, "fast") is None
+
+    def test_select_invalid(self):
+        feat = {"id": "test", "type": "select", "options": ["stable", "fast", "candidate"]}
+        assert _validate_feature_value(feat, "nightly") is not None
+
+    def test_number_valid(self):
+        feat = {"id": "test", "type": "number"}
+        assert _validate_feature_value(feat, 42) is None
+        assert _validate_feature_value(feat, 3.14) is None
+
+    def test_number_invalid(self):
+        feat = {"id": "test", "type": "number"}
+        assert _validate_feature_value(feat, "42") is not None
+
+    def test_string_max_length(self):
+        feat = {"id": "test", "type": "string", "max_length": 5}
+        assert _validate_feature_value(feat, "abc") is None
+        assert _validate_feature_value(feat, "toolong") is not None
+
+    def test_version_valid(self):
+        feat = {"id": "test", "type": "version"}
+        assert _validate_feature_value(feat, "4.20.11") is None
+
+    def test_version_invalid(self):
+        feat = {"id": "test", "type": "version"}
+        assert _validate_feature_value(feat, "not-semver") is not None
+        assert _validate_feature_value(feat, "4.20") is not None
+
+    def test_key_value_valid(self):
+        feat = {"id": "test", "type": "key_value"}
+        assert _validate_feature_value(feat, {"key": "val"}) is None
+
+    def test_key_value_invalid(self):
+        feat = {"id": "test", "type": "key_value"}
+        assert _validate_feature_value(feat, "not-a-dict") is not None
+
+    def test_list_valid(self):
+        feat = {"id": "test", "type": "list"}
+        assert _validate_feature_value(feat, ["a", "b"]) is None
+
+    def test_list_invalid(self):
+        feat = {"id": "test", "type": "list"}
+        assert _validate_feature_value(feat, "not-a-list") is not None
+
+    def test_range_valid(self):
+        feat = {"id": "test", "type": "range"}
+        assert _validate_feature_value(feat, {"min": 1, "max": 5}) is None
+
+    def test_range_missing_fields(self):
+        feat = {"id": "test", "type": "range"}
+        assert _validate_feature_value(feat, {"min": 1}) is not None
+
+    def test_range_invalid_type(self):
+        feat = {"id": "test", "type": "range"}
+        assert _validate_feature_value(feat, 42) is not None
+
+    def test_action_type_passes(self):
+        feat = {"id": "test", "type": "action"}
+        assert _validate_feature_value(feat, None) is None
 
 
 if __name__ == "__main__":
