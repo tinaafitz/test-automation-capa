@@ -9078,6 +9078,54 @@ async def list_workflow_templates():
     return {"success": True, "templates": templates}
 
 
+@app.get("/api/workflows/yaml")
+async def list_yaml_workflows():
+    """Return YAML workflow files from specs/workflows/."""
+    import yaml as _yaml
+    wf_dir = os.path.join(BASE_DIR, "specs", "workflows")
+    results = []
+    if not os.path.isdir(wf_dir):
+        return {"success": True, "workflows": []}
+    for fname in sorted(os.listdir(wf_dir)):
+        if not fname.endswith(".yml"):
+            continue
+        fpath = os.path.join(wf_dir, fname)
+        try:
+            with open(fpath) as f:
+                data = _yaml.safe_load(f)
+            if not data or data.get("kind") != "Workflow":
+                continue
+            meta = data.get("metadata", {})
+            spec = data.get("spec", {})
+            steps = spec.get("steps", [])
+            results.append({
+                "id": f"yaml-{fname.replace('.yml', '')}",
+                "name": meta.get("name", fname.replace(".yml", "")),
+                "description": meta.get("description", ""),
+                "source": f"specs/workflows/{fname}",
+                "stepCount": len(steps),
+                "stepNames": [s.get("name", "") for s in steps],
+                "globalVars": spec.get("vars", {}),
+                "hasGlobalVars": len(spec.get("vars", {})) > 0,
+                "globalVarKeys": list(spec.get("vars", {}).keys()),
+                "stopOnFailure": True,
+                "steps": [
+                    {
+                        "name": s.get("name", ""),
+                        "file": s.get("playbook", ""),
+                        "onFailure": s.get("on_failure", "stop"),
+                        "timeout": s.get("timeout", 600),
+                        "extra_vars": s.get("vars", {}),
+                        **({"condition": s["if"]} if s.get("if") else {}),
+                    }
+                    for s in steps
+                ],
+            })
+        except Exception:
+            continue
+    return {"success": True, "workflows": results}
+
+
 # ============================================================================
 # Cluster Actions / Feature Action Engine API
 # ============================================================================

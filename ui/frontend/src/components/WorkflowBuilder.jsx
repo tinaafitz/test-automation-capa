@@ -211,6 +211,9 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
             {step.required && (
               <span className="text-[10px] px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full font-semibold uppercase tracking-wider">Required</span>
             )}
+            {step.condition && (
+              <span className="text-[10px] px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-semibold uppercase tracking-wider">if: {step.condition}</span>
+            )}
           </div>
 
           {/* Config toggle */}
@@ -277,6 +280,19 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
                   className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Condition (if)</label>
+              <select
+                value={step.condition || ''}
+                onChange={(e) => onUpdateStep(step.id, { condition: e.target.value || undefined })}
+                className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">Always run (default)</option>
+                <option value="always">always — run even after failures</option>
+                <option value="success">success — only if all prior steps passed</option>
+                <option value="failure">failure — only if a prior step failed</option>
+              </select>
             </div>
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
@@ -499,8 +515,9 @@ const WorkflowBuilder = () => {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveDescription, setSaveDescription] = useState('');
   const [workflowTemplates, setWorkflowTemplates] = useState([]);
+  const [yamlWorkflows, setYamlWorkflows] = useState([]);
   const [librarySearch, setLibrarySearch] = useState('');
-  const [libraryTab, setLibraryTab] = useState('saved'); // 'saved' | 'templates'
+  const [libraryTab, setLibraryTab] = useState('saved'); // 'saved' | 'templates' | 'yaml'
   const [activeWorkflowId, setActiveWorkflowId] = useState(null);
   const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
   const [contextMenuId, setContextMenuId] = useState(null);
@@ -566,6 +583,7 @@ const WorkflowBuilder = () => {
     fetchPlaybooks();
     loadSavedWorkflows();
     loadWorkflowTemplates();
+    loadYamlWorkflows();
   }, []);
 
   const fetchPlaybooks = async () => {
@@ -721,6 +739,18 @@ const WorkflowBuilder = () => {
     }
   };
 
+  const loadYamlWorkflows = async () => {
+    try {
+      const res = await fetch(buildApiUrl('/api/workflows/yaml'));
+      if (res.ok) {
+        const data = await res.json();
+        setYamlWorkflows(data.workflows || []);
+      }
+    } catch (e) {
+      console.error('Failed to load YAML workflows:', e);
+    }
+  };
+
   const saveWorkflow = async () => {
     if (!workflowName.trim() || workflowSteps.length === 0) return;
 
@@ -758,8 +788,8 @@ const WorkflowBuilder = () => {
   };
 
   const loadWorkflow = async (workflow) => {
-    // If it's a template, load directly from template data
-    if (workflow.id?.startsWith('tpl-')) {
+    // If it's a template or YAML workflow, load directly from data (no backend fetch needed)
+    if (workflow.id?.startsWith('tpl-') || workflow.id?.startsWith('yaml-')) {
       setWorkflowName(workflow.name);
       setStopOnFailure(workflow.stopOnFailure ?? true);
       setGlobalVars(workflow.globalVars || {});
@@ -1349,6 +1379,21 @@ const WorkflowBuilder = () => {
                   {workflowTemplates.length}
                 </span>
               </button>
+              {yamlWorkflows.length > 0 && (
+                <button
+                  onClick={() => setLibraryTab('yaml')}
+                  className={`text-xs px-2.5 py-1 rounded-lg transition-all duration-200 font-medium flex items-center gap-1 ${
+                    libraryTab === 'yaml'
+                      ? 'bg-green-100 text-green-700 shadow-sm'
+                      : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  YAML
+                  <span className="text-[10px] px-1 py-0 bg-green-100 text-green-600 rounded-full font-bold">
+                    {yamlWorkflows.length}
+                  </span>
+                </button>
+              )}
             </div>
 
             {/* Workflow list */}
@@ -1491,6 +1536,57 @@ const WorkflowBuilder = () => {
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {libraryTab === 'yaml' && (
+                <div className="space-y-2">
+                  {yamlWorkflows
+                    .filter((wf) => !librarySearch || wf.name.toLowerCase().includes(librarySearch.toLowerCase()) || (wf.description || '').toLowerCase().includes(librarySearch.toLowerCase()))
+                    .map((wf) => (
+                    <div
+                      key={wf.id}
+                      className="group bg-white border border-gray-200 rounded-xl p-3 hover:shadow-md hover:border-green-300 transition-all cursor-pointer"
+                      onClick={() => loadWorkflow(wf)}
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-white flex-shrink-0">
+                          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-sm font-semibold text-gray-900 truncate">{wf.name}</h4>
+                          {wf.description && (
+                            <p className="text-[11px] text-gray-400 mt-0.5 line-clamp-2">{wf.description}</p>
+                          )}
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <span className="text-[10px] text-gray-400">
+                              {wf.stepCount} step{wf.stepCount !== 1 ? 's' : ''}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0 bg-green-50 text-green-600 rounded font-semibold">
+                              YAML
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {(wf.stepNames || []).slice(0, 3).map((name, i) => (
+                              <span key={i} className="text-[10px] px-1.5 py-0.5 bg-gray-50 text-gray-500 rounded border border-gray-100 truncate max-w-[120px]">
+                                {i + 1}. {name}
+                              </span>
+                            ))}
+                            {(wf.stepNames || []).length > 3 && (
+                              <span className="text-[10px] px-1.5 py-0.5 text-gray-400">
+                                +{wf.stepNames.length - 3}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-1">
+                            <span className="text-[9px] text-gray-300 font-mono">{wf.source}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
