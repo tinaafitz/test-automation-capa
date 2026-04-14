@@ -350,16 +350,8 @@ suites:
         default: true
         k8s_field: ".spec.imageRegistry"
         resource: ROSAControlPlane
-
-      - id: disk_volume_size
-        name: MachinePool Disk Volume Size
-        description: Root volume disk size for machine pool nodes
-        type: number
-        mutable: false
-        applies_to: [create]
-        default: 300
-        k8s_field: ".spec.rootVolume.size"
-        resource: ROSAMachinePool
+      # Note: disk_volume_size was removed — use disk_size (in node-config suite) instead.
+      # Both mapped to the same k8s_field (.spec.rootVolume.size) on ROSAMachinePool.
 
   - id: domain-useragent
     name: Domain & User Agent

@@ -1203,10 +1203,7 @@ def main():
     }
 
     cmd_fn = commands.get(args.command)
-    if cmd_fn in (cmd_status, cmd_specs, cmd_features):
-        cmd_fn(args, base_dir, registry)
-    else:
-        cmd_fn(args, base_dir, registry)
+    cmd_fn(args, base_dir, registry)
 
 
 if __name__ == "__main__":

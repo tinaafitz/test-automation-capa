@@ -9069,21 +9069,47 @@ async def list_workflow_templates():
 # ============================================================================
 
 # Feature registry: loaded from schemas/feature-registry.yml (single source of truth)
-_FEATURE_REGISTRY_PATH = os.path.join(_project_root, "schemas", "feature-registry.yml")
+FEATURE_REGISTRY_PATH = os.path.join(_project_root, "schemas", "feature-registry.yml")
+
+# Cache for the full registry YAML (includes var_map, dependencies, sequences, suites)
+_registry_cache = {"data": None, "mtime": 0}
+
+
+def _load_feature_registry_full():
+    """Load the full feature registry YAML with cache invalidation on file change."""
+    try:
+        mtime = os.path.getmtime(FEATURE_REGISTRY_PATH)
+        if _registry_cache["data"] is not None and _registry_cache["mtime"] == mtime:
+            return _registry_cache["data"]
+        with open(FEATURE_REGISTRY_PATH, "r") as f:
+            data = yaml.safe_load(f)
+        _registry_cache["data"] = data
+        _registry_cache["mtime"] = mtime
+        return data
+    except Exception as e:
+        print(f"WARNING: Failed to load feature registry from {FEATURE_REGISTRY_PATH}: {e}")
+        return {"suites": [], "var_map": {}, "dependencies": {}}
 
 
 def _load_feature_registry():
-    """Load feature registry from YAML. Returns dict with 'suites' key."""
-    try:
-        with open(_FEATURE_REGISTRY_PATH, "r") as f:
-            data = yaml.safe_load(f)
-        return {"suites": data.get("suites", [])}
-    except Exception as e:
-        print(f"WARNING: Failed to load feature registry from {_FEATURE_REGISTRY_PATH}: {e}")
-        return {"suites": []}
+    """Load feature registry suites (for backward compat). Returns dict with 'suites' key."""
+    data = _load_feature_registry_full()
+    return {"suites": data.get("suites", [])}
+
+
+# Feature index for O(1) lookups
+def _build_feature_index():
+    """Build a feature ID -> feature dict index from the registry."""
+    data = _load_feature_registry_full()
+    index = {}
+    for suite in data.get("suites", []):
+        for feat in suite.get("features", []):
+            index[feat["id"]] = feat
+    return index
 
 
 CLUSTER_FEATURE_REGISTRY = _load_feature_registry()
+_FEATURE_INDEX = _build_feature_index()
 
 
 @app.get("/api/cluster-actions/features")
@@ -9149,12 +9175,8 @@ def _record_action(cluster_name, namespace, feature_id, feature_name, target_val
 
 
 def _find_feature(feature_id):
-    """Look up a feature in the registry by ID"""
-    for suite in CLUSTER_FEATURE_REGISTRY["suites"]:
-        for f in suite["features"]:
-            if f["id"] == feature_id:
-                return f
-    return None
+    """Look up a feature in the registry by ID (O(1) index lookup)."""
+    return _FEATURE_INDEX.get(feature_id)
 
 
 @app.post("/api/cluster-actions/execute")
@@ -9349,24 +9371,13 @@ async def provision_cluster_with_features(request: dict, background_tasks: Backg
     if cluster_name:
         extra_vars["cluster_name"] = cluster_name
 
-    # Map features to provision playbook extra_vars
-    feature_var_map = {
-        "private_network": "private",
-        "byon": "byon_vpc",
-        "availability_zones": "availability_zone_count",
-        "additional_tags": "additional_tags",
-        "etcd_kms": "etcd_encryption_kms_arn",
-        "domain_prefix": "domain_prefix",
-        "channel_group": "channel_group",
-        "instance_type": "instance_type",
-        "disk_size": "root_volume_size",
-        "no_cni": "no_cni",
-        "proxy_enabled": "http_proxy",
-    }
+    # Map features to provision playbook extra_vars using registry var_map
+    registry_data = _load_feature_registry_full()
+    var_map = registry_data.get("var_map", {})
 
     for feature_id, target_value in features.items():
-        var_name = feature_var_map.get(feature_id)
-        if var_name and target_value is not None:
+        var_name = var_map.get(feature_id, feature_id)
+        if target_value is not None:
             extra_vars[var_name] = target_value
 
     # Use the provision playbook
@@ -9522,24 +9533,9 @@ SPECS_DIR = os.path.join(
     "specs"
 )
 
-FEATURE_REGISTRY_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "schemas", "feature-registry.yml"
-)
-
-
-def _load_feature_registry_yaml():
-    """Load the YAML feature registry (single source of truth)."""
-    try:
-        with open(FEATURE_REGISTRY_PATH) as f:
-            return yaml.safe_load(f)
-    except Exception:
-        return {}
-
-
 def _resolve_spec_to_plan(spec_data: dict) -> list:
     """Resolve a ClusterAutomationSpec into an execution plan (list of steps)."""
-    registry_yaml = _load_feature_registry_yaml()
+    registry_yaml = _load_feature_registry_full()
     var_map = registry_yaml.get("var_map", {})
     dependencies = registry_yaml.get("dependencies", {})
     sequences = registry_yaml.get("sequences", {})
