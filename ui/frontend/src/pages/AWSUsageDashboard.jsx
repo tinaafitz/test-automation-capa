@@ -408,7 +408,6 @@ const AWSUsageDashboard = ({ inline = false }) => {
     onResourcesClick: () => navigate('/mce'),
     onEnvironmentsClick: () => navigate('/mce'),
     onCredentialsClick: () => navigate('/mce'),
-    onTestClick: () => navigate('/mce'),
     onAIAssistantClick: () => navigate('/mce'),
     onTerminalClick: () => navigate('/mce'),
     onNotificationsClick: () => navigate('/mce'),

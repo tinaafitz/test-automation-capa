@@ -30,7 +30,6 @@ jest.mock('../components/sidebar/CapaSidebar', () => (props) => {
       <button data-testid="nav-rosa-hcp" onClick={props.onRosaHcpClustersClick}>ROSA HCP</button>
       <button data-testid="nav-resources" onClick={props.onResourcesClick}>Resources</button>
       <button data-testid="nav-environments" onClick={props.onEnvironmentsClick}>Environments</button>
-      <button data-testid="nav-test" onClick={props.onTestClick}>Test</button>
       <button data-testid="nav-ai-assistant" onClick={props.onAIAssistantClick}>AI Assistant</button>
       <button data-testid="nav-terminal" onClick={props.onTerminalClick}>Terminal</button>
       <button data-testid="nav-notifications" onClick={props.onNotificationsClick}>Notifications</button>
@@ -271,14 +270,6 @@ describe('MinikubeDashboard - Section Switching', () => {
     });
     expect(screen.getByText('CAPA Resources')).toBeInTheDocument();
     expect(screen.getByTestId('resources-viewer')).toBeInTheDocument();
-  });
-
-  it('switches to test section', async () => {
-    await renderDashboard();
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('nav-test'));
-    });
-    expect(screen.getByText('Test Suites')).toBeInTheDocument();
   });
 
   it('switches to ai-assistant section', async () => {
@@ -1044,16 +1035,4 @@ describe('MinikubeDashboard - AI Assistant', () => {
 });
 
 // ============================================================================
-// 14. Test Section
-// ============================================================================
-describe('MinikubeDashboard - Test Section', () => {
-  it('shows test suite coming soon message', async () => {
-    await renderDashboard();
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('nav-test'));
-    });
-    expect(screen.getByText(/Test suite dashboard coming soon/)).toBeInTheDocument();
-  });
-});
-
 // ============================================================================

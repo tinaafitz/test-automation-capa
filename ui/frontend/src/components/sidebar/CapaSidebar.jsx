@@ -35,7 +35,6 @@ const CapaSidebar = ({
   onResourcesClick,
   onEnvironmentsClick,
   onCredentialsClick,
-  onTestClick,
   onAIAssistantClick,
   onTerminalClick,
   onNotificationsClick,

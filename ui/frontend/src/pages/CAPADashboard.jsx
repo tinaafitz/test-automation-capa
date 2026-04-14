@@ -1045,7 +1045,6 @@ const CAPADashboardContent = () => {
     onResourcesClick: () => setActiveSection('resources'),
     onEnvironmentsClick: () => setActiveSection('environments'),
     onCredentialsClick: () => setActiveSection('credentials'),
-    onTestClick: () => setActiveSection('test'),
     onAIAssistantClick: () => setActiveSection('ai-assistant'),
     onTerminalClick: () => setActiveSection('terminal'),
     onNotificationsClick: () => setActiveSection('notifications'),
@@ -1693,20 +1692,6 @@ const CAPADashboardContent = () => {
                 }}
               />
             </div>
-          </div>
-        );
-
-      case 'test':
-        return (
-          <div className="space-y-6">
-            {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Test Suites</h2>
-
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <p className="text-gray-600 mb-4">Run and manage CAPI/CAPA test suites.</p>
-              <div className="text-sm text-gray-500">Test suite dashboard coming soon...</div>
-            </div>
-            {/* Task Summary Section removed */}
           </div>
         );
 
