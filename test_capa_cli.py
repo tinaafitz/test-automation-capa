@@ -1470,3 +1470,266 @@ class TestCmdTest:
         cmd = mock_run.call_args[0][0]
         assert "-vvvv" in cmd
         assert "-vvvvvv" not in cmd
+
+
+class TestCmdVersion:
+    """Tests for the 'capa version' command."""
+
+    def test_version_output(self, registry, capsys):
+        """Test version prints CLI info."""
+        args = argparse.Namespace(verbose=False)
+        capa_cli.cmd_version(args, PROJECT_ROOT, registry)
+        output = capsys.readouterr().out
+        assert "CAPA CLI" in output
+        assert "CLI version:" in output
+        assert "Features:" in output
+        assert "Python:" in output
+
+    def test_version_shows_agent_version(self, registry, capsys):
+        """Test version shows agent framework version."""
+        args = argparse.Namespace(verbose=False)
+        capa_cli.cmd_version(args, PROJECT_ROOT, registry)
+        output = capsys.readouterr().out
+        assert "Agent framework:" in output
+
+
+class TestCmdHistory:
+    """Tests for the 'capa history' command."""
+
+    def test_history_no_file(self, tmp_path, capsys):
+        """Test history when no history file exists."""
+        args = argparse.Namespace(cluster=None, limit=20)
+        capa_cli.cmd_history(args, tmp_path, None)
+        output = capsys.readouterr().out
+        assert "No history file" in output
+
+    def test_history_with_entries(self, tmp_path, capsys):
+        """Test history shows entries from file."""
+        (tmp_path / "vars").mkdir()
+        history = [
+            {"cluster_name": "test-cluster", "feature_id": "channel_group",
+             "status": "completed", "target_value": "fast",
+             "timestamp": "2026-04-14T10:00:00"},
+            {"cluster_name": "test-cluster", "feature_id": "control_plane_upgrade",
+             "status": "running", "target_value": "4.20.12",
+             "timestamp": "2026-04-14T10:01:00"},
+        ]
+        with open(tmp_path / "vars" / "cluster_action_history.json", "w") as f:
+            json.dump(history, f)
+
+        args = argparse.Namespace(cluster=None, limit=20)
+        capa_cli.cmd_history(args, tmp_path, None)
+        output = capsys.readouterr().out
+        assert "channel_group" in output
+        assert "control_plane_upgrade" in output
+        assert "completed" in output
+
+    def test_history_filter_by_cluster(self, tmp_path, capsys):
+        """Test history filters by cluster name."""
+        (tmp_path / "vars").mkdir()
+        history = [
+            {"cluster_name": "cluster-a", "feature_id": "feat-a",
+             "status": "completed", "target_value": "x",
+             "timestamp": "2026-04-14T10:00:00"},
+            {"cluster_name": "cluster-b", "feature_id": "feat-b",
+             "status": "running", "target_value": "y",
+             "timestamp": "2026-04-14T10:01:00"},
+        ]
+        with open(tmp_path / "vars" / "cluster_action_history.json", "w") as f:
+            json.dump(history, f)
+
+        args = argparse.Namespace(cluster="cluster-a", limit=20)
+        capa_cli.cmd_history(args, tmp_path, None)
+        output = capsys.readouterr().out
+        assert "feat-a" in output
+        assert "feat-b" not in output
+
+    def test_history_no_entries_for_cluster(self, tmp_path, capsys):
+        """Test history when cluster has no entries."""
+        (tmp_path / "vars").mkdir()
+        with open(tmp_path / "vars" / "cluster_action_history.json", "w") as f:
+            json.dump([], f)
+
+        args = argparse.Namespace(cluster="nonexistent", limit=20)
+        capa_cli.cmd_history(args, tmp_path, None)
+        output = capsys.readouterr().out
+        assert "No history for cluster" in output
+
+    def test_history_limit(self, tmp_path, capsys):
+        """Test history respects --limit."""
+        (tmp_path / "vars").mkdir()
+        history = [
+            {"cluster_name": "c", "feature_id": f"feat-{i}",
+             "status": "completed", "target_value": str(i),
+             "timestamp": f"2026-04-14T10:{i:02d}:00"}
+            for i in range(10)
+        ]
+        with open(tmp_path / "vars" / "cluster_action_history.json", "w") as f:
+            json.dump(history, f)
+
+        args = argparse.Namespace(cluster=None, limit=3)
+        capa_cli.cmd_history(args, tmp_path, None)
+        output = capsys.readouterr().out
+        assert "Showing 3 of 10" in output
+
+
+class TestCmdLogs:
+    """Tests for the 'capa logs' command."""
+
+    def test_logs_no_logs_found(self, tmp_path, capsys):
+        """Test logs when no log files exist."""
+        args = argparse.Namespace(cluster="nonexistent", lines=50, follow=False)
+        capa_cli.cmd_logs(args, tmp_path, None)
+        output = capsys.readouterr().out
+        assert "No logs found" in output
+
+    def test_logs_from_history(self, tmp_path, capsys):
+        """Test logs falls back to history file."""
+        (tmp_path / "vars").mkdir()
+        history = [
+            {"cluster_name": "my-cluster", "feature_id": "channel_group",
+             "status": "completed", "message": "Done",
+             "timestamp": "2026-04-14T10:00:00"},
+        ]
+        with open(tmp_path / "vars" / "cluster_action_history.json", "w") as f:
+            json.dump(history, f)
+
+        args = argparse.Namespace(cluster="my-cluster", lines=50, follow=False)
+        capa_cli.cmd_logs(args, tmp_path, None)
+        output = capsys.readouterr().out
+        assert "Recent operations" in output
+        assert "channel_group" in output
+
+
+class TestCmdListClusters:
+    """Tests for the 'capa list-clusters' command."""
+
+    @patch("subprocess.run")
+    def test_list_clusters_no_crd(self, mock_run, capsys):
+        """Test list-clusters when CRD not installed."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stderr="the server doesn't have a resource type \"rosacontrolplane\""
+        )
+        args = argparse.Namespace(namespace=None)
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_list_clusters(args, Path("."), None)
+        output = capsys.readouterr().out
+        assert "CAPA may not be installed" in output
+
+    @patch("subprocess.run")
+    def test_list_clusters_empty(self, mock_run, capsys):
+        """Test list-clusters when no clusters exist."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        args = argparse.Namespace(namespace=None)
+        capa_cli.cmd_list_clusters(args, Path("."), None)
+        output = capsys.readouterr().out
+        assert "No clusters found" in output
+
+    @patch("subprocess.run")
+    def test_list_clusters_with_results(self, mock_run, capsys):
+        """Test list-clusters displays cluster table."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="moo-rosa-hcp|ns-rosa-hcp|4.20.11|true|4.20.11\n"
+        )
+        args = argparse.Namespace(namespace=None)
+        capa_cli.cmd_list_clusters(args, Path("."), None)
+        output = capsys.readouterr().out
+        assert "moo-rosa-hcp" in output
+        assert "4.20.11" in output
+        assert "CLUSTER" in output
+
+    @patch("subprocess.run")
+    def test_list_clusters_upgrading(self, mock_run, capsys):
+        """Test list-clusters shows upgrade status."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="moo-rosa-hcp|ns-rosa-hcp|4.20.10|false|4.20.11\n"
+        )
+        args = argparse.Namespace(namespace=None)
+        capa_cli.cmd_list_clusters(args, Path("."), None)
+        output = capsys.readouterr().out
+        assert "4.20.10" in output
+        assert "4.20.11" in output
+
+
+class TestCmdWatch:
+    """Tests for the 'capa watch' command."""
+
+    @patch("subprocess.run")
+    def test_watch_cluster_ready_immediately(self, mock_run, capsys):
+        """Test watch exits when cluster is already ready."""
+        # First call: control plane check
+        # Second call: machine pool check
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="4.20.11|true|4.20.11"),
+            MagicMock(returncode=0, stdout="true"),
+        ]
+        args = argparse.Namespace(cluster="moo", namespace="ns-rosa-hcp",
+                                  interval=1, timeout=10)
+        capa_cli.cmd_watch(args, Path("."), None)
+        output = capsys.readouterr().out
+        assert "is ready!" in output
+
+    @patch("subprocess.run")
+    def test_watch_timeout(self, mock_run, capsys):
+        """Test watch exits on timeout."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="4.20.10|false|4.20.11")
+        args = argparse.Namespace(cluster="moo", namespace="ns-rosa-hcp",
+                                  interval=1, timeout=1)
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_watch(args, Path("."), None)
+        assert exc_info.value.code == 1
+        output = capsys.readouterr().out
+        assert "Timeout" in output
+
+
+class TestCmdCompletion:
+    """Tests for the 'capa completion' command."""
+
+    def test_bash_completion(self, registry, capsys):
+        """Test bash completion script generation."""
+        args = argparse.Namespace(shell="bash")
+        capa_cli.cmd_completion(args, PROJECT_ROOT, registry)
+        output = capsys.readouterr().out
+        assert "_capa_complete" in output
+        assert "compgen" in output
+        assert "channel_group" in output
+
+    def test_zsh_completion(self, registry, capsys):
+        """Test zsh completion script generation."""
+        args = argparse.Namespace(shell="zsh")
+        capa_cli.cmd_completion(args, PROJECT_ROOT, registry)
+        output = capsys.readouterr().out
+        assert "#compdef capa" in output
+        assert "_capa" in output
+
+    def test_unknown_shell(self, registry):
+        """Test unknown shell type exits."""
+        args = argparse.Namespace(shell="fish")
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_completion(args, PROJECT_ROOT, registry)
+
+
+class TestCmdTestDryRun:
+    """Test --dry-run works in both positions for capa test."""
+
+    @patch("subprocess.run")
+    def test_dry_run_via_test_subparser(self, mock_run, tmp_path):
+        """Test --dry-run on test subparser (test_dry_run dest)."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = argparse.Namespace(
+            suite_id="20-provision", all=False, list=False, tag=None,
+            format=None, no_save=False, extra_vars=None, ai_agent=False,
+            ai_agent_dry_run=False, test_verbosity=0, dry_run=False,
+            test_dry_run=True, verbose=False
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "--dry-run" in cmd
