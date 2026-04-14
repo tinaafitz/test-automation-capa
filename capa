@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S python3 -u
 """
 CAPA CLI - Declarative cluster lifecycle management
 
@@ -997,10 +997,10 @@ def cmd_watch(args, base_dir, registry):
     interval = args.interval
     timeout = args.timeout
 
-    print(f"\n{C.BOLD}Watching cluster: {cluster}{C.E}")
-    print(f"  Namespace: {namespace}")
-    print(f"  Interval: {interval}s, Timeout: {timeout}s")
-    print(f"  {C.CYAN}Press Ctrl+C to stop{C.E}\n")
+    print(f"\n{C.BOLD}Watching cluster: {cluster}{C.E}", flush=True)
+    print(f"  Namespace: {namespace}", flush=True)
+    print(f"  Interval: {interval}s, Timeout: {timeout}s", flush=True)
+    print(f"  {C.CYAN}Press Ctrl+C to stop{C.E}\n", flush=True)
 
     start = time.time()
     last_status = None
@@ -1052,15 +1052,15 @@ def cmd_watch(args, base_dir, registry):
             ts = datetime.now().strftime("%H:%M:%S")
             current_status = f"cp={ready} mp={mp_ready} v={status_ver}"
 
-            if current_status != last_status:
-                ready_color = C.G if ready == "true" else C.Y
-                mp_color = C.G if mp_ready == "true" else C.Y
-                upgrade_info = f" {C.Y}upgrading -> {spec_ver}{C.E}" if upgrading else ""
-                print(f"  {ts}  CP: {ready_color}{ready}{C.E}  "
-                      f"MP: {mp_color}{mp_ready}{C.E}  "
-                      f"Version: {status_ver}{upgrade_info}  "
-                      f"({int(elapsed)}s)")
-                last_status = current_status
+            ready_color = C.G if ready == "true" else C.Y
+            mp_color = C.G if mp_ready == "true" else C.Y
+            upgrade_info = f" {C.Y}upgrading -> {spec_ver}{C.E}" if upgrading else ""
+            changed = " *" if current_status != last_status else ""
+            print(f"  {ts}  CP: {ready_color}{ready}{C.E}  "
+                  f"MP: {mp_color}{mp_ready}{C.E}  "
+                  f"Version: {status_ver}{upgrade_info}  "
+                  f"({int(elapsed)}s){changed}", flush=True)
+            last_status = current_status
 
             # Check if fully ready
             if ready == "true" and mp_ready == "true" and not upgrading:
