@@ -525,7 +525,7 @@ describe('WorkflowBuilder', () => {
       stepNames: ['01-validate-capa-environment'],
       hasGlobalVars: true,
       globalVarKeys: ['test_var'],
-      stopOnFailure: true,
+      stop_on_failure: true,
       savedAt: new Date().toISOString(),
       lastRunAt: null,
     };
@@ -540,9 +540,9 @@ describe('WorkflowBuilder', () => {
             workflow: {
               id: 'wf-123',
               name: 'Saved Test Workflow',
-              stopOnFailure: true,
-              globalVars: { test_var: 'test_value' },
-              steps: [{ name: '01-validate-capa-environment', file: 'playbooks/validate-capa-environment.yml', onFailure: 'stop', timeout: 600, extra_vars: {} }],
+              stop_on_failure: true,
+              vars: { test_var: 'test_value' },
+              steps: [{ name: '01-validate-capa-environment', playbook: 'playbooks/validate-capa-environment.yml', on_failure: 'stop', timeout: 600, vars: {} }],
             },
           }),
         });
@@ -602,7 +602,7 @@ describe('WorkflowBuilder', () => {
       stepNames: [],
       hasGlobalVars: false,
       globalVarKeys: [],
-      stopOnFailure: true,
+      stop_on_failure: true,
       savedAt: new Date().toISOString(),
       lastRunAt: null,
     };

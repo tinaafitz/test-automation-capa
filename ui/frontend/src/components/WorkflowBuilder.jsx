@@ -202,10 +202,10 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
 
           {/* Step badges */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            {step.onFailure === 'skip' && (
+            {step.on_failure === 'skip' && (
               <span className="text-[10px] px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-semibold uppercase tracking-wider">Skip on fail</span>
             )}
-            {step.onFailure === 'retry' && (
+            {step.on_failure === 'retry' && (
               <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full font-semibold uppercase tracking-wider">Retry</span>
             )}
             {step.required && (
@@ -223,9 +223,9 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
             title="Configure step"
           >
             <Cog6ToothIcon className="h-4 w-4" />
-            {Object.keys(step.extra_vars || {}).length > 0 && (
+            {Object.keys(step.vars || {}).length > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                {Object.keys(step.extra_vars).length}
+                {Object.keys(step.vars).length}
               </span>
             )}
           </button>
@@ -262,8 +262,8 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">On Failure</label>
                 <select
-                  value={step.onFailure}
-                  onChange={(e) => onUpdateStep(step.id, { onFailure: e.target.value })}
+                  value={step.on_failure}
+                  onChange={(e) => onUpdateStep(step.id, { on_failure: e.target.value })}
                   className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="stop">Stop workflow</option>
@@ -311,11 +311,11 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
                 <label className="block text-xs font-medium text-gray-700">Variables</label>
                 <button
                   onClick={() => {
-                    const updated = { ...(step.extra_vars || {}), '': '' };
+                    const updated = { ...(step.vars || {}), '': '' };
                     // Use a unique placeholder key
-                    const key = `new_var_${Object.keys(step.extra_vars || {}).length}`;
+                    const key = `new_var_${Object.keys(step.vars || {}).length}`;
                     updated[key] = '';
-                    onUpdateStep(step.id, { extra_vars: updated });
+                    onUpdateStep(step.id, { vars: updated });
                   }}
                   className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
                 >
@@ -323,9 +323,9 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
                   Add variable
                 </button>
               </div>
-              {Object.keys(step.extra_vars || {}).length > 0 ? (
+              {Object.keys(step.vars || {}).length > 0 ? (
                 <div className="space-y-1.5">
-                  {Object.entries(step.extra_vars || {}).map(([key, val]) => (
+                  {Object.entries(step.vars || {}).map(([key, val]) => (
                     <div key={key} className="flex items-center gap-2">
                       <input
                         type="text"
@@ -334,11 +334,11 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
                         onBlur={(e) => {
                           const newKey = e.target.value.trim();
                           if (newKey && newKey !== key) {
-                            const vars = { ...step.extra_vars };
+                            const vars = { ...step.vars };
                             const value = vars[key];
                             delete vars[key];
                             vars[newKey] = value;
-                            onUpdateStep(step.id, { extra_vars: vars });
+                            onUpdateStep(step.id, { vars: vars });
                           }
                         }}
                         className="flex-1 text-xs font-mono border border-gray-300 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
@@ -349,22 +349,22 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
                         value={typeof val === 'object' ? JSON.stringify(val) : String(val)}
                         placeholder="value"
                         onChange={(e) => {
-                          const vars = { ...step.extra_vars };
+                          const vars = { ...step.vars };
                           // Try to parse booleans and numbers
                           let parsed = e.target.value;
                           if (parsed === 'true') parsed = true;
                           else if (parsed === 'false') parsed = false;
                           else if (parsed !== '' && !isNaN(parsed) && !isNaN(parseFloat(parsed))) parsed = parseFloat(parsed);
                           vars[key] = parsed;
-                          onUpdateStep(step.id, { extra_vars: vars });
+                          onUpdateStep(step.id, { vars: vars });
                         }}
                         className="flex-1 text-xs font-mono border border-gray-300 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                       />
                       <button
                         onClick={() => {
-                          const vars = { ...step.extra_vars };
+                          const vars = { ...step.vars };
                           delete vars[key];
-                          onUpdateStep(step.id, { extra_vars: vars });
+                          onUpdateStep(step.id, { vars: vars });
                         }}
                         className="p-0.5 text-gray-400 hover:text-red-500 transition-colors"
                         title="Remove variable"
@@ -636,14 +636,14 @@ const WorkflowBuilder = () => {
       id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: suite.name,
       description: suite.description || '',
-      file: playbook.file || '',
+      playbook: playbook.file || playbook.playbook || '',
       suiteName: suite.name,
       required: playbook.required !== undefined ? playbook.required : false,
-      onFailure: 'stop',
+      on_failure: 'stop',
       timeout: playbook.timeout || 600,
-      extra_vars: playbook.extra_vars || playbook.vars || {},
+      vars: playbook.vars || playbook.extra_vars || {},
       status: 'pending',
-      showConfig: Object.keys(playbook.extra_vars || playbook.vars || {}).length > 0,
+      showConfig: Object.keys(playbook.vars || playbook.extra_vars || {}).length > 0,
     };
     setWorkflowSteps((prev) => [...prev, newStep]);
   }, []);
@@ -768,8 +768,8 @@ const WorkflowBuilder = () => {
         body: JSON.stringify({
           name: workflowName,
           description: saveDescription,
-          stopOnFailure,
-          globalVars,
+          stop_on_failure: stopOnFailure,
+          vars: globalVars,
           steps: workflowSteps.map(({ id, showConfig, status, logs, agentStats, startedAt, completedAt, ...rest }) => rest),
         }),
       });
@@ -787,14 +787,28 @@ const WorkflowBuilder = () => {
     setSaveDescription('');
   };
 
+  // Normalize a workflow object to the canonical format (handles both old camelCase and new snake_case)
+  const normalizeWorkflow = (wf) => ({
+    ...wf,
+    stop_on_failure: wf.stop_on_failure ?? wf.stopOnFailure ?? true,
+    vars: wf.vars || wf.globalVars || {},
+    steps: (wf.steps || []).map((s) => ({
+      ...s,
+      playbook: s.playbook || s.file || '',
+      on_failure: s.on_failure || s.onFailure || 'stop',
+      vars: s.vars || s.extra_vars || {},
+    })),
+  });
+
   const loadWorkflow = async (workflow) => {
     // If it's a template or YAML workflow, load directly from data (no backend fetch needed)
     if (workflow.id?.startsWith('tpl-') || workflow.id?.startsWith('yaml-')) {
-      setWorkflowName(workflow.name);
-      setStopOnFailure(workflow.stopOnFailure ?? true);
-      setGlobalVars(workflow.globalVars || {});
+      const wf = normalizeWorkflow(workflow);
+      setWorkflowName(wf.name);
+      setStopOnFailure(wf.stop_on_failure);
+      setGlobalVars(wf.vars);
       setWorkflowSteps(
-        workflow.steps.map((step, i) => ({
+        wf.steps.map((step, i) => ({
           ...step,
           id: `step-${Date.now()}-${i}`,
           status: 'pending',
@@ -811,10 +825,10 @@ const WorkflowBuilder = () => {
       const res = await fetch(buildApiUrl(`/api/workflows/${workflow.id}`));
       if (res.ok) {
         const data = await res.json();
-        const wf = data.workflow;
+        const wf = normalizeWorkflow(data.workflow);
         setWorkflowName(wf.name);
-        setStopOnFailure(wf.stopOnFailure ?? true);
-        setGlobalVars(wf.globalVars || {});
+        setStopOnFailure(wf.stop_on_failure);
+        setGlobalVars(wf.vars);
         setSaveDescription(wf.description || '');
         setWorkflowSteps(
           wf.steps.map((step, i) => ({
@@ -976,7 +990,7 @@ const WorkflowBuilder = () => {
       try {
         // Merge global vars with step-specific vars (step vars override globals)
         // Auto-add soft_verify for verify playbooks so informational "not configured" doesn't fail the workflow
-        const mergedVars = { ...globalVars, ...(step.extra_vars || {}) };
+        const mergedVars = { ...globalVars, ...(step.vars || {}) };
         if (step.name.toLowerCase().includes('verify')) {
           mergedVars.soft_verify = 'true';
         }
@@ -986,7 +1000,7 @@ const WorkflowBuilder = () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            playbook: step.file,
+            playbook: step.playbook,
             description: `[Workflow: ${workflowName}] ${step.name}`,
             extra_vars: mergedVars,
           }),
@@ -1026,7 +1040,7 @@ const WorkflowBuilder = () => {
         }
 
         if (!success) {
-          if (step.onFailure === 'retry') {
+          if (step.on_failure === 'retry') {
             // Retry once
             setWorkflowSteps((prev) =>
               prev.map((s, idx) => idx === i ? { ...s, status: 'running' } : s)
@@ -1036,7 +1050,7 @@ const WorkflowBuilder = () => {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                playbook: step.file,
+                playbook: step.playbook,
                 description: `[Workflow: ${workflowName}] ${step.name} (retry)`,
                 extra_vars: mergedVars,
               }),
@@ -1081,7 +1095,7 @@ const WorkflowBuilder = () => {
                 }
               }
             }
-          } else if (step.onFailure === 'stop' || (step.required && stopOnFailure)) {
+          } else if (step.on_failure === 'stop' || (step.required && stopOnFailure)) {
             // Mark remaining as skipped
             for (let j = i + 1; j < workflowSteps.length; j++) {
               addToRecent({

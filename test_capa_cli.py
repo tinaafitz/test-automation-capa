@@ -1787,11 +1787,11 @@ class TestCmdWorkflow:
                 "id": "wf-test123",
                 "name": "test_workflow",
                 "description": "A test workflow",
-                "stopOnFailure": True,
-                "globalVars": {"MCE_NAMESPACE": "multicluster-engine"},
+                "stop_on_failure": True,
+                "vars": {"MCE_NAMESPACE": "multicluster-engine"},
                 "steps": [
-                    {"name": "Step One", "file": "playbooks/validate.yml", "onFailure": "stop", "timeout": 120, "extra_vars": {}},
-                    {"name": "Step Two", "file": "playbooks/configure.yml", "onFailure": "skip", "timeout": 600, "extra_vars": {"key": "val"}},
+                    {"name": "Step One", "playbook": "playbooks/validate.yml", "on_failure": "stop", "timeout": 120, "vars": {}},
+                    {"name": "Step Two", "playbook": "playbooks/configure.yml", "on_failure": "skip", "timeout": 600, "vars": {"key": "val"}},
                 ],
                 "savedAt": "2026-04-13T10:00:00",
             }
