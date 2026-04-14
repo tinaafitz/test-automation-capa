@@ -7,7 +7,7 @@
 #   - How to change it (oc patch or playbook)
 #   - What it depends on (depends_on)
 #   - Whether it can be changed after creation (mutable)
-#   - Which spec actions it applies to (applies_to: [create, apply, delete])
+#   - Which spec actions it applies to (applies_to: [create, apply, upgrade, delete])
 
 version: "1.0"
 

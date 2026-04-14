@@ -230,11 +230,15 @@ class ExecutionEngine:
             var_name = self.registry.resolve_var(feat_id)
             extra_vars[var_name] = value
 
+        # Read playbook path from registry sequences (single source of truth)
+        provision_seq = self.registry.sequences.get("provision", {})
+        playbook = provision_seq.get("playbook", "playbooks/create_rosa_hcp_cluster.yml")
+
         return [{
             "step": 1,
             "type": "playbook",
             "name": f"Create cluster {spec.name_prefix or 'new'}-rosa-hcp",
-            "playbook": "playbooks/create_rosa_hcp_cluster.yml",
+            "playbook": playbook,
             "extra_vars": extra_vars,
             "wait": True,
             "features_used": list(spec.features.keys()),
@@ -361,11 +365,15 @@ class ExecutionEngine:
         if not spec.cluster:
             raise ValueError("delete requires --cluster")
 
+        # Read playbook path from registry sequences (single source of truth)
+        delete_seq = self.registry.sequences.get("delete", {})
+        playbook = delete_seq.get("playbook", "playbooks/delete_rosa_hcp_cluster.yml")
+
         return [{
             "step": 1,
             "type": "playbook",
             "name": f"Delete cluster {spec.cluster}",
-            "playbook": "playbooks/delete_rosa_hcp_cluster.yml",
+            "playbook": playbook,
             "extra_vars": {
                 "cluster_name": spec.cluster,
                 "capi_namespace": spec.namespace,

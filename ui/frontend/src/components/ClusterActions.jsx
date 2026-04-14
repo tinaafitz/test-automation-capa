@@ -183,6 +183,34 @@ const FeatureCard = ({ feature, clusterStatus, onToggle, selectedActions }) => {
                   maxLength={feature.max_length} />
               </div>
             )}
+            {isSelected && feature.type === 'key_value' && (
+              <div className="mt-2">
+                <textarea value={typeof currentAction?.target_value === 'object' ? JSON.stringify(currentAction.target_value, null, 2) : currentAction?.target_value || '{}'}
+                  onChange={(e) => { try { onToggle(feature, JSON.parse(e.target.value)); } catch {} }}
+                  placeholder='{"key": "value"}'
+                  className="text-xs font-mono border border-gray-300 rounded-md px-2 py-1.5 w-64 h-16 focus:ring-2 focus:ring-indigo-500" />
+              </div>
+            )}
+            {isSelected && feature.type === 'range' && (
+              <div className="mt-2 flex items-center gap-2">
+                <label className="text-xs text-gray-500">Min:</label>
+                <input type="number" value={currentAction?.target_value?.min ?? feature.default?.min ?? 1}
+                  onChange={(e) => onToggle(feature, { ...currentAction?.target_value, min: parseInt(e.target.value) || 0 })}
+                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-16 focus:ring-2 focus:ring-indigo-500" />
+                <label className="text-xs text-gray-500">Max:</label>
+                <input type="number" value={currentAction?.target_value?.max ?? feature.default?.max ?? 3}
+                  onChange={(e) => onToggle(feature, { ...currentAction?.target_value, max: parseInt(e.target.value) || 0 })}
+                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-16 focus:ring-2 focus:ring-indigo-500" />
+              </div>
+            )}
+            {isSelected && feature.type === 'list' && (
+              <div className="mt-2">
+                <input type="text" value={Array.isArray(currentAction?.target_value) ? currentAction.target_value.join(', ') : ''}
+                  onChange={(e) => onToggle(feature, e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                  placeholder="item1, item2, item3"
+                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-64 focus:ring-2 focus:ring-indigo-500" />
+              </div>
+            )}
           </div>
           <span className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md font-mono border border-slate-200 flex-shrink-0">
             {feature.resource || 'Action'}
@@ -912,6 +940,33 @@ const NewClusterPanel = ({ registry, onClose, onProvision }) => {
                             onChange={(e) => toggleFeature(feature.id, parseInt(e.target.value) || 0)}
                             className="text-xs border border-gray-300 rounded px-2 py-1 w-20" />
                         </div>
+                      ) : feature.type === 'key_value' ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-700">{feature.name}:</span>
+                          <textarea value={typeof selectedFeatures[feature.id] === 'object' ? JSON.stringify(selectedFeatures[feature.id], null, 2) : selectedFeatures[feature.id] || '{}'}
+                            onChange={(e) => { try { toggleFeature(feature.id, JSON.parse(e.target.value)); } catch {} }}
+                            placeholder='{"key": "value"}'
+                            className="text-xs font-mono border border-gray-300 rounded px-2 py-1 w-48 h-12" />
+                        </div>
+                      ) : feature.type === 'range' ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-700">{feature.name}:</span>
+                          <input type="number" value={(selectedFeatures[feature.id] || feature.default)?.min ?? 1}
+                            onChange={(e) => toggleFeature(feature.id, { ...(selectedFeatures[feature.id] || feature.default), min: parseInt(e.target.value) || 0 })}
+                            className="text-xs border border-gray-300 rounded px-2 py-1 w-14" placeholder="min" />
+                          <span className="text-xs text-gray-400">-</span>
+                          <input type="number" value={(selectedFeatures[feature.id] || feature.default)?.max ?? 3}
+                            onChange={(e) => toggleFeature(feature.id, { ...(selectedFeatures[feature.id] || feature.default), max: parseInt(e.target.value) || 0 })}
+                            className="text-xs border border-gray-300 rounded px-2 py-1 w-14" placeholder="max" />
+                        </div>
+                      ) : feature.type === 'list' ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-700">{feature.name}:</span>
+                          <input type="text" value={Array.isArray(selectedFeatures[feature.id]) ? selectedFeatures[feature.id].join(', ') : ''}
+                            onChange={(e) => toggleFeature(feature.id, e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                            placeholder="item1, item2"
+                            className="text-xs border border-gray-300 rounded px-2 py-1 w-48" />
+                        </div>
                       ) : null}
                     </div>
                   ))}
@@ -994,7 +1049,7 @@ const ClusterActions = () => {
   const discoverClusters = async () => {
     setDiscovering(true);
     try {
-      const res = await fetch(buildApiUrl('/api/rosa/clusters'));
+      const res = await fetch(buildApiUrl('/api/cluster-actions/discover'));
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -1002,13 +1057,13 @@ const ClusterActions = () => {
             success: true,
             clusters: (data.clusters || []).map(c => ({
               name: c.name, namespace: c.namespace || 'ns-rosa-hcp', version: c.version || '',
-              ready: c.status === 'ready', channel_group: c.channel_group || 'stable',
-              available_upgrades: c.available_upgrades || [], region: c.region || '', status: c.status || 'unknown',
+              ready: c.ready ?? false, channel_group: c.channel_group || 'stable',
+              available_upgrades: c.available_upgrades || [], region: c.region || '', status: c.ready ? 'ready' : 'not ready',
             })),
             count: data.count || (data.clusters || []).length,
           });
         } else {
-          setDiscoveredClusters({ success: false, clusters: [], error: data.message || 'Failed' });
+          setDiscoveredClusters({ success: false, clusters: [], error: data.error || 'Failed' });
         }
       }
     } catch (e) { setDiscoveredClusters({ success: false, clusters: [], error: 'Connection failed' }); }
