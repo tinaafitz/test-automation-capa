@@ -9262,18 +9262,40 @@ def _build_json_merge_patch(k8s_field: str, value) -> dict:
     return patch_obj
 
 
+# Per-cluster lock to prevent concurrent operations on the same cluster
+_cluster_locks: Dict[str, asyncio.Lock] = {}
+
+
+def _get_cluster_lock(cluster_name: str) -> asyncio.Lock:
+    """Get or create an asyncio.Lock for a cluster (prevents concurrent operations)."""
+    if cluster_name not in _cluster_locks:
+        _cluster_locks[cluster_name] = asyncio.Lock()
+    return _cluster_locks[cluster_name]
+
+
 @app.post("/api/cluster-actions/execute")
 async def execute_cluster_actions(request: ClusterActionRequest):
     """
     Execute a batch of feature actions on a cluster.
     Playbook-backed actions are run via the job system with live polling.
     K8s patch actions are executed directly via oc patch.
+    Uses per-cluster locking to prevent concurrent conflicting operations.
     """
     # Validate cluster name
     name_err = _validate_cluster_name(request.cluster_name)
     if name_err:
         raise HTTPException(status_code=400, detail=name_err)
 
+    lock = _get_cluster_lock(request.cluster_name)
+    if lock.locked():
+        raise HTTPException(status_code=409, detail=f"Cluster '{request.cluster_name}' has an operation in progress. Please wait.")
+
+    async with lock:
+        return await _execute_cluster_actions_locked(request)
+
+
+async def _execute_cluster_actions_locked(request: ClusterActionRequest):
+    """Inner execution logic, called while holding the per-cluster lock."""
     results = []
 
     for action in request.actions:
