@@ -16,6 +16,12 @@ Usage:
     ./capa test --list                                  # list test suites
     ./capa validate specs/features/channel-group.yml   # validate a spec file
     ./capa plan -f specs/upgrade.yml --cluster moo --version 4.20.12  # dry run
+    ./capa version                                      # show CLI/agent versions
+    ./capa list-clusters                                # list all managed clusters
+    ./capa logs --cluster moo-rosa-hcp                  # tail sidecar/job logs
+    ./capa history --cluster moo-rosa-hcp               # show operation history
+    ./capa watch --cluster moo-rosa-hcp                 # poll status until ready
+    ./capa completion bash                              # generate shell completion
 """
 
 import argparse
@@ -446,6 +452,43 @@ def cmd_status(args, base_dir, registry):
     except Exception:
         pass
 
+    # ROSANetwork
+    try:
+        result = subprocess.run(
+            ["oc", "get", "rosanetwork", cluster, "-n", namespace,
+             "-o", "jsonpath={.status.ready}|{.status.stackStatus}|{.status.vpcID}"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            parts = result.stdout.split("|")
+            net_ready = parts[0] if len(parts) > 0 else "?"
+            stack_status = parts[1] if len(parts) > 1 else "?"
+            vpc_id = parts[2] if len(parts) > 2 else "?"
+
+            print(f"\n  Network:")
+            print(f"    Ready: {C.G if net_ready == 'true' else C.R}{net_ready}{C.E}")
+            if stack_status:
+                stack_color = C.G if "COMPLETE" in stack_status and "DELETE" not in stack_status else C.R if "FAILED" in stack_status else C.Y
+                print(f"    CloudFormation: {stack_color}{stack_status}{C.E}")
+            if vpc_id:
+                print(f"    VPC: {vpc_id}")
+    except Exception:
+        pass
+
+    # ROSARoleConfig
+    try:
+        result = subprocess.run(
+            ["oc", "get", "rosaroleconfig", cluster, "-n", namespace,
+             "-o", "jsonpath={.status.ready}"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            role_ready = result.stdout.strip()
+            print(f"\n  Role Config:")
+            print(f"    Ready: {C.G if role_ready == 'true' else C.R}{role_ready}{C.E}")
+    except Exception:
+        pass
+
     print()
 
 
@@ -714,7 +757,7 @@ def cmd_test(args, base_dir, registry):
         cmd.append("--ai-agent")
     if args.ai_agent_dry_run:
         cmd.append("--ai-agent-dry-run")
-    if args.dry_run:
+    if args.dry_run or getattr(args, "test_dry_run", False):
         cmd.append("--dry-run")
     if args.no_save:
         cmd.append("--no-save")
@@ -745,6 +788,406 @@ def cmd_test(args, base_dir, registry):
     except KeyboardInterrupt:
         print(f"\n{C.Y}Interrupted.{C.E}")
         sys.exit(130)
+
+
+def cmd_version(args, base_dir, registry):
+    """Show CLI, registry, and agent framework versions."""
+    cli_version = "1.1.0"
+    print(f"\n{C.BOLD}CAPA CLI{C.E}")
+    print(f"  CLI version:      {cli_version}")
+    print(f"  Registry path:    schemas/feature-registry.yml")
+    print(f"  Features:         {len(registry.all_features())}")
+    print(f"  Suites:           {len(registry.suites)}")
+
+    # Agent framework version
+    try:
+        from agents import __version__ as agent_version
+        print(f"  Agent framework:  {agent_version}")
+    except ImportError:
+        print(f"  Agent framework:  {C.Y}not installed{C.E}")
+
+    # Python version
+    print(f"  Python:           {sys.version.split()[0]}")
+
+    # Check for oc and ansible-playbook
+    for tool in ("oc", "ansible-playbook"):
+        try:
+            result = subprocess.run([tool, "version" if tool == "oc" else "--version"],
+                                    capture_output=True, text=True, timeout=5)
+            ver_line = result.stdout.strip().split("\n")[0] if result.returncode == 0 else "not found"
+            print(f"  {tool:18s} {ver_line}")
+        except FileNotFoundError:
+            print(f"  {tool:18s} {C.Y}not found{C.E}")
+        except Exception:
+            print(f"  {tool:18s} {C.Y}unknown{C.E}")
+    print()
+
+
+def cmd_list_clusters(args, base_dir, registry):
+    """List all managed ROSA HCP clusters across namespaces."""
+    namespace_flag = ["-n", args.namespace] if args.namespace else ["-A"]
+
+    try:
+        result = subprocess.run(
+            ["oc", "get", "rosacontrolplane"] + namespace_flag +
+            ["-o", "jsonpath={range .items[*]}{.metadata.name}|{.metadata.namespace}|"
+             "{.status.version}|{.status.ready}|{.spec.version}{\"\\n\"}{end}"],
+            capture_output=True, text=True, timeout=15
+        )
+    except FileNotFoundError:
+        print(f"{C.R}oc not found — is OpenShift CLI installed?{C.E}")
+        sys.exit(1)
+
+    if result.returncode != 0:
+        err = result.stderr.strip()
+        if "NotFound" in err or "the server doesn't have a resource type" in err:
+            print(f"{C.Y}No ROSAControlPlane CRD found — CAPA may not be installed.{C.E}")
+        else:
+            print(f"{C.R}Error: {err}{C.E}")
+        sys.exit(1)
+
+    lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
+    if not lines:
+        ns_label = f"namespace {args.namespace}" if args.namespace else "all namespaces"
+        print(f"{C.Y}No clusters found in {ns_label}.{C.E}")
+        return
+
+    print(f"\n{C.BOLD}{'CLUSTER':<30s} {'NAMESPACE':<20s} {'VERSION':<12s} {'READY':<8s} {'UPGRADING'}{C.E}")
+    print(f"{'-' * 90}")
+
+    for line in lines:
+        parts = line.split("|")
+        if len(parts) < 5:
+            continue
+        name, ns, status_ver, ready, spec_ver = parts[0], parts[1], parts[2], parts[3], parts[4]
+        upgrading = spec_ver != status_ver and status_ver and spec_ver
+        ready_color = C.G if ready == "true" else C.R
+        upgrade_str = f"{C.Y}{status_ver} -> {spec_ver}{C.E}" if upgrading else ""
+        print(f"  {name:<28s} {ns:<20s} {status_ver:<12s} "
+              f"{ready_color}{ready:<8s}{C.E} {upgrade_str}")
+    print()
+
+
+def cmd_logs(args, base_dir, registry):
+    """Tail the sidecar log or recent job logs for a cluster."""
+    cluster = args.cluster
+    lines = args.lines
+
+    # Try sidecar log first (active deletion operations)
+    sidecar_path = Path(f"/tmp/deletion-agent-{cluster}.log")
+    if sidecar_path.exists():
+        print(f"{C.BOLD}Sidecar log: {sidecar_path}{C.E}\n")
+        if args.follow:
+            # Follow mode — tail -f equivalent
+            print(f"{C.CYAN}Following log (Ctrl+C to stop)...{C.E}\n")
+            try:
+                subprocess.run(["tail", "-f", str(sidecar_path)])
+            except KeyboardInterrupt:
+                print(f"\n{C.Y}Stopped.{C.E}")
+            return
+        else:
+            try:
+                with open(sidecar_path) as f:
+                    all_lines = f.readlines()
+                for line in all_lines[-lines:]:
+                    print(line, end="")
+            except IOError as e:
+                print(f"{C.R}Error reading sidecar log: {e}{C.E}")
+            return
+
+    # Fall back to cluster action history
+    history_path = base_dir / "vars" / "cluster_action_history.json"
+    if history_path.exists():
+        try:
+            with open(history_path) as f:
+                history = json.load(f)
+            cluster_entries = [e for e in history if e.get("cluster_name") == cluster]
+            if cluster_entries:
+                print(f"{C.BOLD}Recent operations for {cluster}:{C.E}\n")
+                for entry in cluster_entries[-lines:]:
+                    ts = entry.get("timestamp", "?")[:19]
+                    status = entry.get("status", "?")
+                    feature = entry.get("feature_id", "?")
+                    msg = entry.get("message", "")
+                    status_color = C.G if status == "completed" else C.R if status == "failed" else C.Y
+                    print(f"  {ts}  {status_color}{status:<12s}{C.E}  {feature:<30s}  {msg}")
+                print()
+                return
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    # Check test-results for recent logs
+    results_dir = base_dir / "test-results"
+    if results_dir.exists():
+        latest_files = sorted(results_dir.glob("latest*.json"))
+        if latest_files:
+            print(f"{C.Y}No active logs for '{cluster}'. Latest test results:{C.E}")
+            for f in latest_files:
+                print(f"  {f}")
+            print()
+            return
+
+    print(f"{C.Y}No logs found for cluster '{cluster}'.{C.E}")
+    print(f"  Sidecar log would be at: /tmp/deletion-agent-{cluster}.log")
+    print(f"  History file: vars/cluster_action_history.json")
+    print()
+
+
+def cmd_history(args, base_dir, registry):
+    """Show operation history for a cluster from cluster_action_history.json."""
+    history_path = base_dir / "vars" / "cluster_action_history.json"
+
+    if not history_path.exists():
+        print(f"{C.Y}No history file found at vars/cluster_action_history.json{C.E}")
+        return
+
+    try:
+        with open(history_path) as f:
+            history = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"{C.R}Error reading history: {e}{C.E}")
+        sys.exit(1)
+
+    # Filter by cluster if specified
+    if args.cluster:
+        history = [e for e in history if e.get("cluster_name") == args.cluster]
+        if not history:
+            print(f"{C.Y}No history for cluster '{args.cluster}'.{C.E}")
+            return
+        print(f"\n{C.BOLD}Operation history for {args.cluster}:{C.E}\n")
+    else:
+        if not history:
+            print(f"{C.Y}No operations in history.{C.E}")
+            return
+        print(f"\n{C.BOLD}All cluster operation history:{C.E}\n")
+
+    # Show last N entries
+    limit = args.limit
+    entries = history[-limit:]
+
+    print(f"  {C.BOLD}{'TIMESTAMP':<22s} {'CLUSTER':<25s} {'FEATURE':<28s} {'STATUS':<12s} {'VALUE'}{C.E}")
+    print(f"  {'-' * 100}")
+
+    for entry in entries:
+        ts = entry.get("timestamp", "?")[:19]
+        cluster = entry.get("cluster_name", "?")
+        feature = entry.get("feature_id", entry.get("feature_name", "?"))
+        status = entry.get("status", "?")
+        value = str(entry.get("target_value", ""))[:20]
+        status_color = C.G if status == "completed" else C.R if status == "failed" else C.Y
+        print(f"  {ts:<22s} {cluster:<25s} {feature:<28s} "
+              f"{status_color}{status:<12s}{C.E} {value}")
+
+    total = len(history)
+    if total > limit:
+        print(f"\n  {C.CYAN}Showing {limit} of {total} entries (use --limit to show more){C.E}")
+    print()
+
+
+def cmd_watch(args, base_dir, registry):
+    """Poll cluster status until ready or timeout."""
+    cluster = args.cluster
+    namespace = args.namespace or "ns-rosa-hcp"
+    interval = args.interval
+    timeout = args.timeout
+
+    print(f"\n{C.BOLD}Watching cluster: {cluster}{C.E}")
+    print(f"  Namespace: {namespace}")
+    print(f"  Interval: {interval}s, Timeout: {timeout}s")
+    print(f"  {C.CYAN}Press Ctrl+C to stop{C.E}\n")
+
+    start = time.time()
+    last_status = None
+
+    try:
+        while True:
+            elapsed = time.time() - start
+            if elapsed > timeout:
+                print(f"\n{C.R}Timeout after {timeout}s — cluster not ready.{C.E}\n")
+                sys.exit(1)
+
+            # Check control plane
+            try:
+                result = subprocess.run(
+                    ["oc", "get", "rosacontrolplane", cluster, "-n", namespace,
+                     "-o", "jsonpath={.status.version}|{.status.ready}|{.spec.version}"],
+                    capture_output=True, text=True, timeout=10
+                )
+            except FileNotFoundError:
+                print(f"{C.R}oc not found{C.E}")
+                sys.exit(1)
+
+            if result.returncode != 0:
+                ts = datetime.now().strftime("%H:%M:%S")
+                print(f"  {ts}  {C.Y}Cluster not found yet...{C.E}")
+                time.sleep(interval)
+                continue
+
+            parts = result.stdout.split("|")
+            status_ver = parts[0] if len(parts) > 0 else "?"
+            ready = parts[1] if len(parts) > 1 else "?"
+            spec_ver = parts[2] if len(parts) > 2 else "?"
+            upgrading = spec_ver != status_ver and status_ver and spec_ver
+
+            # Check machine pool
+            mp_ready = "?"
+            try:
+                mp_result = subprocess.run(
+                    ["oc", "get", "rosamachinepool", cluster, "-n", namespace,
+                     "-o", "jsonpath={.status.ready}"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if mp_result.returncode == 0:
+                    mp_ready = mp_result.stdout.strip() or "?"
+            except Exception:
+                pass
+
+            # Build status line
+            ts = datetime.now().strftime("%H:%M:%S")
+            current_status = f"cp={ready} mp={mp_ready} v={status_ver}"
+
+            if current_status != last_status:
+                ready_color = C.G if ready == "true" else C.Y
+                mp_color = C.G if mp_ready == "true" else C.Y
+                upgrade_info = f" {C.Y}upgrading -> {spec_ver}{C.E}" if upgrading else ""
+                print(f"  {ts}  CP: {ready_color}{ready}{C.E}  "
+                      f"MP: {mp_color}{mp_ready}{C.E}  "
+                      f"Version: {status_ver}{upgrade_info}  "
+                      f"({int(elapsed)}s)")
+                last_status = current_status
+
+            # Check if fully ready
+            if ready == "true" and mp_ready == "true" and not upgrading:
+                print(f"\n{C.G}{C.BOLD}Cluster {cluster} is ready! "
+                      f"(v{status_ver}, {int(elapsed)}s){C.E}\n")
+                return
+
+            time.sleep(interval)
+
+    except KeyboardInterrupt:
+        print(f"\n\n{C.Y}Stopped watching after {int(time.time() - start)}s.{C.E}\n")
+
+
+def cmd_completion(args, base_dir, registry):
+    """Generate shell completion scripts."""
+    shell = args.shell
+
+    # Gather completable values
+    commands = ["create", "upgrade", "apply", "delete", "plan", "status",
+                "specs", "features", "set", "validate", "test",
+                "generate-specs", "version", "list-clusters", "logs",
+                "history", "watch", "completion"]
+    feature_ids = " ".join(sorted(registry.all_features().keys()))
+
+    suite_ids = ""
+    test_suites_dir = base_dir / "test-suites"
+    if test_suites_dir.exists():
+        suite_ids = " ".join(sorted(f.stem for f in test_suites_dir.glob("*.json")))
+
+    profiles = ""
+    profiles_dir = base_dir / "specs" / "profiles"
+    if profiles_dir.exists():
+        profiles = " ".join(sorted(f.stem for f in profiles_dir.glob("*.yml")))
+
+    if shell == "bash":
+        print(f"""# CAPA CLI bash completion
+# Add to ~/.bashrc: eval "$(./capa completion bash)"
+_capa_complete() {{
+    local cur prev commands
+    cur="${{COMP_WORDS[COMP_CWORD]}}"
+    prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+    commands="{' '.join(commands)}"
+
+    case "$prev" in
+        capa|./capa)
+            COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+            return 0
+            ;;
+        set)
+            COMPREPLY=( $(compgen -W "{feature_ids}" -- "$cur") )
+            return 0
+            ;;
+        test)
+            COMPREPLY=( $(compgen -W "{suite_ids} --list --all --ai-agent --format --tag --dry-run" -- "$cur") )
+            return 0
+            ;;
+        --profile|-p)
+            COMPREPLY=( $(compgen -W "{profiles}" -- "$cur") )
+            return 0
+            ;;
+        --format)
+            COMPREPLY=( $(compgen -W "json html junit all" -- "$cur") )
+            return 0
+            ;;
+        --cluster|-c)
+            return 0
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
+            return 0
+            ;;
+    esac
+
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=( $(compgen -W "--verbose --dry-run --help --cluster --namespace --version --file --profile" -- "$cur") )
+    fi
+}}
+complete -F _capa_complete capa
+complete -F _capa_complete ./capa""")
+
+    elif shell == "zsh":
+        print(f"""# CAPA CLI zsh completion
+# Add to ~/.zshrc: eval "$(./capa completion zsh)"
+#compdef capa
+
+_capa() {{
+    local -a commands
+    commands=(
+        'create:Create a new cluster'
+        'upgrade:Upgrade cluster (CP + MP)'
+        'apply:Apply Day2 actions from spec'
+        'delete:Delete a cluster'
+        'plan:Show execution plan (dry run)'
+        'status:Show cluster status'
+        'specs:List available profiles'
+        'features:List all features from registry'
+        'set:Set a single feature on a running cluster'
+        'validate:Validate a spec file'
+        'test:Run test suites'
+        'generate-specs:Auto-generate feature specs'
+        'version:Show CLI version'
+        'list-clusters:List all managed clusters'
+        'logs:Tail cluster logs'
+        'history:Show operation history'
+        'watch:Poll cluster status until ready'
+        'completion:Generate shell completion'
+    )
+
+    _arguments '1: :->command' '*:: :->args'
+
+    case $state in
+        command)
+            _describe 'command' commands
+            ;;
+        args)
+            case $words[1] in
+                set)
+                    _values 'features' {' '.join(sorted(registry.all_features().keys()))}
+                    ;;
+                test)
+                    _arguments '1:suite:({suite_ids})' '--ai-agent' '--format:format:(json html junit all)' '--list' '--all'
+                    ;;
+                *)
+                    _arguments '--cluster[Cluster name]:cluster:' '--namespace[Namespace]:namespace:' '--verbose' '--dry-run'
+                    ;;
+            esac
+            ;;
+    esac
+}}
+_capa""")
+    else:
+        print(f"{C.R}Unknown shell: {shell}. Supported: bash, zsh{C.E}")
+        sys.exit(1)
 
 
 def cmd_generate_specs(args, base_dir, registry):
@@ -903,7 +1346,37 @@ def main():
     p_test.add_argument("-e", "--extra-vars", action="append", metavar="KEY=VAL", help="Extra variables (can repeat)")
     p_test.add_argument("--ai-agent", action="store_true", help="Enable AI agent framework")
     p_test.add_argument("--ai-agent-dry-run", action="store_true", help="AI agents detect but don't fix")
+    p_test.add_argument("--dry-run", action="store_true", dest="test_dry_run", help="Run in dry-run mode (no changes)")
     p_test.add_argument("-V", "--test-verbosity", action="count", default=0, help="Test verbosity (-V, -VV, -VVV)")
+
+    # version
+    subparsers.add_parser("version", help="Show CLI, registry, and agent versions")
+
+    # list-clusters
+    p_lc = subparsers.add_parser("list-clusters", help="List all managed ROSA HCP clusters")
+    p_lc.add_argument("--namespace", "-n", default=None, help="Namespace (default: all)")
+
+    # logs
+    p_logs = subparsers.add_parser("logs", help="Tail sidecar or job logs for a cluster")
+    p_logs.add_argument("--cluster", "-c", required=True, help="Cluster name")
+    p_logs.add_argument("--lines", "-l", type=int, default=50, help="Number of lines (default: 50)")
+    p_logs.add_argument("--follow", "-f", action="store_true", help="Follow log output (tail -f)")
+
+    # history
+    p_hist = subparsers.add_parser("history", help="Show operation history")
+    p_hist.add_argument("--cluster", "-c", help="Filter by cluster name")
+    p_hist.add_argument("--limit", type=int, default=20, help="Number of entries (default: 20)")
+
+    # watch
+    p_watch = subparsers.add_parser("watch", help="Poll cluster status until ready")
+    p_watch.add_argument("--cluster", "-c", required=True, help="Cluster name")
+    p_watch.add_argument("--namespace", "-n", default="ns-rosa-hcp", help="Namespace")
+    p_watch.add_argument("--interval", "-i", type=int, default=30, help="Poll interval seconds (default: 30)")
+    p_watch.add_argument("--timeout", "-t", type=int, default=7200, help="Timeout seconds (default: 7200)")
+
+    # completion
+    p_comp = subparsers.add_parser("completion", help="Generate shell completion script")
+    p_comp.add_argument("shell", choices=["bash", "zsh"], help="Shell type")
 
     # generate-specs
     p_gen = subparsers.add_parser("generate-specs", help="Auto-generate feature specs from registry")
@@ -927,6 +1400,12 @@ def main():
         "set": cmd_set,
         "validate": cmd_validate,
         "test": cmd_test,
+        "version": cmd_version,
+        "list-clusters": cmd_list_clusters,
+        "logs": cmd_logs,
+        "history": cmd_history,
+        "watch": cmd_watch,
+        "completion": cmd_completion,
         "generate-specs": cmd_generate_specs,
     }
 
