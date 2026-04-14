@@ -22,6 +22,11 @@ Usage:
     ./capa history --cluster moo-rosa-hcp               # show operation history
     ./capa watch --cluster moo-rosa-hcp                 # poll status until ready
     ./capa completion bash                              # generate shell completion
+    ./capa workflow list                                  # list all workflows
+    ./capa workflow show verify_and_configure             # show workflow details
+    ./capa workflow run verify_and_configure              # run a workflow
+    ./capa workflow run verify_and_configure -e key=val   # run with overrides
+    ./capa workflow export verify_and_configure           # export saved workflow to YAML
 """
 
 import argparse
@@ -1269,6 +1274,293 @@ def cmd_generate_specs(args, base_dir, registry):
     print()
 
 
+def cmd_workflow(args, base_dir, registry):
+    """List, show, or run saved workflows."""
+    action = getattr(args, "workflow_action", None) or "list"
+    workflows_file = base_dir / "vars" / "saved_workflows.json"
+
+    def _load_saved():
+        """Load workflows from vars/saved_workflows.json."""
+        if not workflows_file.exists():
+            return []
+        try:
+            with open(workflows_file) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return []
+
+    def _load_yaml_workflows():
+        """Load YAML workflow files from specs/workflows/."""
+        wf_dir = base_dir / "specs" / "workflows"
+        results = []
+        if not wf_dir.exists():
+            return results
+        for yf in sorted(wf_dir.glob("*.yml")):
+            try:
+                with open(yf) as f:
+                    data = yaml.safe_load(f)
+                if data and data.get("kind") == "Workflow":
+                    data["_source"] = str(yf)
+                    results.append(data)
+            except (yaml.YAMLError, IOError):
+                continue
+        return results
+
+    def _find_workflow(name):
+        """Find a workflow by name from saved JSON or YAML files."""
+        # Check saved workflows first
+        for wf in _load_saved():
+            if wf.get("name") == name or wf.get("id") == name:
+                return wf, "saved"
+        # Check YAML workflows
+        for wf in _load_yaml_workflows():
+            meta = wf.get("metadata", {})
+            if meta.get("name") == name:
+                return wf, "yaml"
+        # Check by filename stem
+        yf = base_dir / "specs" / "workflows" / f"{name}.yml"
+        if yf.exists():
+            with open(yf) as f:
+                data = yaml.safe_load(f)
+            if data:
+                data["_source"] = str(yf)
+                return data, "yaml"
+        return None, None
+
+    def _workflow_to_plan(wf, wf_type, extra_vars_overrides=None):
+        """Convert a workflow (saved JSON or YAML) to an execution plan."""
+        steps = []
+        global_vars = {}
+
+        if wf_type == "saved":
+            global_vars = wf.get("globalVars", {})
+            for i, step in enumerate(wf.get("steps", [])):
+                merged_vars = {**global_vars, **(step.get("extra_vars", {}))}
+                if extra_vars_overrides:
+                    merged_vars.update(extra_vars_overrides)
+                steps.append({
+                    "step": i + 1,
+                    "type": "playbook",
+                    "name": step.get("name", f"Step {i+1}"),
+                    "playbook": step.get("file", ""),
+                    "extra_vars": merged_vars,
+                    "on_failure": step.get("onFailure", "stop"),
+                    "timeout": step.get("timeout", 600),
+                })
+        elif wf_type == "yaml":
+            global_vars = wf.get("spec", {}).get("vars", {})
+            for i, step in enumerate(wf.get("spec", {}).get("steps", [])):
+                merged_vars = {**global_vars, **(step.get("vars", {}))}
+                if extra_vars_overrides:
+                    merged_vars.update(extra_vars_overrides)
+                steps.append({
+                    "step": i + 1,
+                    "type": "playbook",
+                    "name": step.get("name", f"Step {i+1}"),
+                    "playbook": step.get("playbook", ""),
+                    "extra_vars": merged_vars,
+                    "on_failure": step.get("on_failure", "stop"),
+                    "timeout": step.get("timeout", 600),
+                })
+        return steps
+
+    if action == "list":
+        saved = _load_saved()
+        yaml_wfs = _load_yaml_workflows()
+
+        if not saved and not yaml_wfs:
+            print(f"{C.Y}No workflows found.{C.E}")
+            print(f"  Save workflows in the UI Workflow Builder, or create YAML files in specs/workflows/")
+            return
+
+        if saved:
+            print(f"\n{C.BOLD}Saved Workflows{C.E} ({workflows_file.name}):\n")
+            for wf in saved:
+                step_count = len(wf.get("steps", []))
+                saved_at = wf.get("savedAt", "")[:16]
+                print(f"  {C.G}{wf['name']}{C.E}  ({step_count} steps)  saved: {saved_at}")
+                for i, step in enumerate(wf.get("steps", []), 1):
+                    print(f"    {i}. {step.get('name', '?')}")
+
+        if yaml_wfs:
+            print(f"\n{C.BOLD}YAML Workflows{C.E} (specs/workflows/):\n")
+            for wf in yaml_wfs:
+                meta = wf.get("metadata", {})
+                spec = wf.get("spec", {})
+                step_count = len(spec.get("steps", []))
+                print(f"  {C.B}{meta.get('name', '?')}{C.E}  ({step_count} steps)  {meta.get('description', '')}")
+                for i, step in enumerate(spec.get("steps", []), 1):
+                    print(f"    {i}. {step.get('name', '?')}")
+        print()
+
+    elif action == "show":
+        name = getattr(args, "name", None)
+        if not name:
+            print(f"{C.R}Usage: capa workflow show <name>{C.E}")
+            sys.exit(1)
+        wf, wf_type = _find_workflow(name)
+        if not wf:
+            print(f"{C.R}Workflow not found: {name}{C.E}")
+            sys.exit(1)
+
+        if wf_type == "saved":
+            print(f"\n{C.BOLD}Workflow: {wf['name']}{C.E}")
+            print(f"  ID: {wf.get('id', 'n/a')}")
+            print(f"  Stop on failure: {wf.get('stopOnFailure', True)}")
+            gv = wf.get("globalVars", {})
+            if gv:
+                print(f"\n  {C.BOLD}Global Variables:{C.E}")
+                for k, v in gv.items():
+                    display_v = "***" if "secret" in k.lower() or "password" in k.lower() else v
+                    print(f"    {k} = {display_v}")
+            print(f"\n  {C.BOLD}Steps:{C.E}")
+            for i, step in enumerate(wf.get("steps", []), 1):
+                print(f"    {i}. {step.get('name', '?')}")
+                print(f"       playbook: {step.get('file', '?')}")
+                print(f"       on_failure: {step.get('onFailure', 'stop')}")
+                ev = step.get("extra_vars", {})
+                if ev:
+                    print(f"       extra_vars: {json.dumps(ev, indent=2).replace(chr(10), chr(10) + '       ')}")
+        elif wf_type == "yaml":
+            print(f"\n{C.BOLD}Workflow: {wf['metadata']['name']}{C.E}  ({wf.get('_source', '')})")
+            print(f"  Description: {wf['metadata'].get('description', '')}")
+            spec = wf.get("spec", {})
+            gv = spec.get("vars", {})
+            if gv:
+                print(f"\n  {C.BOLD}Global Variables:{C.E}")
+                for k, v in gv.items():
+                    display_v = "***" if "secret" in k.lower() or "password" in k.lower() else v
+                    print(f"    {k} = {display_v}")
+            print(f"\n  {C.BOLD}Steps:{C.E}")
+            for i, step in enumerate(spec.get("steps", []), 1):
+                print(f"    {i}. {step.get('name', '?')}")
+                print(f"       playbook: {step.get('playbook', '?')}")
+                print(f"       on_failure: {step.get('on_failure', 'stop')}")
+                sv = step.get("vars", {})
+                if sv:
+                    print(f"       vars: {json.dumps(sv, indent=2).replace(chr(10), chr(10) + '       ')}")
+        print()
+
+    elif action == "run":
+        name = getattr(args, "name", None)
+        if not name:
+            print(f"{C.R}Usage: capa workflow run <name>{C.E}")
+            sys.exit(1)
+        wf, wf_type = _find_workflow(name)
+        if not wf:
+            print(f"{C.R}Workflow not found: {name}{C.E}")
+            sys.exit(1)
+
+        # Parse -e overrides
+        extra_vars_overrides = {}
+        raw_extras = getattr(args, "extra_vars", None) or []
+        for item in raw_extras:
+            if "=" in item:
+                k, v = item.split("=", 1)
+                extra_vars_overrides[k] = v
+
+        plan = _workflow_to_plan(wf, wf_type, extra_vars_overrides)
+        if not plan:
+            print(f"{C.R}Workflow has no steps.{C.E}")
+            sys.exit(1)
+
+        dry_run = args.dry_run
+        engine = ExecutionEngine(registry, base_dir, dry_run=dry_run, verbose=args.verbose)
+
+        # Use the workflow's on_failure policy per step
+        stop_on_failure = wf.get("stopOnFailure", True) if wf_type == "saved" else True
+
+        print(f"\n{C.BOLD}{C.CYAN}{'=' * 60}{C.E}")
+        wf_name = wf.get("name") or wf.get("metadata", {}).get("name", name)
+        print(f"{C.BOLD}  Workflow: {wf_name} ({len(plan)} steps){C.E}")
+        print(f"{C.BOLD}{C.CYAN}{'=' * 60}{C.E}\n")
+
+        for step in plan:
+            engine._print_step(step)
+
+        if dry_run:
+            print(f"\n{C.Y}DRY RUN — no changes made.{C.E}\n")
+            return
+
+        print(f"\n{C.BOLD}Executing...{C.E}\n")
+        results = []
+        for step in plan:
+            result = engine._execute_step(step)
+            results.append(result)
+
+            if result["status"] == "failed":
+                on_failure = step.get("on_failure", "stop")
+                if on_failure == "stop" or (on_failure != "skip" and stop_on_failure):
+                    print(f"\n{C.R}Step {step['step']} failed — stopping workflow.{C.E}")
+                    for remaining in plan[step["step"]:]:
+                        results.append({"step": remaining["step"], "name": remaining["name"], "status": "skipped"})
+                    break
+                elif on_failure == "skip":
+                    print(f"  {C.Y}Step failed — skipping (on_failure: skip){C.E}")
+
+        engine._print_summary(results)
+
+    elif action == "export":
+        name = getattr(args, "name", None)
+        if not name:
+            print(f"{C.R}Usage: capa workflow export <name>{C.E}")
+            sys.exit(1)
+        wf, wf_type = _find_workflow(name)
+        if not wf:
+            print(f"{C.R}Workflow not found: {name}{C.E}")
+            sys.exit(1)
+
+        if wf_type == "yaml":
+            print(f"{C.Y}Already a YAML workflow: {wf.get('_source')}{C.E}")
+            return
+
+        # Convert saved JSON workflow to YAML format
+        yaml_wf = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "Workflow",
+            "metadata": {
+                "name": wf["name"],
+                "description": wf.get("description", ""),
+            },
+            "spec": {
+                "vars": wf.get("globalVars", {}),
+                "steps": [],
+            },
+        }
+        for step in wf.get("steps", []):
+            yaml_step = {
+                "name": step.get("name", ""),
+                "playbook": step.get("file", ""),
+                "on_failure": step.get("onFailure", "stop"),
+                "timeout": step.get("timeout", 600),
+            }
+            ev = step.get("extra_vars", {})
+            if ev:
+                yaml_step["vars"] = ev
+            yaml_wf["spec"]["steps"].append(yaml_step)
+
+        out_path = base_dir / "specs" / "workflows" / f"{wf['name']}.yml"
+        print(f"\n{C.BOLD}Exported YAML:{C.E}\n")
+        yaml_str = yaml.dump(yaml_wf, default_flow_style=False, sort_keys=False)
+        print(yaml_str)
+
+        if getattr(args, "output", None):
+            out_path = Path(args.output)
+
+        print(f"{C.CYAN}Save to: {out_path}{C.E}")
+        confirm = input("Write file? [y/N] ").strip().lower()
+        if confirm == "y":
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w") as f:
+                f.write(f"# Exported from UI workflow: {wf['name']}\n")
+                yaml.dump(yaml_wf, f, default_flow_style=False, sort_keys=False)
+            print(f"{C.G}Written: {out_path}{C.E}")
+    else:
+        print(f"{C.R}Unknown workflow action: {action}{C.E}")
+        print(f"Usage: capa workflow [list|show|run|export] <name>")
+        sys.exit(1)
+
+
 def main():
     base_dir = Path(os.path.dirname(os.path.abspath(__file__)))
     registry = FeatureRegistry(base_dir)
@@ -1383,6 +1675,16 @@ def main():
     p_gen = subparsers.add_parser("generate-specs", help="Auto-generate feature specs from registry")
     p_gen.add_argument("--force", action="store_true", help="Overwrite existing spec files")
 
+    # workflow
+    p_wf = subparsers.add_parser("workflow", help="List, show, run, or export workflows")
+    p_wf.add_argument("workflow_action", nargs="?", default="list",
+                       choices=["list", "show", "run", "export"],
+                       help="Action: list, show, run, or export")
+    p_wf.add_argument("name", nargs="?", help="Workflow name or ID")
+    p_wf.add_argument("-e", "--extra-vars", action="append", metavar="KEY=VAL",
+                       help="Override variables (for run)")
+    p_wf.add_argument("-o", "--output", help="Output file path (for export)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -1408,6 +1710,7 @@ def main():
         "watch": cmd_watch,
         "completion": cmd_completion,
         "generate-specs": cmd_generate_specs,
+        "workflow": cmd_workflow,
     }
 
     cmd_fn = commands.get(args.command)

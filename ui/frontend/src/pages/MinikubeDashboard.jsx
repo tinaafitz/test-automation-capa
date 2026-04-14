@@ -8,8 +8,6 @@ import MCEEnvironmentSelector from '../components/MCEEnvironmentSelector';
 import ActiveEnvironmentBanner from '../components/ActiveEnvironmentBanner';
 import { YamlEditorModal } from '../components/YamlEditorModal';
 import { RosaProvisionModal } from '../components/RosaProvisionModal';
-import TestSuiteDashboard from '../components/sections/TestSuiteDashboard';
-import TestSuiteSection from '../components/sections/TestSuiteSection';
 import ResourcesViewer from '../components/ResourcesViewer';
 import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import {
@@ -1330,8 +1328,6 @@ const MinikubeDashboardContent = () => {
     onResourcesClick: () => setActiveSection('resources'),
     onEnvironmentsClick: () => setActiveSection('environments'),
     onTestClick: () => setActiveSection('test'),
-    onTestSuiteDashboardClick: () => setActiveSection('test-suite-dashboard'),
-    onTestAutomationClick: () => setActiveSection('test-automation'),
     onAIAssistantClick: () => setActiveSection('ai-assistant'),
     onAWSUsageClick: () => window.location.href = '/aws-usage',
     onTerminalClick: () => setActiveSection('terminal'),
@@ -1934,27 +1930,6 @@ const MinikubeDashboardContent = () => {
               <div className="text-sm text-gray-500">Test suite dashboard coming soon...</div>
             </div>
             {/* Task Summary Section removed */}
-          </div>
-        );
-
-      case 'test-suite-dashboard':
-        return (
-          <TestSuiteDashboard
-            theme="mce"
-            onSelectTestSuite={(testSuite) => {
-              console.log('Selected test suite:', testSuite);
-              // You can add modal or navigation logic here
-            }}
-          />
-        );
-
-      case 'test-automation':
-        return (
-          <div className="space-y-6">
-            {/* Title */}
-            <h2 className="text-2xl font-bold text-purple-900">Playbooks</h2>
-
-            <TestSuiteSection theme="minikube" />
           </div>
         );
 

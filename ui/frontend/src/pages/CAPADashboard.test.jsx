@@ -58,16 +58,6 @@ jest.mock('../components/RosaProvisionModal', () => ({
   },
 }));
 
-let capturedTestSuiteDashboardProps = {};
-jest.mock('../components/sections/TestSuiteDashboard', () => (props) => {
-  capturedTestSuiteDashboardProps = props;
-  return <div data-testid="test-suite-dashboard">Test Suite Dashboard</div>;
-});
-
-jest.mock('../components/sections/TestSuiteSection', () => () => (
-  <div data-testid="test-suite-section">Test Section</div>
-));
-
 jest.mock('../components/ResourcesViewer', () => (props) => (
   <div data-testid="resources-viewer">Resources {props.theme}</div>
 ));
@@ -153,7 +143,6 @@ beforeEach(() => {
   capturedCredsModalProps = {};
   capturedEnvSelectorProps = {};
   capturedProvisionModalProps = {};
-  capturedTestSuiteDashboardProps = {};
 
   // Default: no running jobs
   mockFetch.mockResolvedValue({
@@ -189,8 +178,6 @@ async function navigateTo(section) {
     environments: 'onEnvironmentsClick',
     credentials: 'onCredentialsClick',
     test: 'onTestClick',
-    'test-suite-dashboard': 'onTestSuiteDashboardClick',
-    'test-automation': 'onTestAutomationClick',
     'ai-assistant': 'onAIAssistantClick',
     terminal: 'onTerminalClick',
     notifications: 'onNotificationsClick',
@@ -289,19 +276,6 @@ describe('CAPADashboard', () => {
     await renderDashboard();
     await navigateTo('test');
     expect(screen.getByText('Test Suites')).toBeInTheDocument();
-  });
-
-  it('navigates to test-suite-dashboard section', async () => {
-    await renderDashboard();
-    await navigateTo('test-suite-dashboard');
-    expect(screen.getByTestId('test-suite-dashboard')).toBeInTheDocument();
-  });
-
-  it('navigates to test-automation section', async () => {
-    await renderDashboard();
-    await navigateTo('test-automation');
-    expect(screen.getByText('Playbooks')).toBeInTheDocument();
-    expect(screen.getByTestId('test-suite-section')).toBeInTheDocument();
   });
 
   it('navigates to workflows section', async () => {
@@ -988,17 +962,6 @@ describe('CAPADashboard', () => {
     expect(capturedCredsModalProps.inline).toBe(true);
     expect(capturedCredsModalProps.isOpen).toBe(true);
     expect(capturedCredsModalProps.theme).toBe('mce');
-  });
-
-  // ----------------------------------------------------------
-  // 11. Test suite dashboard integration
-  // ----------------------------------------------------------
-
-  it('passes theme and isProvisioning to TestSuiteDashboard', async () => {
-    await renderDashboard();
-    await navigateTo('test-suite-dashboard');
-    expect(capturedTestSuiteDashboardProps.theme).toBe('mce');
-    expect(capturedTestSuiteDashboardProps.isProvisioning).toBe(false);
   });
 
   // ----------------------------------------------------------
