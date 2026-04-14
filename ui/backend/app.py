@@ -9210,18 +9210,6 @@ def _get_cluster_lock(cluster_name: str) -> asyncio.Lock:
     return _cluster_locks[cluster_name]
 
 
-
-# Per-cluster lock to prevent concurrent operations on the same cluster
-_cluster_locks: Dict[str, asyncio.Lock] = {}
-
-
-def _get_cluster_lock(cluster_name: str) -> asyncio.Lock:
-    """Get or create an asyncio.Lock for a cluster (prevents concurrent operations)."""
-    if cluster_name not in _cluster_locks:
-        _cluster_locks[cluster_name] = asyncio.Lock()
-    return _cluster_locks[cluster_name]
-
-
 @app.post("/api/cluster-actions/execute")
 async def execute_cluster_actions(request: ClusterActionRequest):
     """
