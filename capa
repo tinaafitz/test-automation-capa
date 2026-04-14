@@ -1021,6 +1021,11 @@ def _validate_feature_value_check(feat, value, errors, warnings):
         if not isinstance(value, list):
             errors.append(f"Feature '{feat_id}' expects list, got: {type(value).__name__}")
 
+    elif feat_type == "version":
+        import re
+        if not isinstance(value, str) or not re.match(r'^\d+\.\d+\.\d+$', str(value)):
+            errors.append(f"Feature '{feat_id}' expects semver (e.g. 4.20.11), got: {value}")
+
     elif feat_type == "range":
         if isinstance(value, dict):
             if "min" not in value or "max" not in value:
