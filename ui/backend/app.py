@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional
 import asyncio
 import json
+import re
 import subprocess
 import uuid
 from datetime import datetime
@@ -9111,6 +9112,20 @@ def _build_feature_index():
 CLUSTER_FEATURE_REGISTRY = _load_feature_registry()
 _FEATURE_INDEX = _build_feature_index()
 
+# Cluster name validation: lowercase alphanumeric + hyphens, 1-54 chars (ROSA HCP limit)
+_CLUSTER_NAME_RE = re.compile(r'^[a-z][a-z0-9-]{0,53}$')
+
+
+def _validate_cluster_name(name: str) -> Optional[str]:
+    """Validate cluster name format. Returns error message or None if valid."""
+    if not name:
+        return "Cluster name is required"
+    if len(name) > 54:
+        return f"Cluster name must be 54 characters or fewer (got {len(name)})"
+    if not _CLUSTER_NAME_RE.match(name):
+        return "Cluster name must start with a lowercase letter and contain only lowercase letters, numbers, and hyphens"
+    return None
+
 
 @app.get("/api/cluster-actions/features")
 async def get_feature_registry():
@@ -9361,6 +9376,12 @@ async def provision_cluster_with_features(request: dict, background_tasks: Backg
 
     if not cluster_name and not name_prefix:
         raise HTTPException(status_code=400, detail="cluster_name or name_prefix required")
+
+    # Validate cluster name format if provided
+    if cluster_name:
+        name_err = _validate_cluster_name(cluster_name)
+        if name_err:
+            raise HTTPException(status_code=400, detail=name_err)
 
     # Build extra_vars from selected features
     extra_vars = {

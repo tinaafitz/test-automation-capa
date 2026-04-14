@@ -14,6 +14,9 @@ version: "1.0"
 # Feature variable mapping: feature_id -> playbook extra_var name
 # Used when resolving a ClusterAutomationSpec into playbook arguments
 var_map:
+  # Maps feature_id -> playbook extra_var name for the provision playbook.
+  # Only features listed in sequences.provision.accepts_features need entries here.
+  # Day2 features (upgrades, patches, deletions) use K8s field patches, not playbook vars.
   private_network: private
   byon: byon_vpc
   availability_zones: availability_zone_count
@@ -393,7 +396,7 @@ suites:
         name: Cluster Deletion
         description: Delete cluster and clean up all AWS resources
         type: action
-        mutable: true
+        mutable: false
         applies_to: [delete]
         default: null
         playbook: playbooks/delete_rosa_hcp_cluster.yml

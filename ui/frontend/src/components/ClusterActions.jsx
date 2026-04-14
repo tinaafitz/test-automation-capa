@@ -1090,7 +1090,9 @@ const ClusterActions = () => {
   const actionableSuites = (registry?.suites || [])
     .map(suite => ({
       ...suite,
-      features: suite.features.filter(f => f.applies_to?.includes('apply')),
+      features: suite.features.filter(f =>
+        f.applies_to?.includes('apply') || f.applies_to?.includes('upgrade') || f.applies_to?.includes('delete')
+      ),
     }))
     .filter(suite => suite.features.length > 0);
   const filteredSuites = actionableSuites.filter(suite => {
@@ -1120,14 +1122,14 @@ const ClusterActions = () => {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-xl font-bold text-white">Cluster Actions</h2>
-              <p className="text-indigo-200 text-sm mt-1">All mutable features you can configure on a running ROSA HCP cluster.</p>
+              <p className="text-indigo-200 text-sm mt-1">All actionable features for ROSA HCP cluster lifecycle management.</p>
             </div>
             <div className="flex items-center gap-3">
               <div className="text-right"><div className="text-2xl font-bold text-white">{totalFeatures}</div><div className="text-xs text-indigo-200">features</div></div>
               <div className="w-px h-10 bg-indigo-400/30" />
               <div className="text-right"><div className="text-2xl font-bold text-white">{mutableFeatures}</div><div className="text-xs text-indigo-200">mutable</div></div>
               <div className="w-px h-10 bg-indigo-400/30" />
-              <div className="text-right"><div className="text-2xl font-bold text-white">{(registry?.suites || []).length}</div><div className="text-xs text-indigo-200">suites</div></div>
+              <div className="text-right"><div className="text-2xl font-bold text-white">{actionableSuites.length}</div><div className="text-xs text-indigo-200">suites</div></div>
             </div>
           </div>
         </div>
