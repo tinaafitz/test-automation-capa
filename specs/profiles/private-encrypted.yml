@@ -9,7 +9,7 @@ spec:
   channel: stable
   features:
     private_network: true
-    etcd_kms: ""  # Set via -e etcd_encryption_kms_arn=arn:aws:kms:...
+    etcd_kms: ""  # Set via -e etcd_kms=arn:aws:kms:...
     availability_zones: "3"
     instance_type: m5.2xlarge
     additional_tags:
