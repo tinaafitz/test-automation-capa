@@ -39,8 +39,11 @@ ClusterAutomationSpec = capa_cli.ClusterAutomationSpec
 ExecutionEngine = capa_cli.ExecutionEngine
 C = capa_cli.C
 load_spec = capa_cli.load_spec
-_validate_feature_value = capa_cli._validate_feature_value
+_validate_feature_value = capa_cli._validate_feature_value_exit
 _validate_feature_value_check = capa_cli._validate_feature_value_check
+
+# Also import the shared core validation for direct testing
+from capa_core import validate_feature_value
 
 
 # ============================================================================
@@ -957,8 +960,9 @@ class TestCLIIntegration:
             import shutil
             shutil.copy(PROJECT_ROOT / "schemas" / "feature-registry.yml",
                         tmp_schemas / "feature-registry.yml")
-            # Copy the capa script
+            # Copy the capa script and its shared core module
             shutil.copy(PROJECT_ROOT / "capa", Path(tmpdir) / "capa")
+            shutil.copy(PROJECT_ROOT / "capa_core.py", Path(tmpdir) / "capa_core.py")
 
             result = subprocess.run(
                 [sys.executable, str(Path(tmpdir) / "capa"), "generate-specs"],
@@ -1108,6 +1112,86 @@ class TestProfileInheritance:
         errors = []
         capa_cli._validate_feature_value_check(feat, "4.20", errors, warnings)
         assert len(errors) == 1  # Missing patch version
+
+    def test_multi_level_inheritance(self):
+        """Multi-level: grandchild inherits parent inherits grandparent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            specs_dir = Path(tmpdir) / "specs" / "profiles"
+            specs_dir.mkdir(parents=True)
+
+            # Grandparent: base features
+            grandparent = {
+                "apiVersion": "capa-automation/v1",
+                "kind": "ClusterAutomationSpec",
+                "metadata": {"name": "grandparent"},
+                "spec": {
+                    "action": "create",
+                    "region": "us-east-1",
+                    "features": {"private_network": True, "sts": True},
+                },
+            }
+            with open(specs_dir / "grandparent.yml", "w") as f:
+                yaml.dump(grandparent, f)
+
+            # Parent: inherits grandparent, adds/overrides
+            parent = {
+                "apiVersion": "capa-automation/v1",
+                "kind": "ClusterAutomationSpec",
+                "metadata": {"name": "parent", "inherits": "grandparent"},
+                "spec": {
+                    "action": "create",
+                    "features": {"availability_zones": "3"},
+                },
+            }
+            with open(specs_dir / "parent.yml", "w") as f:
+                yaml.dump(parent, f)
+
+            # Child: inherits parent
+            child_data = {
+                "apiVersion": "capa-automation/v1",
+                "kind": "ClusterAutomationSpec",
+                "metadata": {"name": "child", "inherits": "parent"},
+                "spec": {
+                    "action": "create",
+                    "features": {"instance_type": "m5.4xlarge"},
+                },
+            }
+            spec = ClusterAutomationSpec(child_data, base_dir=Path(tmpdir))
+
+            # From grandparent
+            assert spec.features["private_network"] is True
+            assert spec.features["sts"] is True
+            assert spec.region == "us-east-1"
+            # From parent
+            assert spec.features["availability_zones"] == "3"
+            # From child
+            assert spec.features["instance_type"] == "m5.4xlarge"
+
+    def test_circular_inheritance_raises(self):
+        """Circular inheritance (A -> B -> A) raises ValueError."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            specs_dir = Path(tmpdir) / "specs" / "profiles"
+            specs_dir.mkdir(parents=True)
+
+            a_data = {
+                "apiVersion": "capa-automation/v1",
+                "kind": "ClusterAutomationSpec",
+                "metadata": {"name": "a", "inherits": "b"},
+                "spec": {"action": "create", "features": {}},
+            }
+            b_data = {
+                "apiVersion": "capa-automation/v1",
+                "kind": "ClusterAutomationSpec",
+                "metadata": {"name": "b", "inherits": "a"},
+                "spec": {"action": "create", "features": {}},
+            }
+            with open(specs_dir / "a.yml", "w") as f:
+                yaml.dump(a_data, f)
+            with open(specs_dir / "b.yml", "w") as f:
+                yaml.dump(b_data, f)
+
+            with pytest.raises(ValueError, match="Circular inheritance"):
+                ClusterAutomationSpec(a_data, base_dir=Path(tmpdir))
 
 
 class TestRealSpecFiles:

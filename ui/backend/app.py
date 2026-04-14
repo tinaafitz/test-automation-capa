@@ -35,6 +35,19 @@ except ImportError as e:
     AI_AGENTS_AVAILABLE = False
     print(f"AI Agent Framework not available: {e}")
 
+from capa_core import (
+    FeatureRegistry as _CoreFeatureRegistry,
+    ClusterAutomationSpec as _CoreClusterAutomationSpec,
+    validate_feature_value as _core_validate_feature_value,
+    validate_cluster_name as _core_validate_cluster_name,
+    build_json_merge_patch as _core_build_json_merge_patch,
+    resolve_spec_to_plan as _core_resolve_spec_to_plan,
+)
+from pathlib import Path as _Path
+
+# Shared registry instance (auto-refreshes on file change via mtime cache)
+_shared_registry = _CoreFeatureRegistry(_Path(_project_root))
+
 app = FastAPI(title="ROSA Automation API", version="1.0.0")
 
 # Add production endpoints (health checks, metrics, monitoring)
@@ -9069,115 +9082,43 @@ async def list_workflow_templates():
 # Cluster Actions / Feature Action Engine API
 # ============================================================================
 
-# Feature registry: loaded from schemas/feature-registry.yml (single source of truth)
-FEATURE_REGISTRY_PATH = os.path.join(_project_root, "schemas", "feature-registry.yml")
-
-# Cache for the full registry YAML (includes var_map, dependencies, sequences, suites)
-_registry_cache = {"data": None, "mtime": 0}
-
+# Feature registry: delegates to shared capa_core (single source of truth)
+# These thin wrappers preserve the existing API surface used throughout this file.
 
 def _load_feature_registry_full():
-    """Load the full feature registry YAML with cache invalidation on file change."""
-    try:
-        mtime = os.path.getmtime(FEATURE_REGISTRY_PATH)
-        if _registry_cache["data"] is not None and _registry_cache["mtime"] == mtime:
-            return _registry_cache["data"]
-        with open(FEATURE_REGISTRY_PATH, "r") as f:
-            data = yaml.safe_load(f)
-        _registry_cache["data"] = data
-        _registry_cache["mtime"] = mtime
-        return data
-    except Exception as e:
-        print(f"WARNING: Failed to load feature registry from {FEATURE_REGISTRY_PATH}: {e}")
-        return {"suites": [], "var_map": {}, "dependencies": {}}
+    """Load the full feature registry YAML (delegates to shared registry)."""
+    _shared_registry.refresh()
+    return _shared_registry.raw_data
 
 
 def _load_feature_registry():
     """Load feature registry suites (for backward compat). Returns dict with 'suites' key."""
-    data = _load_feature_registry_full()
-    return {"suites": data.get("suites", [])}
-
-
-# Feature index for O(1) lookups
-def _build_feature_index():
-    """Build a feature ID -> feature dict index from the registry."""
-    data = _load_feature_registry_full()
-    index = {}
-    for suite in data.get("suites", []):
-        for feat in suite.get("features", []):
-            index[feat["id"]] = feat
-    return index
-
-
-# Initial load — these are refreshed on every access via _get_registry() / _get_feature_index()
-CLUSTER_FEATURE_REGISTRY = _load_feature_registry()
-_FEATURE_INDEX = _build_feature_index()
-
-# Cluster name validation: lowercase alphanumeric + hyphens, 1-54 chars (ROSA HCP limit)
-_CLUSTER_NAME_RE = re.compile(r'^[a-z][a-z0-9-]{0,53}$')
+    _shared_registry.refresh()
+    return {"suites": _shared_registry.suites}
 
 
 def _get_registry():
     """Get the live feature registry (refreshed on file change via mtime cache)."""
-    global CLUSTER_FEATURE_REGISTRY
-    CLUSTER_FEATURE_REGISTRY = _load_feature_registry()
-    return CLUSTER_FEATURE_REGISTRY
+    return _load_feature_registry()
 
 
 def _get_feature_index():
-    """Get the live feature index (rebuilt when registry file changes)."""
-    global _FEATURE_INDEX
-    # _build_feature_index calls _load_feature_registry_full which has mtime cache
-    _FEATURE_INDEX = _build_feature_index()
-    return _FEATURE_INDEX
+    """Get the live feature index (auto-refreshed via shared registry)."""
+    _shared_registry.refresh()
+    return _shared_registry.all_features()
+
+
+# Backward-compat module-level variables (used by tests)
+CLUSTER_FEATURE_REGISTRY = _load_feature_registry()
+_FEATURE_INDEX = _get_feature_index()
 
 
 def _validate_cluster_name(name: str) -> Optional[str]:
-    """Validate cluster name format. Returns error message or None if valid."""
-    if not name:
-        return "Cluster name is required"
-    if len(name) > 54:
-        return f"Cluster name must be 54 characters or fewer (got {len(name)})"
-    if not _CLUSTER_NAME_RE.match(name):
-        return "Cluster name must start with a lowercase letter and contain only lowercase letters, numbers, and hyphens"
-    return None
+    return _core_validate_cluster_name(name)
 
 
 def _validate_feature_value(feature: dict, value) -> Optional[str]:
-    """Validate target_value matches the feature's declared type. Returns error or None."""
-    feat_type = feature.get("type", "string")
-    feat_id = feature["id"]
-
-    if feat_type == "boolean":
-        if not isinstance(value, bool):
-            return f"Feature '{feat_id}' expects boolean, got {type(value).__name__}"
-    elif feat_type == "select":
-        options = feature.get("options", [])
-        if options and str(value) not in [str(o) for o in options]:
-            return f"Feature '{feat_id}' expects one of {options}, got: {value}"
-    elif feat_type == "number":
-        if not isinstance(value, (int, float)):
-            return f"Feature '{feat_id}' expects number, got {type(value).__name__}"
-    elif feat_type == "string":
-        max_len = feature.get("max_length")
-        if max_len and len(str(value)) > max_len:
-            return f"Feature '{feat_id}' max length is {max_len}, got {len(str(value))} chars"
-    elif feat_type == "version":
-        if not isinstance(value, str) or not re.match(r'^\d+\.\d+\.\d+$', str(value)):
-            return f"Feature '{feat_id}' expects semver (e.g. 4.20.11), got: {value}"
-    elif feat_type == "key_value":
-        if not isinstance(value, dict):
-            return f"Feature '{feat_id}' expects key-value dict, got {type(value).__name__}"
-    elif feat_type == "list":
-        if not isinstance(value, list):
-            return f"Feature '{feat_id}' expects list, got {type(value).__name__}"
-    elif feat_type == "range":
-        if isinstance(value, dict):
-            if "min" not in value or "max" not in value:
-                return f"Feature '{feat_id}' range expects {{min, max}}, got: {value}"
-        else:
-            return f"Feature '{feat_id}' expects range {{min, max}}, got {type(value).__name__}"
-    return None
+    return _core_validate_feature_value(feature, value)
 
 
 @app.get("/api/cluster-actions/features")
@@ -9249,17 +9190,25 @@ def _find_feature(feature_id):
 
 
 def _build_json_merge_patch(k8s_field: str, value) -> dict:
-    """Build a JSON merge patch object from a k8s_field path (e.g. '.spec.channelGroup')."""
-    field_parts = [p for p in k8s_field.split(".") if p]
-    patch_obj = {}
-    current = patch_obj
-    for i, part in enumerate(field_parts):
-        if i == len(field_parts) - 1:
-            current[part] = value
-        else:
-            current[part] = {}
-            current = current[part]
-    return patch_obj
+    return _core_build_json_merge_patch(k8s_field, value)
+
+
+# Per-cluster lock to prevent concurrent operations on the same cluster
+_cluster_locks: Dict[str, asyncio.Lock] = {}
+_CLUSTER_LOCKS_MAX = 100
+
+
+def _get_cluster_lock(cluster_name: str) -> asyncio.Lock:
+    """Get or create an asyncio.Lock for a cluster (prevents concurrent operations)."""
+    if cluster_name not in _cluster_locks:
+        # Evict unlocked entries if we've exceeded the max
+        if len(_cluster_locks) >= _CLUSTER_LOCKS_MAX:
+            stale = [k for k, v in _cluster_locks.items() if not v.locked()]
+            for k in stale:
+                del _cluster_locks[k]
+        _cluster_locks[cluster_name] = asyncio.Lock()
+    return _cluster_locks[cluster_name]
+
 
 
 # Per-cluster lock to prevent concurrent operations on the same cluster
@@ -9637,115 +9586,9 @@ SPECS_DIR = os.path.join(
 )
 
 def _resolve_spec_to_plan(spec_data: dict) -> list:
-    """Resolve a ClusterAutomationSpec into an execution plan (list of steps)."""
-    registry_yaml = _load_feature_registry_full()
-    var_map = registry_yaml.get("var_map", {})
-    dependencies = registry_yaml.get("dependencies", {})
-    sequences = registry_yaml.get("sequences", {})
-
-    # Build feature lookup
-    features_by_id = {}
-    for suite in registry_yaml.get("suites", []):
-        for feat in suite.get("features", []):
-            features_by_id[feat["id"]] = feat
-
-    spec = spec_data.get("spec", {})
-    action = spec.get("action", "create")
-    steps = []
-
-    if action == "create":
-        extra_vars = {
-            "name_prefix": spec.get("name_prefix", ""),
-            "capi_namespace": spec.get("namespace", "ns-rosa-hcp"),
-            "aws_region": spec.get("region", "us-west-2"),
-            "channel_group": spec.get("channel", "stable"),
-        }
-        if spec.get("version"):
-            extra_vars["openshift_version"] = spec["version"]
-        for feat_id, value in spec.get("features", {}).items():
-            var_name = var_map.get(feat_id, feat_id)
-            extra_vars[var_name] = value
-
-        steps.append({
-            "step": 1,
-            "type": "playbook",
-            "name": f"Create cluster {spec.get('name_prefix', 'new')}-rosa-hcp",
-            "playbook": "playbooks/create_rosa_hcp_cluster.yml",
-            "extra_vars": extra_vars,
-            "features_used": list(spec.get("features", {}).keys()),
-        })
-
-    elif action == "upgrade":
-        cluster = spec.get("cluster", "")
-        version = spec.get("version", "")
-        namespace = spec.get("namespace", "ns-rosa-hcp")
-        cp = features_by_id.get("control_plane_upgrade", {})
-        mp = features_by_id.get("machine_pool_upgrade", {})
-
-        steps.append({
-            "step": 1, "type": "playbook",
-            "name": f"Upgrade control plane to {version}",
-            "playbook": cp.get("playbook", "playbooks/upgrade_rosa_control_plane.yml"),
-            "extra_vars": {"cluster_name": cluster, "capi_namespace": namespace, "requested_version": version},
-            "feature": "control_plane_upgrade",
-            "wait_timeout": cp.get("wait_timeout", 3600),
-        })
-        steps.append({
-            "step": 2, "type": "playbook",
-            "name": f"Upgrade machine pool to {version}",
-            "playbook": mp.get("playbook", "playbooks/upgrade_rosa_machine_pool.yml"),
-            "extra_vars": {"cluster_name": cluster, "capi_namespace": namespace, "requested_version": version},
-            "feature": "machine_pool_upgrade",
-            "depends_on": "control_plane_upgrade",
-            "wait_timeout": mp.get("wait_timeout", 3600),
-        })
-
-    elif action == "apply":
-        cluster = spec.get("cluster", "")
-        namespace = spec.get("namespace", "ns-rosa-hcp")
-        for i, act in enumerate(spec.get("actions", [])):
-            feat_id = act.get("feature", "")
-            value = act.get("value")
-            feature = features_by_id.get(feat_id, {})
-            deps = dependencies.get(feat_id, [])
-
-            if feature.get("playbook"):
-                extra_vars = {"cluster_name": cluster, "capi_namespace": namespace}
-                if feat_id in ("control_plane_upgrade", "machine_pool_upgrade") and value:
-                    extra_vars["requested_version"] = str(value)
-                steps.append({
-                    "step": i + 1, "type": "playbook",
-                    "name": feature.get("name", feat_id),
-                    "playbook": feature["playbook"],
-                    "extra_vars": extra_vars,
-                    "feature": feat_id,
-                    "depends_on": deps[0] if deps else None,
-                    "wait_timeout": feature.get("wait_timeout", 600),
-                })
-            else:
-                steps.append({
-                    "step": i + 1, "type": "patch",
-                    "name": f"{feature.get('name', feat_id)} = {value}",
-                    "resource": feature.get("resource", ""),
-                    "k8s_field": feature.get("k8s_field", ""),
-                    "value": value,
-                    "cluster": cluster, "namespace": namespace,
-                    "feature": feat_id,
-                    "depends_on": deps[0] if deps else None,
-                })
-
-    elif action == "delete":
-        cluster = spec.get("cluster", "")
-        namespace = spec.get("namespace", "ns-rosa-hcp")
-        steps.append({
-            "step": 1, "type": "playbook",
-            "name": f"Delete cluster {cluster}",
-            "playbook": "playbooks/delete_rosa_hcp_cluster.yml",
-            "extra_vars": {"cluster_name": cluster, "capi_namespace": namespace},
-            "feature": "cluster_delete",
-        })
-
-    return steps
+    """Resolve a ClusterAutomationSpec into an execution plan (delegates to capa_core)."""
+    spec = _CoreClusterAutomationSpec(spec_data)
+    return _core_resolve_spec_to_plan(_shared_registry, spec)
 
 
 @app.get("/api/cluster-specs")
