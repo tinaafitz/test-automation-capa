@@ -12,6 +12,8 @@ Usage:
     ./capa status --cluster moo-rosa-hcp
     ./capa specs                    # list available specs/profiles
     ./capa features                 # list all features
+    ./capa test 20-rosa-hcp-provision --ai-agent -VVV    # run test suite
+    ./capa test --list                                  # list test suites
     ./capa validate specs/features/channel-group.yml   # validate a spec file
     ./capa plan -f specs/upgrade.yml --cluster moo --version 4.20.12  # dry run
 """
@@ -186,11 +188,10 @@ class ExecutionEngine:
 
     def _run_test_suite(self, step: Dict) -> Dict:
         """Run a test suite via run-test-suite.py."""
-        # Map suite ID to test suite file
         suite_id = step["suite_id"]
         cmd = [sys.executable, str(self.base_dir / "run-test-suite.py")]
 
-        # Find matching test suite JSON
+        # Find matching test suite JSON by name or use suite_id directly
         test_suites_dir = self.base_dir / "test-suites"
         suite_files = sorted(test_suites_dir.glob("*.json"))
         matched = None
@@ -204,15 +205,29 @@ class ExecutionEngine:
             except (json.JSONDecodeError, IOError):
                 continue
 
-        if matched:
-            cmd.append(matched.stem)
-        else:
-            cmd.append(suite_id)
+        cmd.append(matched.stem if matched else suite_id)
 
+        # Forward cluster/namespace as extra vars
         if step.get("cluster"):
             cmd.extend(["-e", f"cluster_name={step['cluster']}"])
         if step.get("namespace"):
             cmd.extend(["-e", f"capi_namespace={step['namespace']}"])
+
+        # Forward extra vars from step
+        for key, value in step.get("extra_vars", {}).items():
+            cmd.extend(["-e", f"{key}={value}"])
+
+        # Forward verbosity
+        if self.verbose:
+            cmd.append("-vvv")
+
+        # Forward format if specified
+        if step.get("format"):
+            cmd.extend(["--format", step["format"]])
+
+        # Forward ai-agent flag
+        if step.get("ai_agent"):
+            cmd.append("--ai-agent")
 
         print(f"  {C.CYAN}$ {' '.join(cmd)}{C.E}")
 
@@ -669,6 +684,69 @@ def _validate_feature_value_check(feat, value, errors, warnings):
         errors.append(err)
 
 
+def cmd_test(args, base_dir, registry):
+    """Run test suites via run-test-suite.py with full flag passthrough.
+
+    Examples:
+        ./capa test 20-rosa-hcp-provision
+        ./capa test 20-rosa-hcp-provision --ai-agent -vvv --format junit
+        ./capa test --list
+        ./capa test --all --tag rosa-hcp
+        ./capa test 30-rosa-hcp-delete -e cluster_name=my-rosa-hcp --ai-agent
+    """
+    runner_path = base_dir / "run-test-suite.py"
+    if not runner_path.exists():
+        print(f"{C.R}run-test-suite.py not found at {runner_path}{C.E}")
+        sys.exit(1)
+
+    cmd = [sys.executable, str(runner_path)]
+
+    # Positional suite ID
+    if args.suite_id:
+        cmd.append(args.suite_id)
+
+    # Boolean flags
+    if args.all:
+        cmd.append("--all")
+    if args.list:
+        cmd.append("--list")
+    if args.ai_agent:
+        cmd.append("--ai-agent")
+    if args.ai_agent_dry_run:
+        cmd.append("--ai-agent-dry-run")
+    if args.dry_run:
+        cmd.append("--dry-run")
+    if args.no_save:
+        cmd.append("--no-save")
+
+    # Tag filter
+    if args.tag:
+        cmd.extend(["--tag", args.tag])
+
+    # Output format
+    if args.format:
+        cmd.extend(["--format", args.format])
+
+    # Verbosity (map -v count to -v/-vv/-vvv/-vvvv)
+    if args.test_verbosity and args.test_verbosity > 0:
+        cmd.append("-" + "v" * min(args.test_verbosity, 4))
+
+    # Extra vars passthrough
+    if args.extra_vars:
+        for ev in args.extra_vars:
+            cmd.extend(["-e", ev])
+
+    if args.verbose:
+        print(f"{C.CYAN}$ {' '.join(cmd)}{C.E}\n")
+
+    try:
+        result = subprocess.run(cmd, cwd=str(base_dir))
+        sys.exit(result.returncode)
+    except KeyboardInterrupt:
+        print(f"\n{C.Y}Interrupted.{C.E}")
+        sys.exit(130)
+
+
 def cmd_generate_specs(args, base_dir, registry):
     """Auto-generate feature spec files from the registry."""
     features_dir = base_dir / "specs" / "features"
@@ -814,6 +892,19 @@ def main():
     p_validate = subparsers.add_parser("validate", help="Validate a spec file against the registry")
     p_validate.add_argument("file", help="Path to ClusterAutomationSpec YAML file")
 
+    # test
+    p_test = subparsers.add_parser("test", help="Run test suites (passthrough to run-test-suite.py)")
+    p_test.add_argument("suite_id", nargs="?", help="Test suite ID (e.g., 20-rosa-hcp-provision)")
+    p_test.add_argument("--all", action="store_true", help="Run all test suites")
+    p_test.add_argument("--list", action="store_true", help="List available test suites")
+    p_test.add_argument("--tag", type=str, help="Filter test suites by tag")
+    p_test.add_argument("--format", choices=["json", "html", "junit", "all"], help="Output format for results")
+    p_test.add_argument("--no-save", action="store_true", help="Don't save results to file")
+    p_test.add_argument("-e", "--extra-vars", action="append", metavar="KEY=VAL", help="Extra variables (can repeat)")
+    p_test.add_argument("--ai-agent", action="store_true", help="Enable AI agent framework")
+    p_test.add_argument("--ai-agent-dry-run", action="store_true", help="AI agents detect but don't fix")
+    p_test.add_argument("-V", "--test-verbosity", action="count", default=0, help="Test verbosity (-V, -VV, -VVV)")
+
     # generate-specs
     p_gen = subparsers.add_parser("generate-specs", help="Auto-generate feature specs from registry")
     p_gen.add_argument("--force", action="store_true", help="Overwrite existing spec files")
@@ -835,6 +926,7 @@ def main():
         "features": cmd_features,
         "set": cmd_set,
         "validate": cmd_validate,
+        "test": cmd_test,
         "generate-specs": cmd_generate_specs,
     }
 

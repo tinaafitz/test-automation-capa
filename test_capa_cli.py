@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the CAPA CLI tool."""
 
+import argparse
 import json
 import os
 import subprocess
@@ -1233,3 +1234,239 @@ class TestRealSpecFiles:
                 data = yaml.safe_load(f)
             assert data["apiVersion"] == "capa-automation/v1", f"{spec_file.name}: bad apiVersion"
             assert data["kind"] == "ClusterAutomationSpec", f"{spec_file.name}: bad kind"
+
+
+class TestCmdTest:
+    """Tests for the 'capa test' command (passthrough to run-test-suite.py)."""
+
+    def _make_args(self, **kwargs):
+        """Build a namespace with defaults for cmd_test args."""
+        defaults = {
+            "suite_id": None,
+            "all": False,
+            "list": False,
+            "tag": None,
+            "format": None,
+            "no_save": False,
+            "extra_vars": None,
+            "ai_agent": False,
+            "ai_agent_dry_run": False,
+            "test_verbosity": 0,
+            "dry_run": False,
+            "verbose": False,
+        }
+        defaults.update(kwargs)
+        return argparse.Namespace(**defaults)
+
+    @patch("subprocess.run")
+    def test_basic_suite_run(self, mock_run, tmp_path):
+        """Test running a single suite by ID."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(suite_id="20-rosa-hcp-provision")
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "run-test-suite.py" in cmd[1]
+        assert "20-rosa-hcp-provision" in cmd
+
+    @patch("subprocess.run")
+    def test_list_flag(self, mock_run, tmp_path):
+        """Test --list flag passthrough."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(list=True)
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "--list" in cmd
+
+    @patch("subprocess.run")
+    def test_all_flag(self, mock_run, tmp_path):
+        """Test --all flag passthrough."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(all=True)
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "--all" in cmd
+
+    @patch("subprocess.run")
+    def test_ai_agent_flags(self, mock_run, tmp_path):
+        """Test --ai-agent and --ai-agent-dry-run passthrough."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(suite_id="30-delete", ai_agent=True, ai_agent_dry_run=True)
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "--ai-agent" in cmd
+        assert "--ai-agent-dry-run" in cmd
+
+    @patch("subprocess.run")
+    def test_extra_vars_passthrough(self, mock_run, tmp_path):
+        """Test -e extra vars are forwarded."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(
+            suite_id="20-provision",
+            extra_vars=["OCP_HUB_API_URL=https://api.hub:6443", "AWS_ACCESS_KEY_ID=AKIA123"]
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "-e" in cmd
+        assert "OCP_HUB_API_URL=https://api.hub:6443" in cmd
+        assert "AWS_ACCESS_KEY_ID=AKIA123" in cmd
+
+    @patch("subprocess.run")
+    def test_verbosity_passthrough(self, mock_run, tmp_path):
+        """Test -V/-VV/-VVV verbosity mapping."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(suite_id="20-provision", test_verbosity=3)
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "-vvv" in cmd
+
+    @patch("subprocess.run")
+    def test_format_passthrough(self, mock_run, tmp_path):
+        """Test --format flag passthrough."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(suite_id="20-provision", format="junit")
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "--format" in cmd
+        assert "junit" in cmd
+
+    @patch("subprocess.run")
+    def test_tag_passthrough(self, mock_run, tmp_path):
+        """Test --tag flag passthrough."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(all=True, tag="rosa-hcp")
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "--tag" in cmd
+        assert "rosa-hcp" in cmd
+
+    @patch("subprocess.run")
+    def test_dry_run_passthrough(self, mock_run, tmp_path):
+        """Test --dry-run flag passthrough."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(suite_id="20-provision", dry_run=True)
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "--dry-run" in cmd
+
+    @patch("subprocess.run")
+    def test_no_save_passthrough(self, mock_run, tmp_path):
+        """Test --no-save flag passthrough."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(suite_id="20-provision", no_save=True)
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "--no-save" in cmd
+
+    def test_missing_runner_exits(self, tmp_path):
+        """Test error when run-test-suite.py doesn't exist."""
+        args = self._make_args(suite_id="20-provision")
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_test(args, tmp_path, None)
+
+    @patch("subprocess.run")
+    def test_full_jenkins_style_invocation(self, mock_run, tmp_path):
+        """Test a full Jenkins-style invocation with all flags."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(
+            suite_id="20-rosa-hcp-provision",
+            format="junit",
+            test_verbosity=3,
+            ai_agent=True,
+            extra_vars=[
+                "OCP_HUB_API_URL=https://api.hub:6443",
+                "OCP_HUB_ADMIN_USER=kubeadmin",
+                "OCP_HUB_ADMIN_PASS=secret",
+                "AWS_ACCESS_KEY_ID=AKIA123",
+                "AWS_SECRET_ACCESS_KEY=secret456",
+            ]
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "20-rosa-hcp-provision" in cmd
+        assert "--format" in cmd
+        assert "junit" in cmd
+        assert "-vvv" in cmd
+        assert "--ai-agent" in cmd
+        e_indices = [i for i, x in enumerate(cmd) if x == "-e"]
+        assert len(e_indices) == 5
+
+    @patch("subprocess.run")
+    def test_exit_code_passthrough(self, mock_run, tmp_path):
+        """Test that non-zero exit code from runner is propagated."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=1)
+
+        args = self._make_args(suite_id="20-provision")
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 1
+
+    @patch("subprocess.run")
+    def test_verbosity_capped_at_4(self, mock_run, tmp_path):
+        """Test that verbosity is capped at -vvvv even if -VVVVV given."""
+        (tmp_path / "run-test-suite.py").write_text("# fake")
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = self._make_args(suite_id="20-provision", test_verbosity=6)
+        with pytest.raises(SystemExit) as exc_info:
+            capa_cli.cmd_test(args, tmp_path, None)
+        assert exc_info.value.code == 0
+
+        cmd = mock_run.call_args[0][0]
+        assert "-vvvv" in cmd
+        assert "-vvvvvv" not in cmd
