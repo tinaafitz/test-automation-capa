@@ -602,7 +602,8 @@ def cmd_set(args, base_dir, registry):
         },
     }
     spec = ClusterAutomationSpec(data)
-    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose)
+    dry_run = args.dry_run or getattr(args, "set_dry_run", False)
+    engine = ExecutionEngine(registry, base_dir, dry_run=dry_run, verbose=args.verbose)
     plan = engine.plan(spec)
     engine.execute(plan)
 
@@ -1329,7 +1330,7 @@ def main():
     p_set.add_argument("value", help="Target value (e.g., fast)")
     p_set.add_argument("--cluster", "-c", required=True, help="Cluster name")
     p_set.add_argument("--namespace", "-n", default="ns-rosa-hcp", help="Namespace")
-    p_set.add_argument("--dry-run", action="store_true", help="Show plan without executing")
+    p_set.add_argument("--dry-run", action="store_true", dest="set_dry_run", help="Show plan without executing")
 
     # validate
     p_validate = subparsers.add_parser("validate", help="Validate a spec file against the registry")
