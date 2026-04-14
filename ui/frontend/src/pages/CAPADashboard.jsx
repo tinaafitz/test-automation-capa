@@ -10,8 +10,6 @@ import MCEEnvironmentSelector from '../components/MCEEnvironmentSelector';
 import ActiveEnvironmentBanner from '../components/ActiveEnvironmentBanner';
 import { YamlEditorModal } from '../components/YamlEditorModal';
 import { RosaProvisionModal } from '../components/RosaProvisionModal';
-import TestSuiteDashboard from '../components/sections/TestSuiteDashboard';
-import TestSuiteSection from '../components/sections/TestSuiteSection';
 import ResourcesViewer from '../components/ResourcesViewer';
 import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import NotificationSettingsInline from '../components/NotificationSettingsInline';
@@ -1048,8 +1046,6 @@ const CAPADashboardContent = () => {
     onEnvironmentsClick: () => setActiveSection('environments'),
     onCredentialsClick: () => setActiveSection('credentials'),
     onTestClick: () => setActiveSection('test'),
-    onTestSuiteDashboardClick: () => setActiveSection('test-suite-dashboard'),
-    onTestAutomationClick: () => setActiveSection('test-automation'),
     onAIAssistantClick: () => setActiveSection('ai-assistant'),
     onTerminalClick: () => setActiveSection('terminal'),
     onNotificationsClick: () => setActiveSection('notifications'),
@@ -1711,157 +1707,6 @@ const CAPADashboardContent = () => {
               <div className="text-sm text-gray-500">Test suite dashboard coming soon...</div>
             </div>
             {/* Task Summary Section removed */}
-          </div>
-        );
-
-      case 'test-suite-dashboard':
-        return (
-          <TestSuiteDashboard
-            theme="mce"
-            isProvisioning={isProvisioning}
-            onSelectTestSuite={async (testSuite) => {
-              console.log('Selected test suite:', testSuite);
-
-              // Map test suite to playbook for direct execution (if playbook exists)
-              const playbookMap = {
-                'ImageType Testing Suite': 'test_imagetype.yaml',
-                'Audit Log Forwarding': 'test-rosa-log-forwarding.yml',
-                // Add other test suites here
-              };
-
-              const playbookFile = playbookMap[testSuite.name];
-
-              // If no playbook mapping exists, navigate to provision section with pre-filled config
-              if (!playbookFile) {
-                console.log('📋 Opening provision modal with pre-filled test configuration:', testSuite.name);
-
-                // Set the selected test suite (this will pre-fill the provision form)
-                setSelectedTestSuite(testSuite);
-
-                // Reset provision state to show form
-                setProvisionResults(null);
-                setProvisionViewMode('form');
-
-                // Navigate to provision section
-                setActiveSection('provision');
-                return;
-              }
-
-              // Confirm execution
-              const confirm = window.confirm(
-                `Run ${testSuite.name}?\n\n` +
-                `This will:\n` +
-                testSuite.components.map(c => `• ${c}`).join('\n') +
-                `\n\nPlaybook: ${playbookFile}\n\n` +
-                `Continue?`
-              );
-
-              if (!confirm) return;
-
-              // Execute the test playbook
-              try {
-                const testId = `test-suite-${Date.now()}`;
-
-                addToRecent({
-                  id: testId,
-                  title: `🧪 ${testSuite.name}`,
-                  color: 'bg-blue-600',
-                  status: '🚀 Starting test...',
-                  environment: 'mce',
-                  playbook: playbookFile,
-                  output: `Starting ${testSuite.name}...\n\nComponents to test:\n${testSuite.components.map(c => `  • ${c}`).join('\n')}`,
-                });
-
-                const response = await fetch(buildApiUrl(API_ENDPOINTS.ANSIBLE_RUN_PLAYBOOK), {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    playbook: playbookFile,
-                    description: testSuite.name,
-                    extra_vars: {},
-                  }),
-                });
-
-                if (!response.ok) {
-                  throw new Error(`Failed to start test: ${response.statusText}`);
-                }
-
-                const result = await response.json();
-
-                if (!result.success || !result.job_id) {
-                  throw new Error(result.error || result.message || 'Failed to start test');
-                }
-
-                const jobId = result.job_id;
-                console.log(`🧪 Test started with job_id: ${jobId}`);
-
-                // Poll for job completion with real-time output updates
-                const pollTestJob = async () => {
-                  const maxAttempts = 3600; // 1 hour max (tests can take 45-60 min)
-                  let attempts = 0;
-
-                  while (attempts < maxAttempts) {
-                    attempts++;
-
-                    const jobResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}`));
-                    const jobData = await jobResponse.json();
-
-                    // Fetch logs for real-time output
-                    const logsResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}/logs`));
-                    const logsData = await logsResponse.json();
-                    const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
-
-                    if (jobData.status === 'completed') {
-                      const output = currentOutput || 'Test completed successfully';
-                      updateRecentOperationStatus(testId, `✅ ${testSuite.name} completed!`, output);
-                      setToastMessage(`${testSuite.name} completed successfully! Check Task Summary for full details.`); setToastType('success'); setTimeout(() => setToastMessage(''), 5000);
-                      return;
-                    } else if (jobData.status === 'failed') {
-                      const output = currentOutput || (jobData.error || jobData.message || 'Test failed');
-                      updateRecentOperationStatus(testId, `❌ ${testSuite.name} failed`, output);
-                      setToastMessage(`${testSuite.name} failed. Check Task Summary for error details.`); setToastType('error'); setTimeout(() => setToastMessage(''), 5000);
-                      return;
-                    }
-
-                    // Still running - update with current logs every 5 seconds
-                    if (attempts % 5 === 0 && currentOutput) {
-                      updateRecentOperationStatus(testId, `⏳ ${testSuite.name} running...`, currentOutput);
-                    }
-
-                    // Wait and poll again
-                    await new Promise((resolve) => setTimeout(resolve, 1000)); // Poll every 1 second
-                  }
-
-                  throw new Error('Test timed out after 1 hour');
-                };
-
-                // Start polling in background
-                pollTestJob().catch(error => {
-                  console.error('Test polling error:', error);
-                  updateRecentOperationStatus(testId, '❌ Test error', extractSafeErrorMessage(error));
-                });
-
-                // Show immediate feedback
-                updateRecentOperationStatus(
-                  testId,
-                  '⏳ Test running...',
-                  `Test suite started successfully!\nJob ID: ${jobId}\n\nMonitoring progress...`
-                );
-              } catch (error) {
-                console.error('Test execution error:', error);
-                setToastMessage(`Failed to start test: ${error.message}. You can run manually: ansible-playbook ${playbookFile}`); setToastType('error'); setTimeout(() => setToastMessage(''), 8000);
-              }
-            }}
-          />
-        );
-
-      case 'test-automation':
-        return (
-          <div className="space-y-6">
-            {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Playbooks</h2>
-
-            <TestSuiteSection />
           </div>
         );
 

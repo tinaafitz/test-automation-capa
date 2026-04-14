@@ -36,8 +36,6 @@ const CapaSidebar = ({
   onEnvironmentsClick,
   onCredentialsClick,
   onTestClick,
-  onTestSuiteDashboardClick,
-  onTestAutomationClick,
   onAIAssistantClick,
   onTerminalClick,
   onNotificationsClick,
@@ -142,12 +140,6 @@ const CapaSidebar = ({
       onClick: onRosaHcpClustersClick
     },
     {
-      id: 'test-automation',
-      label: 'Playbooks',
-      icon: <ArrowPathIcon className="h-5 w-5" />,
-      onClick: onTestAutomationClick
-    },
-    {
       id: 'workflows',
       label: 'Workflows',
       icon: <span className="text-lg">&#9776;</span>,
@@ -159,13 +151,6 @@ const CapaSidebar = ({
       icon: <span className="text-lg">&#9889;</span>,
       onClick: onClusterActionsClick,
       showInEnvironments: ['mce']
-    },
-    {
-      id: 'test-suite-dashboard',
-      label: 'Feature Test Dashboard',
-      icon: <span className="text-lg">🧪</span>,
-      onClick: onTestSuiteDashboardClick,
-      showInEnvironments: ['mce'] // Only show in MCE, not minikube
     },
     {
       id: 'terminal',

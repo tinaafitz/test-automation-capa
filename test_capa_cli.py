@@ -1233,7 +1233,7 @@ class TestRealSpecFiles:
             with open(spec_file) as f:
                 data = yaml.safe_load(f)
             assert data["apiVersion"] == "capa-automation/v1", f"{spec_file.name}: bad apiVersion"
-            assert data["kind"] == "ClusterAutomationSpec", f"{spec_file.name}: bad kind"
+            assert data["kind"] in ("ClusterAutomationSpec", "Workflow"), f"{spec_file.name}: bad kind"
 
 
 class TestCmdTest:
@@ -1768,3 +1768,131 @@ class TestCmdSetDryRun:
         capa_cli.cmd_set(args, minimal_registry._registry_path.parent.parent, minimal_registry)
 
         mock_execute.assert_called_once()
+
+
+class TestCmdWorkflow:
+    """Tests for the 'capa workflow' command."""
+
+    @pytest.fixture
+    def workflow_env(self, minimal_registry):
+        """Set up a temp dir with saved workflows and YAML workflows."""
+        base_dir = minimal_registry._registry_path.parent.parent
+
+        # Create vars/saved_workflows.json
+        vars_dir = base_dir / "vars"
+        vars_dir.mkdir(exist_ok=True)
+        saved = [
+            {
+                "id": "wf-test123",
+                "name": "test_workflow",
+                "description": "A test workflow",
+                "stopOnFailure": True,
+                "globalVars": {"MCE_NAMESPACE": "multicluster-engine"},
+                "steps": [
+                    {"name": "Step One", "file": "playbooks/validate.yml", "onFailure": "stop", "timeout": 120, "extra_vars": {}},
+                    {"name": "Step Two", "file": "playbooks/configure.yml", "onFailure": "skip", "timeout": 600, "extra_vars": {"key": "val"}},
+                ],
+                "savedAt": "2026-04-13T10:00:00",
+            }
+        ]
+        with open(vars_dir / "saved_workflows.json", "w") as f:
+            json.dump(saved, f)
+
+        # Create YAML workflow
+        wf_dir = base_dir / "specs" / "workflows"
+        wf_dir.mkdir(parents=True, exist_ok=True)
+        yaml_wf = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "Workflow",
+            "metadata": {"name": "yaml-test", "description": "A YAML workflow"},
+            "spec": {
+                "vars": {},
+                "steps": [
+                    {"name": "YAML Step 1", "playbook": "playbooks/test.yml", "on_failure": "stop", "timeout": 60},
+                ],
+            },
+        }
+        with open(wf_dir / "yaml-test.yml", "w") as f:
+            yaml.dump(yaml_wf, f)
+
+        return base_dir
+
+    def test_list_shows_saved_and_yaml(self, workflow_env, minimal_registry, capsys):
+        args = argparse.Namespace(workflow_action="list", dry_run=False, verbose=False)
+        capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "test_workflow" in out
+        assert "yaml-test" in out
+        assert "Step One" in out
+        assert "YAML Step 1" in out
+
+    def test_show_saved_workflow(self, workflow_env, minimal_registry, capsys):
+        args = argparse.Namespace(workflow_action="show", name="test_workflow", dry_run=False, verbose=False)
+        capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "test_workflow" in out
+        assert "wf-test123" in out
+        assert "Step One" in out
+        assert "playbooks/validate.yml" in out
+
+    def test_show_yaml_workflow(self, workflow_env, minimal_registry, capsys):
+        args = argparse.Namespace(workflow_action="show", name="yaml-test", dry_run=False, verbose=False)
+        capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "yaml-test" in out
+        assert "YAML Step 1" in out
+
+    def test_show_not_found(self, workflow_env, minimal_registry):
+        args = argparse.Namespace(workflow_action="show", name="nonexistent", dry_run=False, verbose=False)
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+
+    def test_run_dry_run(self, workflow_env, minimal_registry, capsys):
+        args = argparse.Namespace(
+            workflow_action="run", name="test_workflow",
+            dry_run=True, verbose=False, extra_vars=None,
+        )
+        capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "test_workflow" in out
+        assert "2 steps" in out
+        assert "DRY RUN" in out
+
+    def test_run_yaml_dry_run(self, workflow_env, minimal_registry, capsys):
+        args = argparse.Namespace(
+            workflow_action="run", name="yaml-test",
+            dry_run=True, verbose=False, extra_vars=None,
+        )
+        capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "yaml-test" in out
+        assert "DRY RUN" in out
+
+    def test_run_with_extra_vars(self, workflow_env, minimal_registry, capsys):
+        args = argparse.Namespace(
+            workflow_action="run", name="test_workflow",
+            dry_run=True, verbose=False, extra_vars=["key=override"],
+        )
+        capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "DRY RUN" in out
+
+    def test_export_saved_to_yaml(self, workflow_env, minimal_registry, capsys, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda _: "n")
+        args = argparse.Namespace(
+            workflow_action="export", name="test_workflow",
+            dry_run=False, verbose=False, output=None,
+        )
+        capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "kind: Workflow" in out
+        assert "playbooks/validate.yml" in out
+
+    def test_export_yaml_already(self, workflow_env, minimal_registry, capsys):
+        args = argparse.Namespace(
+            workflow_action="export", name="yaml-test",
+            dry_run=False, verbose=False, output=None,
+        )
+        capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "Already a YAML workflow" in out

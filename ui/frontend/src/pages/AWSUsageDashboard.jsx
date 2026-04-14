@@ -409,8 +409,6 @@ const AWSUsageDashboard = ({ inline = false }) => {
     onEnvironmentsClick: () => navigate('/mce'),
     onCredentialsClick: () => navigate('/mce'),
     onTestClick: () => navigate('/mce'),
-    onTestSuiteDashboardClick: () => navigate('/mce'),
-    onTestAutomationClick: () => navigate('/mce'),
     onAIAssistantClick: () => navigate('/mce'),
     onTerminalClick: () => navigate('/mce'),
     onNotificationsClick: () => navigate('/mce'),

@@ -31,8 +31,6 @@ jest.mock('../components/sidebar/CapaSidebar', () => (props) => {
       <button data-testid="nav-resources" onClick={props.onResourcesClick}>Resources</button>
       <button data-testid="nav-environments" onClick={props.onEnvironmentsClick}>Environments</button>
       <button data-testid="nav-test" onClick={props.onTestClick}>Test</button>
-      <button data-testid="nav-test-suite-dashboard" onClick={props.onTestSuiteDashboardClick}>Test Suite Dashboard</button>
-      <button data-testid="nav-test-automation" onClick={props.onTestAutomationClick}>Test Automation</button>
       <button data-testid="nav-ai-assistant" onClick={props.onAIAssistantClick}>AI Assistant</button>
       <button data-testid="nav-terminal" onClick={props.onTerminalClick}>Terminal</button>
       <button data-testid="nav-notifications" onClick={props.onNotificationsClick}>Notifications</button>
@@ -74,14 +72,6 @@ jest.mock('../components/RosaProvisionModal', () => ({
     </div>
   ),
 }));
-
-jest.mock('../components/sections/TestSuiteDashboard', () => (props) => (
-  <div data-testid="test-suite-dashboard">Test Suite (theme={props.theme})</div>
-));
-
-jest.mock('../components/sections/TestSuiteSection', () => (props) => (
-  <div data-testid="test-suite-section">Test Section (theme={props.theme})</div>
-));
 
 jest.mock('../components/ResourcesViewer', () => (props) => (
   <div data-testid="resources-viewer">Resources (theme={props.theme})</div>
@@ -289,23 +279,6 @@ describe('MinikubeDashboard - Section Switching', () => {
       fireEvent.click(screen.getByTestId('nav-test'));
     });
     expect(screen.getByText('Test Suites')).toBeInTheDocument();
-  });
-
-  it('switches to test-suite-dashboard section', async () => {
-    await renderDashboard();
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('nav-test-suite-dashboard'));
-    });
-    expect(screen.getByTestId('test-suite-dashboard')).toBeInTheDocument();
-  });
-
-  it('switches to test-automation section', async () => {
-    await renderDashboard();
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('nav-test-automation'));
-    });
-    expect(screen.getByText('Playbooks')).toBeInTheDocument();
-    expect(screen.getByTestId('test-suite-section')).toBeInTheDocument();
   });
 
   it('switches to ai-assistant section', async () => {
@@ -1084,14 +1057,3 @@ describe('MinikubeDashboard - Test Section', () => {
 });
 
 // ============================================================================
-// 15. Test Automation Section
-// ============================================================================
-describe('MinikubeDashboard - Test Automation', () => {
-  it('renders TestSuiteSection with minikube theme', async () => {
-    await renderDashboard();
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('nav-test-automation'));
-    });
-    expect(screen.getByTestId('test-suite-section')).toHaveTextContent('theme=minikube');
-  });
-});
