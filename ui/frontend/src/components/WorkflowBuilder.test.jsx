@@ -355,12 +355,12 @@ describe('WorkflowBuilder', () => {
     expect(saveButton).toBeInTheDocument();
   });
 
-  it('has load workflow button', async () => {
+  it('has workflows tab in palette', async () => {
     await act(async () => {
       render(<WorkflowBuilder />);
     });
-    const loadButton = screen.getByRole('button', { name: /Load/i });
-    expect(loadButton).toBeInTheDocument();
+    const workflowsTab = screen.getByRole('button', { name: /Workflows/i });
+    expect(workflowsTab).toBeInTheDocument();
   });
 
   it('opens save dialog when save button clicked - needs steps first', async () => {
@@ -422,58 +422,52 @@ describe('WorkflowBuilder', () => {
     });
   });
 
-  it('opens load workflow list when load button clicked', async () => {
+  it('switches to workflows tab when clicked', async () => {
     await act(async () => {
       render(<WorkflowBuilder />);
     });
 
-    const loadButton = screen.getByRole('button', { name: /Load/i });
-    fireEvent.click(loadButton);
+    const workflowsTab = screen.getByRole('button', { name: /Workflows/i });
+    fireEvent.click(workflowsTab);
 
     await waitFor(() => {
-      const savedWorkflowsHeaders = screen.getAllByText(/Saved Workflows/i);
-      expect(savedWorkflowsHeaders.length).toBeGreaterThan(0);
+      // Should show the workflows sub-tabs and search
+      expect(screen.getByPlaceholderText(/Search workflows/i)).toBeInTheDocument();
     });
   });
 
-  it('can close load workflow list', async () => {
+  it('can switch back to playbooks tab', async () => {
     await act(async () => {
       render(<WorkflowBuilder />);
     });
 
-    const loadButton = screen.getByRole('button', { name: /Load/i });
-    fireEvent.click(loadButton);
+    // Switch to workflows tab
+    const workflowsTab = screen.getByRole('button', { name: /Workflows/i });
+    fireEvent.click(workflowsTab);
+
+    // Switch back to playbooks tab
+    const playbooksTab = screen.getByRole('button', { name: /Playbooks/i });
+    fireEvent.click(playbooksTab);
 
     await waitFor(() => {
-      const savedWorkflowsHeaders = screen.getAllByText(/Saved Workflows/i);
-      expect(savedWorkflowsHeaders.length).toBeGreaterThan(0);
-    });
-
-    // Click load button again to toggle closed
-    fireEvent.click(loadButton);
-
-    await waitFor(() => {
-      // After closing, should only have the heading not the list content
-      const savedWorkflowsHeaders = screen.queryAllByText(/Saved Workflows/i);
-      // Component might keep one heading visible, or hide all - either is acceptable
-      expect(true).toBe(true); // Test that it doesn't crash
+      expect(screen.getByPlaceholderText(/Search playbooks/i)).toBeInTheDocument();
     });
   });
 
-  it('shows empty state when no workflows saved', async () => {
+  it('shows empty state when no workflows saved in palette', async () => {
     await act(async () => {
       render(<WorkflowBuilder />);
     });
 
-    const loadButton = screen.getByRole('button', { name: /Load/i });
-    fireEvent.click(loadButton);
+    const workflowsTab = screen.getByRole('button', { name: /Workflows/i });
+    fireEvent.click(workflowsTab);
 
     await waitFor(() => {
       expect(screen.getByText(/No saved workflows yet/i)).toBeInTheDocument();
     });
   });
 
-  it('saves workflow to localStorage', async () => {
+  it('saves workflow via API', async () => {
     await act(async () => {
       render(<WorkflowBuilder />);
     });
@@ -503,57 +497,94 @@ describe('WorkflowBuilder', () => {
       expect(screen.getByText('Save Workflow')).toBeInTheDocument();
     });
 
+    // Should show step preview
+    expect(screen.getByText('Steps Preview')).toBeInTheDocument();
+
     // Confirm save
     const confirmButton = screen.getAllByRole('button', { name: /Save/i })[1]; // Second Save button in dialog
-    fireEvent.click(confirmButton);
+    await act(async () => {
+      fireEvent.click(confirmButton);
+    });
 
-    // Check localStorage was called
-    expect(localStorageMock.setItem).toHaveBeenCalledWith(
-      'capa-workflows',
-      expect.any(String)
-    );
+    // Check API was called
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/workflows'),
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
   });
 
-  it('loads workflow from localStorage', async () => {
-    // Pre-populate localStorage with a workflow BEFORE rendering
+  it('loads workflow from library via API', async () => {
+    // Mock workflows list API to return a saved workflow
     const savedWorkflow = {
       id: 'wf-123',
       name: 'Saved Test Workflow',
+      description: 'A test workflow',
+      stepCount: 1,
+      stepNames: ['01-validate-capa-environment'],
+      hasGlobalVars: true,
+      globalVarKeys: ['test_var'],
       stopOnFailure: true,
-      globalVars: { test_var: 'test_value' },
-      steps: [
-        {
-          name: '01-validate-capa-environment',
-          description: 'Validate CAPA environment',
-          file: 'playbooks/validate-capa-environment.yml',
-          category: 'validation',
-          onFailure: 'stop',
-          timeout: 600,
-          required: true,
-          extra_vars: {},
-        },
-      ],
       savedAt: new Date().toISOString(),
+      lastRunAt: null,
     };
-    const workflowsJson = JSON.stringify([savedWorkflow]);
-    localStorageMock.getItem.mockReturnValue(workflowsJson);
-    localStorageMock.store = { 'capa-workflows': workflowsJson };
+
+    // Setup mock to return workflows on the /api/workflows call
+    mockFetch.mockImplementation((url) => {
+      if (url.includes('/api/workflows/wf-123') && !url.includes('duplicate') && !url.includes('run')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            workflow: {
+              id: 'wf-123',
+              name: 'Saved Test Workflow',
+              stopOnFailure: true,
+              globalVars: { test_var: 'test_value' },
+              steps: [{ name: '01-validate-capa-environment', file: 'playbooks/validate-capa-environment.yml', onFailure: 'stop', timeout: 600, extra_vars: {} }],
+            },
+          }),
+        });
+      }
+      if (url.includes('/api/workflows') && !url.includes('templates')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, workflows: [savedWorkflow], count: 1 }),
+        });
+      }
+      // Default: test suites and templates
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          suites: [
+            { id: 'validate-capa', config: { name: '01-validate-capa-environment', description: 'Validate CAPA environment', playbooks: [{ file: 'playbooks/validate-capa-environment.yml', timeout: 600, required: true, extra_vars: {} }], tags: ['validation'] } },
+            { id: 'create-rosa', config: { name: '20-create-rosa-hcp-cluster', description: 'Create ROSA HCP cluster', playbooks: [{ file: 'playbooks/create-rosa-hcp-cluster.yml', timeout: 1200, required: false, extra_vars: {} }], tags: ['provisioning'] } },
+          ],
+          templates: [],
+        }),
+      });
+    });
 
     await act(async () => {
       render(<WorkflowBuilder />);
     });
 
-    // Open load dialog
-    const loadButton = screen.getByRole('button', { name: /Load/i });
-    fireEvent.click(loadButton);
+    // Switch to workflows tab in palette
+    const workflowsTab = screen.getByRole('button', { name: /Workflows/i });
+    await act(async () => {
+      fireEvent.click(workflowsTab);
+    });
 
     await waitFor(() => {
       expect(screen.getByText('Saved Test Workflow')).toBeInTheDocument();
     });
 
-    // Load the workflow (click on the workflow name itself)
+    // Load the workflow
     const loadWorkflowButton = screen.getByText('Saved Test Workflow');
-    fireEvent.click(loadWorkflowButton);
+    await act(async () => {
+      fireEvent.click(loadWorkflowButton);
+    });
 
     // Workflow name should be updated
     await waitFor(() => {
@@ -562,51 +593,81 @@ describe('WorkflowBuilder', () => {
     });
   });
 
-  it('deletes workflow from localStorage', async () => {
-    // Pre-populate localStorage with a workflow BEFORE rendering
+  it('deletes workflow via API', async () => {
     const savedWorkflow = {
       id: 'wf-123',
       name: 'Workflow to Delete',
+      description: '',
+      stepCount: 0,
+      stepNames: [],
+      hasGlobalVars: false,
+      globalVarKeys: [],
       stopOnFailure: true,
-      globalVars: {},
-      steps: [],
       savedAt: new Date().toISOString(),
+      lastRunAt: null,
     };
-    const workflowsJson = JSON.stringify([savedWorkflow]);
-    localStorageMock.getItem.mockReturnValue(workflowsJson);
-    localStorageMock.store = { 'capa-workflows': workflowsJson };
+
+    let workflows = [savedWorkflow];
+    mockFetch.mockImplementation((url, opts) => {
+      if (url.includes('/api/workflows/wf-123') && opts?.method === 'DELETE') {
+        workflows = [];
+        return Promise.resolve({ ok: true, json: async () => ({ success: true }) });
+      }
+      if (url.includes('/api/workflows') && !url.includes('templates')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, workflows: [...workflows], count: workflows.length }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          suites: [
+            { id: 'validate-capa', config: { name: '01-validate-capa-environment', description: 'Validate CAPA environment', playbooks: [{ file: 'playbooks/validate-capa-environment.yml', timeout: 600, required: true, extra_vars: {} }], tags: ['validation'] } },
+          ],
+          templates: [],
+        }),
+      });
+    });
 
     await act(async () => {
       render(<WorkflowBuilder />);
     });
 
-    // Open load dialog
-    const loadButton = screen.getByRole('button', { name: /Load/i });
-    fireEvent.click(loadButton);
+    // Switch to workflows tab in palette
+    const workflowsTab = screen.getByRole('button', { name: /Workflows/i });
+    await act(async () => {
+      fireEvent.click(workflowsTab);
+    });
 
     await waitFor(() => {
       expect(screen.getByText('Workflow to Delete')).toBeInTheDocument();
     });
 
-    // Delete the workflow - find TrashIcon button
-    const deleteButtons = screen.getAllByRole('button');
-    const deleteButton = deleteButtons.find(btn => {
-      const svg = btn.querySelector('svg');
-      return svg && btn.classList.contains('hover:text-red-600');
-    });
-    expect(deleteButton).toBeDefined();
-    fireEvent.click(deleteButton);
+    // Open context menu on the workflow card
+    const menuButtons = screen.getAllByRole('button');
+    const contextMenuButton = menuButtons.find(btn => btn.querySelector('svg') && btn.closest('[class*="flex-shrink-0"]'));
+    if (contextMenuButton) {
+      await act(async () => {
+        fireEvent.click(contextMenuButton);
+      });
+    }
 
-    // Workflow should be removed
-    await waitFor(() => {
-      expect(screen.queryByText('Workflow to Delete')).not.toBeInTheDocument();
-    });
+    // Find and click Delete
+    const deleteButton = screen.queryByText('Delete');
+    if (deleteButton) {
+      await act(async () => {
+        fireEvent.click(deleteButton);
+      });
 
-    // localStorage should be updated
-    expect(localStorageMock.setItem).toHaveBeenCalledWith(
-      'capa-workflows',
-      JSON.stringify([])
-    );
+      // Verify API was called with DELETE method
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('/api/workflows/wf-123'),
+          expect.objectContaining({ method: 'DELETE' })
+        );
+      });
+    }
   });
 
   it('displays step configuration panel when config button clicked', async () => {

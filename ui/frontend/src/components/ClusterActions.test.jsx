@@ -26,6 +26,7 @@ const mockRegistry = {
             description: 'Upgrade the ROSA HCP control plane version',
             type: 'version',
             mutable: true,
+            applies_to: ['apply', 'upgrade'],
             default: '',
             k8s_field: '.spec.version',
             resource: 'ROSAControlPlane',
@@ -39,6 +40,7 @@ const mockRegistry = {
             type: 'select',
             options: ['stable', 'fast', 'candidate'],
             mutable: true,
+            applies_to: ['create', 'apply', 'upgrade'],
             default: 'stable',
             k8s_field: '.spec.channelGroup',
             resource: 'ROSAControlPlane',
@@ -59,6 +61,7 @@ const mockRegistry = {
             description: 'Enable private cluster networking',
             type: 'boolean',
             mutable: false,
+            applies_to: ['create'],
             default: false,
             k8s_field: '.spec.endpointAccess',
             resource: 'ROSAControlPlane',
@@ -69,6 +72,7 @@ const mockRegistry = {
             description: 'Custom AWS tags',
             type: 'key_value',
             mutable: true,
+            applies_to: ['create', 'apply'],
             default: {},
             k8s_field: '.spec.additionalTags',
             resource: 'ROSAControlPlane',
@@ -139,6 +143,7 @@ describe('ClusterActions', () => {
       expect(screen.getByText('Cluster Actions')).toBeInTheDocument();
     });
     expect(screen.getByText('Version & Lifecycle')).toBeInTheDocument();
+    // Day1 suites with apply-able features also appear (e.g., additional_tags)
     expect(screen.getByText('Cluster Configuration')).toBeInTheDocument();
   });
 
@@ -219,20 +224,15 @@ describe('ClusterActions', () => {
     });
   });
 
-  it('shows immutable badge for immutable features', async () => {
+  it('shows suites with apply-able features', async () => {
     setupFetch();
     await act(async () => { render(<ClusterActions />); });
 
     await waitFor(() => {
-      expect(screen.getByText('Cluster Configuration')).toBeInTheDocument();
+      expect(screen.getByText('Version & Lifecycle')).toBeInTheDocument();
     });
-
-    fireEvent.click(screen.getByText('Cluster Configuration'));
-
-    await waitFor(() => {
-      expect(screen.getByText('Private Network')).toBeInTheDocument();
-      expect(screen.getByText('Immutable')).toBeInTheDocument();
-    });
+    // Day1 suites with mutable (applies_to: apply) features also appear
+    expect(screen.getByText('Cluster Configuration')).toBeInTheDocument();
   });
 
   it('allows selecting mutable features', async () => {
@@ -281,23 +281,13 @@ describe('ClusterActions', () => {
     });
   });
 
-  it('filters suites by phase', async () => {
+  it('shows Day2 badge in filter bar', async () => {
     setupFetch();
     await act(async () => { render(<ClusterActions />); });
 
     await waitFor(() => {
-      expect(screen.getByText('Version & Lifecycle')).toBeInTheDocument();
-      expect(screen.getByText('Cluster Configuration')).toBeInTheDocument();
-    });
-
-    // Click the Day2 filter button (in the phase filter bar)
-    const day2Buttons = screen.getAllByText('Day2');
-    const filterButton = day2Buttons.find(el => el.closest('[class*="bg-gray-100"]'));
-    fireEvent.click(filterButton);
-
-    await waitFor(() => {
-      expect(screen.getByText('Version & Lifecycle')).toBeInTheDocument();
-      expect(screen.queryByText('Cluster Configuration')).not.toBeInTheDocument();
+      // Day2 badge is shown as a static label (no phase filter needed)
+      expect(screen.getAllByText('Day2').length).toBeGreaterThan(0);
     });
   });
 
@@ -316,7 +306,7 @@ describe('ClusterActions', () => {
     await act(async () => { render(<ClusterActions />); });
 
     await waitFor(() => {
-      expect(screen.getByText('How Feature Suites Work')).toBeInTheDocument();
+      expect(screen.getByText('How Cluster Actions Work')).toBeInTheDocument();
     });
   });
 
@@ -341,7 +331,8 @@ describe('ClusterActions', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Control Plane Upgrade')).toBeInTheDocument();
-      expect(screen.getByText('Private Network')).toBeInTheDocument();
+      expect(screen.getByText('Channel Group')).toBeInTheDocument();
+      expect(screen.getByText('Additional Tags')).toBeInTheDocument();
       expect(screen.getByText('Collapse All')).toBeInTheDocument();
     });
   });
@@ -436,9 +427,13 @@ describe('ClusterActions', () => {
     await act(async () => { render(<ClusterActions />); });
 
     await waitFor(() => {
-      expect(screen.getByText(/2 features \(2 mutable\)/)).toBeInTheDocument(); // version-lifecycle
-      expect(screen.getByText(/2 features \(1 mutable\)/)).toBeInTheDocument(); // cluster-config
+      expect(screen.getByText('Version & Lifecycle')).toBeInTheDocument();
+      expect(screen.getByText('Cluster Configuration')).toBeInTheDocument();
     });
+    // version-lifecycle: 2 apply-able features
+    expect(screen.getByText(/2 features \(2 mutable\)/)).toBeInTheDocument();
+    // cluster-config: 1 apply-able feature (additional_tags only)
+    expect(screen.getByText(/1 features \(1 mutable\)/)).toBeInTheDocument();
   });
 
   it('shows phase badges on suites', async () => {
@@ -446,8 +441,9 @@ describe('ClusterActions', () => {
     await act(async () => { render(<ClusterActions />); });
 
     await waitFor(() => {
-      expect(screen.getAllByText('Day1').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Day2').length).toBeGreaterThan(0);
+      // Both Day1 and Day2 suites appear if they have apply-able features
+      expect(screen.getByText('Version & Lifecycle')).toBeInTheDocument();
+      expect(screen.getByText('Cluster Configuration')).toBeInTheDocument();
     });
   });
 });

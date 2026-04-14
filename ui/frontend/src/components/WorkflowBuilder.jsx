@@ -31,24 +31,45 @@ import {
   ArrowDownIcon,
   DocumentDuplicateIcon,
   FolderOpenIcon,
+  ArrowDownTrayIcon,
+  ArrowUpTrayIcon,
+  MagnifyingGlassIcon,
+  BookmarkIcon,
+  RocketLaunchIcon,
+  ServerIcon,
+  ShieldCheckIcon,
+  XMarkIcon,
+  StarIcon,
+  EllipsisVerticalIcon,
 } from '@heroicons/react/24/outline';
+import { BookmarkIcon as BookmarkSolidIcon } from '@heroicons/react/24/solid';
 import { buildApiUrl } from '../config/api';
 import { useRecentOperationsContext } from '../store/AppContext';
 
 // ============================================================================
 // Draggable Playbook Card (in the palette)
 // ============================================================================
-const PlaybookPaletteItem = ({ suite, onAdd }) => {
+const categoryColors = {
+  Validation: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-400' },
+  Configuration: { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', dot: 'bg-violet-400' },
+  Provisioning: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', dot: 'bg-blue-400' },
+  Cleanup: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', dot: 'bg-orange-400' },
+  Other: { bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-700', dot: 'bg-gray-400' },
+};
+
+const PlaybookPaletteItem = ({ suite, onAdd, category }) => {
+  const colors = categoryColors[category] || categoryColors.Other;
   return (
     <div
-      className="flex items-center justify-between px-3 py-2 bg-white border border-gray-200 rounded-lg cursor-grab hover:border-blue-400 hover:shadow-sm transition-all group"
+      className={`flex items-center gap-2.5 px-3 py-2.5 bg-white border ${colors.border} rounded-xl cursor-grab hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData('application/json', JSON.stringify(suite));
         e.dataTransfer.effectAllowed = 'copy';
       }}
     >
-      <div className="flex-1 min-w-0 mr-2">
+      <div className={`w-1.5 h-8 rounded-full ${colors.dot} flex-shrink-0`} />
+      <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-gray-900 truncate">{suite.name}</div>
         <div className="text-xs text-gray-500 truncate">{suite.description}</div>
       </div>
@@ -57,7 +78,7 @@ const PlaybookPaletteItem = ({ suite, onAdd }) => {
           e.stopPropagation();
           onAdd(suite);
         }}
-        className="flex-shrink-0 p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors opacity-0 group-hover:opacity-100"
+        className="flex-shrink-0 p-1.5 text-gray-300 hover:text-white hover:bg-indigo-500 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
         title="Add to workflow"
       >
         <PlusIcon className="h-4 w-4" />
@@ -85,39 +106,71 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
     opacity: isDragging ? 0.5 : 1,
   };
 
-  const statusColors = {
-    pending: 'border-gray-200 bg-white',
-    running: 'border-blue-400 bg-blue-50 ring-2 ring-blue-200',
-    completed: 'border-green-400 bg-green-50',
-    failed: 'border-red-400 bg-red-50',
-    skipped: 'border-yellow-400 bg-yellow-50',
+  const statusStyles = {
+    pending: { card: 'border-gray-200 bg-white hover:shadow-md', accent: 'bg-gray-300', iconBg: 'bg-gray-100', iconText: 'text-gray-500' },
+    running: { card: 'border-blue-400 bg-gradient-to-r from-blue-50 to-white ring-2 ring-blue-200 shadow-lg shadow-blue-100', accent: 'bg-blue-500', iconBg: 'bg-blue-100', iconText: 'text-blue-600' },
+    completed: { card: 'border-emerald-400 bg-gradient-to-r from-emerald-50 to-white', accent: 'bg-emerald-500', iconBg: 'bg-emerald-100', iconText: 'text-emerald-600' },
+    failed: { card: 'border-red-400 bg-gradient-to-r from-red-50 to-white', accent: 'bg-red-500', iconBg: 'bg-red-100', iconText: 'text-red-600' },
+    skipped: { card: 'border-amber-300 bg-gradient-to-r from-amber-50 to-white', accent: 'bg-amber-400', iconBg: 'bg-amber-100', iconText: 'text-amber-600' },
   };
 
+  const st = statusStyles[step.status] || statusStyles.pending;
+
   const statusIcons = {
-    pending: <div className="w-6 h-6 rounded-full border-2 border-gray-300 flex items-center justify-center text-xs font-bold text-gray-400">{index + 1}</div>,
-    running: <ArrowPathIcon className="h-6 w-6 text-blue-600 animate-spin" />,
-    completed: <CheckCircleIcon className="h-6 w-6 text-green-600" />,
-    failed: <XCircleIcon className="h-6 w-6 text-red-600" />,
-    skipped: <ClockIcon className="h-6 w-6 text-yellow-600" />,
+    pending: (
+      <div className={`w-8 h-8 rounded-xl ${st.iconBg} flex items-center justify-center text-sm font-bold ${st.iconText}`}>
+        {index + 1}
+      </div>
+    ),
+    running: (
+      <div className={`w-8 h-8 rounded-xl ${st.iconBg} flex items-center justify-center`}>
+        <ArrowPathIcon className="h-5 w-5 text-blue-600 animate-spin" />
+      </div>
+    ),
+    completed: (
+      <div className={`w-8 h-8 rounded-xl ${st.iconBg} flex items-center justify-center`}>
+        <CheckCircleIcon className="h-5 w-5 text-emerald-600" />
+      </div>
+    ),
+    failed: (
+      <div className={`w-8 h-8 rounded-xl ${st.iconBg} flex items-center justify-center`}>
+        <XCircleIcon className="h-5 w-5 text-red-600" />
+      </div>
+    ),
+    skipped: (
+      <div className={`w-8 h-8 rounded-xl ${st.iconBg} flex items-center justify-center`}>
+        <ClockIcon className="h-5 w-5 text-amber-600" />
+      </div>
+    ),
+  };
+
+  const formatDuration = (start, end) => {
+    const secs = Math.round(((end || Date.now()) - start) / 1000);
+    if (secs < 60) return `${secs}s`;
+    return `${Math.floor(secs / 60)}m ${secs % 60}s`;
   };
 
   return (
     <div ref={setNodeRef} style={style}>
-      {/* Connector arrow */}
+      {/* Connector */}
       {index > 0 && (
-        <div className="flex justify-center py-1">
-          <ArrowDownIcon className="h-4 w-4 text-gray-400" />
+        <div className="flex flex-col items-center py-1">
+          <div className={`w-0.5 h-3 ${step.status === 'running' ? 'bg-blue-300' : step.status === 'completed' ? 'bg-emerald-300' : 'bg-gray-300'} rounded-full`} />
+          <ArrowDownIcon className={`h-3.5 w-3.5 ${step.status === 'running' ? 'text-blue-400' : step.status === 'completed' ? 'text-emerald-400' : 'text-gray-300'}`} />
         </div>
       )}
 
       {/* Step card */}
-      <div className={`rounded-lg border-2 ${statusColors[step.status]} transition-all`}>
+      <div className={`rounded-xl border-2 ${st.card} transition-all duration-300 overflow-hidden`}>
+        {/* Color accent bar */}
+        <div className={`h-1 ${st.accent} transition-all duration-500`} />
+
         <div className="flex items-center gap-3 px-4 py-3">
           {/* Drag handle */}
           <div
             {...attributes}
             {...listeners}
-            className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 flex-shrink-0"
+            className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 flex-shrink-0 transition-colors"
             title="Drag to reorder"
           >
             <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -131,42 +184,44 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
           {/* Step info */}
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold text-gray-900 truncate">{step.name}</div>
-            <div className="text-xs text-gray-500 truncate">
-              {step.description}
+            <div className="text-xs text-gray-500 truncate flex items-center gap-2">
+              <span className="truncate">{step.description}</span>
               {step.startedAt && (
-                <span className="ml-2 text-gray-400">
-                  {step.completedAt
-                    ? (() => {
-                        const secs = Math.round((step.completedAt - step.startedAt) / 1000);
-                        return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
-                      })()
-                    : step.status === 'running'
-                    ? (() => {
-                        const secs = Math.round((Date.now() - step.startedAt) / 1000);
-                        return secs < 60 ? `${secs}s...` : `${Math.floor(secs / 60)}m ${secs % 60}s...`;
-                      })()
-                    : null}
+                <span className={`flex-shrink-0 font-mono px-1.5 py-0.5 rounded text-[10px] ${
+                  step.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                  step.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
+                  step.status === 'failed' ? 'bg-red-100 text-red-700' :
+                  'bg-gray-100 text-gray-600'
+                }`}>
+                  {formatDuration(step.startedAt, step.completedAt)}
+                  {step.status === 'running' && '...'}
                 </span>
               )}
             </div>
           </div>
 
           {/* Step badges */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             {step.onFailure === 'skip' && (
-              <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">Skip on fail</span>
+              <span className="text-[10px] px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-semibold uppercase tracking-wider">Skip on fail</span>
+            )}
+            {step.onFailure === 'retry' && (
+              <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full font-semibold uppercase tracking-wider">Retry</span>
+            )}
+            {step.required && (
+              <span className="text-[10px] px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full font-semibold uppercase tracking-wider">Required</span>
             )}
           </div>
 
           {/* Config toggle */}
           <button
             onClick={() => onToggleConfig(step.id)}
-            className="relative p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors flex-shrink-0"
+            className="relative p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all flex-shrink-0"
             title="Configure step"
           >
             <Cog6ToothIcon className="h-4 w-4" />
             {Object.keys(step.extra_vars || {}).length > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                 {Object.keys(step.extra_vars).length}
               </span>
             )}
@@ -176,8 +231,8 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
           {(step.logs || []).length > 0 && (
             <button
               onClick={() => onToggleOutput(step.id)}
-              className={`p-1.5 rounded transition-colors flex-shrink-0 ${
-                isOutputActive ? 'text-blue-600 bg-blue-100' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              className={`p-1.5 rounded-lg transition-all flex-shrink-0 ${
+                isOutputActive ? 'text-indigo-600 bg-indigo-100 ring-2 ring-indigo-200' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'
               }`}
               title={isOutputActive ? 'Hide output' : 'Show output'}
             >
@@ -190,7 +245,7 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
           {/* Remove button */}
           <button
             onClick={() => onRemove(step.id)}
-            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors flex-shrink-0"
+            className="p-1.5 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all flex-shrink-0"
             title="Remove step"
           >
             <TrashIcon className="h-4 w-4" />
@@ -199,7 +254,7 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
 
         {/* Expanded config panel */}
         {step.showConfig && (
-          <div className="border-t border-gray-200 px-4 py-3 bg-gray-50 rounded-b-lg space-y-3">
+          <div className="border-t border-gray-200 px-4 py-3 bg-gradient-to-b from-gray-50 to-white space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">On Failure</label>
@@ -439,10 +494,18 @@ const WorkflowBuilder = () => {
   // Output panel — which step's logs to show
   const [activeOutputStepId, setActiveOutputStepId] = useState(null);
 
-  // Saved workflows
+  // Saved workflows & library
   const [savedWorkflows, setSavedWorkflows] = useState([]);
-  const [showSavedList, setShowSavedList] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveDescription, setSaveDescription] = useState('');
+  const [workflowTemplates, setWorkflowTemplates] = useState([]);
+  const [librarySearch, setLibrarySearch] = useState('');
+  const [libraryTab, setLibraryTab] = useState('saved'); // 'saved' | 'templates'
+  const [activeWorkflowId, setActiveWorkflowId] = useState(null);
+  const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
+  const [contextMenuId, setContextMenuId] = useState(null);
+  const [paletteTab, setPaletteTab] = useState('playbooks'); // 'playbooks' | 'workflows'
+  const fileInputRef = useRef(null);
 
   // Recent operations (task logging)
   const recentOps = useRecentOperationsContext();
@@ -502,6 +565,7 @@ const WorkflowBuilder = () => {
   useEffect(() => {
     fetchPlaybooks();
     loadSavedWorkflows();
+    loadWorkflowTemplates();
   }, []);
 
   const fetchPlaybooks = async () => {
@@ -627,54 +691,204 @@ const WorkflowBuilder = () => {
     e.currentTarget.classList.remove('ring-2', 'ring-blue-400', 'bg-blue-50');
   };
 
-  // ---- Save / Load workflows ----
-  const loadSavedWorkflows = () => {
+  // ---- Save / Load workflows (backend-backed) ----
+  const loadSavedWorkflows = async () => {
     try {
-      const saved = localStorage.getItem('capa-workflows');
-      if (saved) setSavedWorkflows(JSON.parse(saved));
+      const res = await fetch(buildApiUrl('/api/workflows'));
+      if (res.ok) {
+        const data = await res.json();
+        setSavedWorkflows(data.workflows || []);
+      }
     } catch (e) {
       console.error('Failed to load workflows:', e);
+      // Fallback to localStorage
+      try {
+        const saved = localStorage.getItem('capa-workflows');
+        if (saved) setSavedWorkflows(JSON.parse(saved));
+      } catch (err) { /* ignore */ }
     }
   };
 
-  const saveWorkflow = () => {
+  const loadWorkflowTemplates = async () => {
+    try {
+      const res = await fetch(buildApiUrl('/api/workflows/templates/list'));
+      if (res.ok) {
+        const data = await res.json();
+        setWorkflowTemplates(data.templates || []);
+      }
+    } catch (e) {
+      console.error('Failed to load templates:', e);
+    }
+  };
+
+  const saveWorkflow = async () => {
     if (!workflowName.trim() || workflowSteps.length === 0) return;
 
-    const workflow = {
-      id: `wf-${Date.now()}`,
-      name: workflowName,
-      stopOnFailure,
-      globalVars,
-      steps: workflowSteps.map(({ id, showConfig, status, ...rest }) => rest),
-      savedAt: new Date().toISOString(),
+    // Check for existing workflow with same name
+    const existing = savedWorkflows.find((w) => w.name === workflowName && w.id !== activeWorkflowId);
+    if (existing && !showOverwriteConfirm) {
+      setShowOverwriteConfirm(true);
+      return;
+    }
+
+    try {
+      const res = await fetch(buildApiUrl('/api/workflows'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: workflowName,
+          description: saveDescription,
+          stopOnFailure,
+          globalVars,
+          steps: workflowSteps.map(({ id, showConfig, status, logs, agentStats, startedAt, completedAt, ...rest }) => rest),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActiveWorkflowId(data.workflow.id);
+        await loadSavedWorkflows();
+      }
+    } catch (e) {
+      console.error('Failed to save workflow:', e);
+    }
+
+    setShowSaveDialog(false);
+    setShowOverwriteConfirm(false);
+    setSaveDescription('');
+  };
+
+  const loadWorkflow = async (workflow) => {
+    // If it's a template, load directly from template data
+    if (workflow.id?.startsWith('tpl-')) {
+      setWorkflowName(workflow.name);
+      setStopOnFailure(workflow.stopOnFailure ?? true);
+      setGlobalVars(workflow.globalVars || {});
+      setWorkflowSteps(
+        workflow.steps.map((step, i) => ({
+          ...step,
+          id: `step-${Date.now()}-${i}`,
+          status: 'pending',
+          showConfig: false,
+        }))
+      );
+      setActiveWorkflowId(null);
+      setPaletteTab('playbooks');
+      return;
+    }
+
+    // Fetch full workflow from backend
+    try {
+      const res = await fetch(buildApiUrl(`/api/workflows/${workflow.id}`));
+      if (res.ok) {
+        const data = await res.json();
+        const wf = data.workflow;
+        setWorkflowName(wf.name);
+        setStopOnFailure(wf.stopOnFailure ?? true);
+        setGlobalVars(wf.globalVars || {});
+        setSaveDescription(wf.description || '');
+        setWorkflowSteps(
+          wf.steps.map((step, i) => ({
+            ...step,
+            id: `step-${Date.now()}-${i}`,
+            status: 'pending',
+            showConfig: false,
+          }))
+        );
+        setActiveWorkflowId(wf.id);
+      }
+    } catch (e) {
+      console.error('Failed to load workflow:', e);
+    }
+    setPaletteTab('playbooks');
+  };
+
+  const deleteWorkflow = async (workflowId) => {
+    try {
+      await fetch(buildApiUrl(`/api/workflows/${workflowId}`), { method: 'DELETE' });
+      await loadSavedWorkflows();
+      if (activeWorkflowId === workflowId) setActiveWorkflowId(null);
+    } catch (e) {
+      console.error('Failed to delete workflow:', e);
+    }
+  };
+
+  const duplicateWorkflow = async (workflowId) => {
+    try {
+      await fetch(buildApiUrl(`/api/workflows/${workflowId}/duplicate`), { method: 'POST' });
+      await loadSavedWorkflows();
+    } catch (e) {
+      console.error('Failed to duplicate workflow:', e);
+    }
+    setContextMenuId(null);
+  };
+
+  const exportWorkflow = async (workflow) => {
+    let wfData;
+    if (workflow.steps) {
+      wfData = workflow;
+    } else {
+      try {
+        const res = await fetch(buildApiUrl(`/api/workflows/${workflow.id}`));
+        if (!res.ok) return;
+        const data = await res.json();
+        wfData = data.workflow;
+      } catch (e) { return; }
+    }
+
+    const exportData = {
+      name: wfData.name,
+      description: wfData.description || '',
+      stopOnFailure: wfData.stopOnFailure,
+      globalVars: wfData.globalVars || {},
+      steps: (wfData.steps || []).map(({ id, showConfig, status, logs, agentStats, startedAt, completedAt, ...rest }) => rest),
+      exportedAt: new Date().toISOString(),
     };
 
-    const existing = savedWorkflows.filter((w) => w.name !== workflowName);
-    const updated = [...existing, workflow];
-    setSavedWorkflows(updated);
-    localStorage.setItem('capa-workflows', JSON.stringify(updated));
-    setShowSaveDialog(false);
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `workflow-${wfData.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setContextMenuId(null);
   };
 
-  const loadWorkflow = (workflow) => {
-    setWorkflowName(workflow.name);
-    setStopOnFailure(workflow.stopOnFailure ?? true);
-    setGlobalVars(workflow.globalVars || {});
-    setWorkflowSteps(
-      workflow.steps.map((step, i) => ({
-        ...step,
-        id: `step-${Date.now()}-${i}`,
-        status: 'pending',
-        showConfig: false,
-      }))
-    );
-    setShowSavedList(false);
-  };
+  const importWorkflow = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-  const deleteWorkflow = (workflowId) => {
-    const updated = savedWorkflows.filter((w) => w.id !== workflowId);
-    setSavedWorkflows(updated);
-    localStorage.setItem('capa-workflows', JSON.stringify(updated));
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!data.name || !data.steps?.length) {
+          alert('Invalid workflow file: must contain name and steps');
+          return;
+        }
+
+        // Save imported workflow to backend
+        await fetch(buildApiUrl('/api/workflows'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: data.name,
+            description: data.description || `Imported on ${new Date().toLocaleDateString()}`,
+            stopOnFailure: data.stopOnFailure ?? true,
+            globalVars: data.globalVars || {},
+            steps: data.steps,
+          }),
+        });
+        await loadSavedWorkflows();
+      } catch (err) {
+        alert('Failed to import workflow: invalid JSON file');
+      }
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be imported again
+    event.target.value = '';
   };
 
   // ---- Run workflow ----
@@ -685,6 +899,11 @@ const WorkflowBuilder = () => {
     // Reset all steps to pending, clear logs
     setWorkflowSteps((prev) => prev.map((s) => ({ ...s, status: 'pending', logs: [] })));
     setActiveOutputStepId(null);
+
+    // Mark workflow as run on backend
+    if (activeWorkflowId) {
+      fetch(buildApiUrl(`/api/workflows/${activeWorkflowId}/run`), { method: 'POST' }).catch(() => {});
+    }
 
     // Log workflow start to Recent Tasks
     const workflowOpId = `workflow-${Date.now()}`;
@@ -955,124 +1174,431 @@ const WorkflowBuilder = () => {
     setStopOnFailure(true);
     setGlobalVars({});
     setActiveOutputStepId(null);
+    setActiveWorkflowId(null);
+    setSaveDescription('');
     localStorage.removeItem('capa-workflow-last-run');
   };
+
+  // ---- Computed stats for status bar ----
+  const completedSteps = workflowSteps.filter(s => s.status === 'completed').length;
+  const failedSteps = workflowSteps.filter(s => s.status === 'failed').length;
+  const runningSteps = workflowSteps.filter(s => s.status === 'running').length;
+  const skippedSteps = workflowSteps.filter(s => s.status === 'skipped').length;
+  const hasRunResults = completedSteps + failedSteps + skippedSteps > 0;
+  const progressPercent = workflowSteps.length > 0
+    ? Math.round(((completedSteps + failedSteps + skippedSteps) / workflowSteps.length) * 100)
+    : 0;
 
   // ============================================================================
   // Render
   // ============================================================================
   return (
-    <div className="flex gap-6 h-[calc(100vh-180px)] overflow-hidden">
-      {/* ---- Left: Playbook Palette ---- */}
-      <div className="w-72 flex-shrink-0 flex flex-col bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
-          <h3 className="text-sm font-semibold text-gray-900">Playbooks</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Drag to add to workflow</p>
-        </div>
-
-        {/* Search */}
-        <div className="px-3 py-2 border-b border-gray-100">
-          <input
-            type="text"
-            placeholder="Search playbooks..."
-            value={paletteSearch}
-            onChange={(e) => setPaletteSearch(e.target.value)}
-            className="w-full text-sm border border-gray-300 rounded-md px-2.5 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-        </div>
-
-        {/* Category filter */}
-        <div className="px-3 py-2 border-b border-gray-100 flex flex-wrap gap-1">
-          {['all', 'Validation', 'Configuration', 'Provisioning', 'Cleanup', 'Other'].map((cat) => (
+    <div className="flex gap-5 h-[calc(100vh-180px)] overflow-hidden">
+      {/* ---- Left: Tabbed Palette (Playbooks / Workflows) ---- */}
+      <div className="w-72 flex-shrink-0 flex flex-col rounded-2xl border border-gray-200 shadow-sm overflow-hidden bg-white">
+        {/* Tab header */}
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 px-2 pt-3 pb-0">
+          <div className="flex">
             <button
-              key={cat}
-              onClick={() => setPaletteCategory(cat)}
-              className={`text-xs px-2 py-1 rounded-full transition-colors ${
-                paletteCategory === cat
-                  ? 'bg-blue-100 text-blue-700 font-medium'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              onClick={() => setPaletteTab('playbooks')}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-t-xl transition-all ${
+                paletteTab === 'playbooks'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
-              {cat === 'all' ? 'All' : cat}
+              <PlusIcon className="h-4 w-4" />
+              Playbooks
             </button>
-          ))}
+            <button
+              onClick={() => { setPaletteTab('workflows'); loadSavedWorkflows(); }}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-t-xl transition-all ${
+                paletteTab === 'workflows'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <BookmarkIcon className="h-4 w-4" />
+              Workflows
+              {savedWorkflows.length > 0 && paletteTab !== 'workflows' && (
+                <span className="text-[10px] px-1.5 py-0.5 bg-indigo-500 text-white rounded-full font-bold min-w-[18px] text-center">
+                  {savedWorkflows.length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
-        {/* Playbook list */}
-        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
-          {loading ? (
-            <div className="text-center py-8">
-              <ArrowPathIcon className="h-6 w-6 text-gray-400 mx-auto animate-spin" />
-              <p className="text-xs text-gray-500 mt-2">Loading...</p>
-            </div>
-          ) : sortedPlaybooks.length === 0 ? (
-            <p className="text-xs text-gray-500 text-center py-4">No playbooks found</p>
-          ) : (
-            <div className="space-y-1.5">
-              {sortedPlaybooks.map((suite) => (
-                <PlaybookPaletteItem
-                  key={suite.name}
-                  suite={suite}
-                  onAdd={addStep}
+        {/* ---- Playbooks Tab Content ---- */}
+        {paletteTab === 'playbooks' && (
+          <>
+            {/* Search */}
+            <div className="px-3 py-2.5 border-b border-gray-100">
+              <div className="relative">
+                <MagnifyingGlassIcon className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search playbooks..."
+                  value={paletteSearch}
+                  onChange={(e) => setPaletteSearch(e.target.value)}
+                  className="w-full text-sm border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50"
                 />
-              ))}
+              </div>
             </div>
-          )}
-        </div>
+
+            {/* Category filter */}
+            <div className="px-3 py-2 border-b border-gray-100 flex flex-wrap gap-1">
+              {['all', 'Validation', 'Configuration', 'Provisioning', 'Cleanup', 'Other'].map((cat) => {
+                const catColor = categoryColors[cat] || {};
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setPaletteCategory(cat)}
+                    className={`text-xs px-2.5 py-1 rounded-lg transition-all duration-200 font-medium ${
+                      paletteCategory === cat
+                        ? cat === 'all'
+                          ? 'bg-indigo-100 text-indigo-700 shadow-sm'
+                          : `${catColor.bg || 'bg-indigo-100'} ${catColor.text || 'text-indigo-700'} shadow-sm`
+                        : 'bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                    }`}
+                  >
+                    {cat === 'all' ? 'All' : cat}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Playbook list */}
+            <div className="flex-1 overflow-y-auto px-3 py-2.5">
+              {loading ? (
+                <div className="text-center py-12">
+                  <div className="w-10 h-10 mx-auto rounded-xl bg-indigo-100 flex items-center justify-center mb-3">
+                    <ArrowPathIcon className="h-5 w-5 text-indigo-500 animate-spin" />
+                  </div>
+                  <p className="text-xs text-gray-500">Loading...</p>
+                </div>
+              ) : sortedPlaybooks.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-xs text-gray-400">No playbooks found</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {sortedPlaybooks.map((suite) => (
+                    <PlaybookPaletteItem
+                      key={suite.name}
+                      suite={suite}
+                      onAdd={addStep}
+                      category={categorizePlaybook(suite)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Palette footer */}
+            <div className="px-3 py-2 border-t border-gray-100 bg-gray-50">
+              <p className="text-[10px] text-gray-400 text-center">{sortedPlaybooks.length} playbooks available</p>
+            </div>
+          </>
+        )}
+
+        {/* ---- Workflows Tab Content ---- */}
+        {paletteTab === 'workflows' && (
+          <>
+            {/* Search */}
+            <div className="px-3 py-2.5 border-b border-gray-100">
+              <div className="relative">
+                <MagnifyingGlassIcon className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search workflows..."
+                  value={librarySearch}
+                  onChange={(e) => setLibrarySearch(e.target.value)}
+                  className="w-full text-sm border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50"
+                />
+              </div>
+            </div>
+
+            {/* Sub-tabs: Saved / Templates */}
+            <div className="px-3 py-2 border-b border-gray-100 flex gap-1">
+              <button
+                onClick={() => setLibraryTab('saved')}
+                className={`text-xs px-2.5 py-1 rounded-lg transition-all duration-200 font-medium flex items-center gap-1 ${
+                  libraryTab === 'saved'
+                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
+                    : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                }`}
+              >
+                Saved
+                {savedWorkflows.length > 0 && (
+                  <span className="text-[10px] px-1 py-0 bg-indigo-200 text-indigo-700 rounded-full font-bold">
+                    {savedWorkflows.length}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setLibraryTab('templates')}
+                className={`text-xs px-2.5 py-1 rounded-lg transition-all duration-200 font-medium flex items-center gap-1 ${
+                  libraryTab === 'templates'
+                    ? 'bg-purple-100 text-purple-700 shadow-sm'
+                    : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                }`}
+              >
+                Templates
+                <span className="text-[10px] px-1 py-0 bg-purple-100 text-purple-600 rounded-full font-bold">
+                  {workflowTemplates.length}
+                </span>
+              </button>
+            </div>
+
+            {/* Workflow list */}
+            <div className="flex-1 overflow-y-auto px-3 py-2.5">
+              {libraryTab === 'saved' && (
+                <>
+                  {savedWorkflows.length === 0 ? (
+                    <div className="text-center py-8">
+                      <BookmarkIcon className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                      <p className="text-xs text-gray-400 mb-1">No saved workflows yet</p>
+                      <p className="text-[10px] text-gray-300">Build a workflow and click Save</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {savedWorkflows
+                        .filter((wf) => !librarySearch || wf.name.toLowerCase().includes(librarySearch.toLowerCase()) || (wf.description || '').toLowerCase().includes(librarySearch.toLowerCase()))
+                        .map((wf) => (
+                        <div
+                          key={wf.id}
+                          className={`group relative bg-white border rounded-xl p-3 hover:shadow-md transition-all cursor-pointer ${
+                            activeWorkflowId === wf.id ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-gray-200 hover:border-indigo-300'
+                          }`}
+                          onClick={() => loadWorkflow(wf)}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <h4 className="text-sm font-semibold text-gray-900 truncate">{wf.name}</h4>
+                                {activeWorkflowId === wf.id && (
+                                  <span className="text-[9px] px-1 py-0 bg-indigo-100 text-indigo-600 rounded font-bold uppercase">Active</span>
+                                )}
+                              </div>
+                              {wf.description && (
+                                <p className="text-[11px] text-gray-400 mt-0.5 truncate">{wf.description}</p>
+                              )}
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <span className="text-[10px] text-gray-400">{wf.stepCount} steps</span>
+                                {wf.hasGlobalVars && (
+                                  <span className="text-[10px] text-gray-400">{wf.globalVarKeys?.length} vars</span>
+                                )}
+                              </div>
+                              {/* Step name pills */}
+                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                {(wf.stepNames || []).slice(0, 3).map((name, i) => (
+                                  <span key={i} className="text-[10px] px-1.5 py-0.5 bg-gray-50 text-gray-500 rounded border border-gray-100 truncate max-w-[120px]">
+                                    {i + 1}. {name}
+                                  </span>
+                                ))}
+                                {(wf.stepNames || []).length > 3 && (
+                                  <span className="text-[10px] px-1.5 py-0.5 text-gray-400">
+                                    +{wf.stepNames.length - 3}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={() => setContextMenuId(contextMenuId === wf.id ? null : wf.id)}
+                                className="p-1 text-gray-300 hover:text-gray-500 rounded transition-colors opacity-0 group-hover:opacity-100"
+                              >
+                                <EllipsisVerticalIcon className="h-4 w-4" />
+                              </button>
+                              {contextMenuId === wf.id && (
+                                <div className="absolute right-0 top-6 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-32 z-10">
+                                  <button
+                                    onClick={() => duplicateWorkflow(wf.id)}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                                  >
+                                    <DocumentDuplicateIcon className="h-3.5 w-3.5" />
+                                    Duplicate
+                                  </button>
+                                  <button
+                                    onClick={() => exportWorkflow(wf)}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                                  >
+                                    <ArrowDownTrayIcon className="h-3.5 w-3.5" />
+                                    Export
+                                  </button>
+                                  <div className="border-t border-gray-100 my-0.5" />
+                                  <button
+                                    onClick={() => { deleteWorkflow(wf.id); setContextMenuId(null); }}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                  >
+                                    <TrashIcon className="h-3.5 w-3.5" />
+                                    Delete
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {libraryTab === 'templates' && (
+                <div className="space-y-2">
+                  {workflowTemplates
+                    .filter((tpl) => !librarySearch || tpl.name.toLowerCase().includes(librarySearch.toLowerCase()))
+                    .map((tpl) => {
+                    const iconMap = {
+                      rocket: <RocketLaunchIcon className="h-4 w-4" />,
+                      server: <ServerIcon className="h-4 w-4" />,
+                      trash: <TrashIcon className="h-4 w-4" />,
+                      check: <ShieldCheckIcon className="h-4 w-4" />,
+                    };
+                    const colorMap = {
+                      rocket: 'from-blue-500 to-indigo-600',
+                      server: 'from-emerald-500 to-teal-600',
+                      trash: 'from-orange-500 to-red-500',
+                      check: 'from-green-500 to-emerald-600',
+                    };
+                    return (
+                      <div
+                        key={tpl.id}
+                        className="group bg-white border border-gray-200 rounded-xl p-3 hover:shadow-md hover:border-purple-300 transition-all cursor-pointer"
+                        onClick={() => loadWorkflow(tpl)}
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${colorMap[tpl.icon] || 'from-gray-400 to-gray-600'} flex items-center justify-center text-white flex-shrink-0`}>
+                            {iconMap[tpl.icon] || <StarIcon className="h-4 w-4" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-sm font-semibold text-gray-900 truncate">{tpl.name}</h4>
+                            <p className="text-[11px] text-gray-400 mt-0.5 line-clamp-2">{tpl.description}</p>
+                            <div className="flex items-center gap-2 mt-1.5">
+                              <span className="text-[10px] text-gray-400">
+                                {tpl.steps.length} step{tpl.steps.length !== 1 ? 's' : ''}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-500 rounded font-semibold">
+                                Template
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Workflows tab footer */}
+            <div className="px-3 py-2 border-t border-gray-100 bg-gray-50">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full text-[11px] text-gray-400 hover:text-indigo-600 flex items-center justify-center gap-1 transition-colors"
+              >
+                <ArrowUpTrayIcon className="h-3.5 w-3.5" />
+                Import from file
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* ---- Center: Workflow Canvas ---- */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        {/* Toolbar */}
-        <div className="flex items-center justify-between px-4 py-3 bg-white rounded-t-lg border border-gray-200 border-b-0">
+        {/* Toolbar - glass effect */}
+        <div className="flex items-center justify-between px-5 py-3 bg-white/95 backdrop-blur-sm rounded-t-2xl border border-gray-200 border-b-0 shadow-sm">
           <div className="flex items-center gap-3">
-            <input
-              type="text"
-              value={workflowName}
-              onChange={(e) => setWorkflowName(e.target.value)}
-              className="text-lg font-bold text-gray-900 border-0 border-b-2 border-transparent hover:border-gray-300 focus:border-blue-500 focus:ring-0 bg-transparent px-1 py-0.5 transition-colors"
-              placeholder="Workflow name..."
-            />
-            <span className="text-xs text-gray-400">
-              {workflowSteps.length} step{workflowSteps.length !== 1 ? 's' : ''}
-            </span>
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+              <svg className="h-5 w-5 text-white" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div>
+              <input
+                type="text"
+                value={workflowName}
+                onChange={(e) => setWorkflowName(e.target.value)}
+                className="text-lg font-bold text-gray-900 border-0 border-b-2 border-transparent hover:border-indigo-300 focus:border-indigo-500 focus:ring-0 bg-transparent px-0 py-0 transition-colors w-64"
+                placeholder="Workflow name..."
+              />
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-xs text-gray-400">
+                  {workflowSteps.length} step{workflowSteps.length !== 1 ? 's' : ''}
+                </span>
+                {activeWorkflowId && (
+                  <>
+                    <span className="text-xs text-gray-300">|</span>
+                    <span className="text-xs text-indigo-500 flex items-center gap-1">
+                      <BookmarkSolidIcon className="h-3 w-3" />
+                      Saved
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
             {/* Stop on failure toggle */}
-            <label className="flex items-center gap-2 text-sm text-gray-600 mr-2">
+            <label className="flex items-center gap-2 text-sm text-gray-500 mr-1 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={stopOnFailure}
                 onChange={(e) => setStopOnFailure(e.target.checked)}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
               />
               Stop on failure
             </label>
 
+            <div className="w-px h-6 bg-gray-200 mx-1" />
+
             {/* Save */}
             <button
-              onClick={() => setShowSaveDialog(true)}
+              onClick={() => {
+                setSaveDescription(saveDescription || '');
+                setShowSaveDialog(true);
+                setShowOverwriteConfirm(false);
+              }}
               disabled={workflowSteps.length === 0}
-              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
             >
+              <BookmarkIcon className="h-4 w-4" />
               Save
             </button>
 
-            {/* Load */}
-            <button
-              onClick={() => setShowSavedList(!showSavedList)}
-              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center gap-1.5"
-            >
-              <FolderOpenIcon className="h-4 w-4" />
-              Load
-            </button>
+            {/* Export (when workflow is saved) */}
+            {activeWorkflowId && (
+              <button
+                onClick={() => exportWorkflow({ id: activeWorkflowId, name: workflowName })}
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
+                title="Export workflow"
+              >
+                <ArrowDownTrayIcon className="h-4 w-4" />
+              </button>
+            )}
+
+            {/* Hidden file input for import */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={importWorkflow}
+              className="hidden"
+            />
+
+            <div className="w-px h-6 bg-gray-200 mx-1" />
 
             {/* Clear */}
             <button
               onClick={clearWorkflow}
               disabled={workflowSteps.length === 0 || isRunning}
-              className="px-3 py-1.5 text-sm font-medium text-red-600 bg-white border border-red-200 rounded-md hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1.5 text-sm font-medium text-red-500 bg-white border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
               Clear
             </button>
@@ -1081,10 +1607,10 @@ const WorkflowBuilder = () => {
             <button
               onClick={runWorkflow}
               disabled={workflowSteps.length === 0 || isRunning}
-              className={`px-4 py-1.5 text-sm font-medium text-white rounded-md flex items-center gap-2 transition-colors ${
+              className={`px-5 py-2 text-sm font-semibold text-white rounded-xl flex items-center gap-2 transition-all duration-300 shadow-sm ${
                 isRunning
                   ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700'
+                  : 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 hover:shadow-md hover:shadow-indigo-200'
               }`}
             >
               {isRunning ? (
@@ -1102,40 +1628,65 @@ const WorkflowBuilder = () => {
           </div>
         </div>
 
-        {/* Saved workflows dropdown */}
-        {showSavedList && (
-          <div className="mx-0 bg-white border-x border-gray-200 shadow-inner">
-            <div className="px-4 py-2 border-b border-gray-100">
-              <h4 className="text-sm font-semibold text-gray-700">Saved Workflows</h4>
-            </div>
-            {savedWorkflows.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-gray-500">No saved workflows yet</p>
-            ) : (
-              <div className="max-h-48 overflow-y-auto">
-                {savedWorkflows.map((wf) => (
-                  <div
-                    key={wf.id}
-                    className="flex items-center justify-between px-4 py-2 hover:bg-gray-50 transition-colors"
-                  >
-                    <button
-                      onClick={() => loadWorkflow(wf)}
-                      className="flex-1 text-left"
-                    >
-                      <div className="text-sm font-medium text-gray-900">{wf.name}</div>
-                      <div className="text-xs text-gray-500">
-                        {wf.steps.length} steps - saved {new Date(wf.savedAt).toLocaleDateString()}
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => deleteWorkflow(wf.id)}
-                      className="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                    >
-                      <TrashIcon className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
+        {/* Status summary bar (shows when workflow has run results) */}
+        {hasRunResults && (
+          <div className="mx-0 border-x border-gray-200 bg-white px-5 py-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-3">
+                {completedSteps > 0 && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-emerald-700">
+                    <CheckCircleIcon className="h-3.5 w-3.5" />
+                    {completedSteps} passed
+                  </span>
+                )}
+                {failedSteps > 0 && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-red-600">
+                    <XCircleIcon className="h-3.5 w-3.5" />
+                    {failedSteps} failed
+                  </span>
+                )}
+                {skippedSteps > 0 && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-amber-600">
+                    <ClockIcon className="h-3.5 w-3.5" />
+                    {skippedSteps} skipped
+                  </span>
+                )}
+                {runningSteps > 0 && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-blue-600">
+                    <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" />
+                    {runningSteps} running
+                  </span>
+                )}
               </div>
-            )}
+              <span className="text-xs text-gray-400 font-mono">{progressPercent}%</span>
+            </div>
+            {/* Progress bar */}
+            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden flex">
+              {completedSteps > 0 && (
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500"
+                  style={{ width: `${(completedSteps / workflowSteps.length) * 100}%` }}
+                />
+              )}
+              {failedSteps > 0 && (
+                <div
+                  className="h-full bg-gradient-to-r from-red-400 to-red-500 transition-all duration-500"
+                  style={{ width: `${(failedSteps / workflowSteps.length) * 100}%` }}
+                />
+              )}
+              {skippedSteps > 0 && (
+                <div
+                  className="h-full bg-gradient-to-r from-amber-300 to-amber-400 transition-all duration-500"
+                  style={{ width: `${(skippedSteps / workflowSteps.length) * 100}%` }}
+                />
+              )}
+              {runningSteps > 0 && (
+                <div
+                  className="h-full bg-gradient-to-r from-blue-400 to-blue-500 animate-pulse transition-all duration-500"
+                  style={{ width: `${(runningSteps / workflowSteps.length) * 100}%` }}
+                />
+              )}
+            </div>
           </div>
         )}
 
@@ -1143,7 +1694,7 @@ const WorkflowBuilder = () => {
         <div className="bg-white border-x border-gray-200">
           <button
             onClick={() => setShowGlobalVars(!showGlobalVars)}
-            className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            className="w-full flex items-center justify-between px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             <div className="flex items-center gap-2">
               {showGlobalVars ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
@@ -1270,7 +1821,14 @@ const WorkflowBuilder = () => {
 
         {/* Canvas */}
         <div
-          className="flex-1 bg-gray-50 border border-gray-200 rounded-b-lg overflow-y-auto p-6 transition-all"
+          className="flex-1 border border-gray-200 rounded-b-2xl overflow-y-auto p-6 transition-all duration-300"
+          style={{
+            background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 50%, #eff3f8 100%)',
+            backgroundImage: workflowSteps.length === 0
+              ? 'radial-gradient(circle at 1px 1px, #e2e8f0 1px, transparent 0)'
+              : 'none',
+            backgroundSize: '24px 24px',
+          }}
           onDrop={handleCanvasDrop}
           onDragOver={handleCanvasDragOver}
           onDragLeave={handleCanvasDragLeave}
@@ -1278,13 +1836,20 @@ const WorkflowBuilder = () => {
           {workflowSteps.length === 0 ? (
             <div className="h-full flex items-center justify-center">
               <div className="text-center">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
-                  <PlusIcon className="h-8 w-8 text-gray-400" />
+                <div className="w-20 h-20 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center shadow-sm">
+                  <PlusIcon className="h-10 w-10 text-indigo-400" />
                 </div>
-                <h3 className="text-lg font-medium text-gray-600 mb-1">Build your workflow</h3>
-                <p className="text-sm text-gray-500 max-w-sm">
-                  Drag playbooks from the palette on the left, or click the + button to add steps to your workflow.
+                <h3 className="text-xl font-semibold text-gray-700 mb-2">Build your workflow</h3>
+                <p className="text-sm text-gray-400 max-w-sm mx-auto mb-5">
+                  Drag playbooks from the palette on the left, or click the + button to add steps to your pipeline.
                 </p>
+                <button
+                  onClick={() => { setPaletteTab('workflows'); setLibraryTab('templates'); loadSavedWorkflows(); loadWorkflowTemplates(); }}
+                  className="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 hover:shadow-sm transition-all inline-flex items-center gap-2"
+                >
+                  <RocketLaunchIcon className="h-4 w-4" />
+                  Start from a template
+                </button>
               </div>
             </div>
           ) : (
@@ -1323,29 +1888,29 @@ const WorkflowBuilder = () => {
           const activeStep = workflowSteps.find(s => s.id === activeOutputStepId);
           if (!activeStep || !(activeStep.logs || []).length) return null;
           return (
-            <div className="mt-3 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
+            <div className="mt-3 bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-2.5 bg-gradient-to-r from-slate-800 to-slate-900">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-gray-700">Output:</span>
-                  <span className="text-sm text-gray-600">{activeStep.name}</span>
+                  <span className="text-sm font-semibold text-slate-300">Output:</span>
+                  <span className="text-sm text-white font-medium">{activeStep.name}</span>
                   {activeStep.status === 'running' && (
-                    <ArrowPathIcon className="h-4 w-4 text-blue-500 animate-spin" />
+                    <ArrowPathIcon className="h-4 w-4 text-blue-400 animate-spin" />
                   )}
                   {activeStep.status === 'completed' && (
-                    <CheckCircleIcon className="h-4 w-4 text-green-500" />
+                    <CheckCircleIcon className="h-4 w-4 text-emerald-400" />
                   )}
                   {activeStep.status === 'failed' && (
-                    <XCircleIcon className="h-4 w-4 text-red-500" />
+                    <XCircleIcon className="h-4 w-4 text-red-400" />
                   )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">{activeStep.logs.length} lines</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-slate-400 font-mono">{activeStep.logs.length} lines</span>
                   <button
                     onClick={() => setActiveOutputStepId(null)}
-                    className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                    className="p-1 text-slate-400 hover:text-white transition-colors"
                     title="Close output"
                   >
-                    <XCircleIcon className="h-4 w-4" />
+                    <XMarkIcon className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -1355,37 +1920,98 @@ const WorkflowBuilder = () => {
         })()}
       </div>
 
-      {/* Save dialog */}
+      {/* Enhanced Save dialog */}
       {showSaveDialog && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-96">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Save Workflow</h3>
-            <input
-              type="text"
-              value={workflowName}
-              onChange={(e) => setWorkflowName(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 mb-4 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Workflow name..."
-              autoFocus
-            />
-            <div className="flex justify-end gap-2">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowSaveDialog(false); setShowOverwriteConfirm(false); }}>
+          <div className="bg-white rounded-xl shadow-2xl w-[440px] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-4">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <BookmarkIcon className="h-5 w-5" />
+                Save Workflow
+              </h3>
+              <p className="text-indigo-200 text-sm mt-0.5">
+                {workflowSteps.length} step{workflowSteps.length !== 1 ? 's' : ''} will be saved
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Workflow Name</label>
+                <input
+                  type="text"
+                  value={workflowName}
+                  onChange={(e) => setWorkflowName(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                  placeholder="e.g., Full E2E Test Suite"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description <span className="text-gray-400 font-normal">(optional)</span></label>
+                <textarea
+                  value={saveDescription}
+                  onChange={(e) => setSaveDescription(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm resize-none"
+                  rows={2}
+                  placeholder="What does this workflow do?"
+                />
+              </div>
+
+              {/* Step preview */}
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Steps Preview</p>
+                <div className="space-y-1">
+                  {workflowSteps.slice(0, 5).map((step, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm text-gray-700">
+                      <span className="w-5 h-5 flex items-center justify-center rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold flex-shrink-0">
+                        {i + 1}
+                      </span>
+                      <span className="truncate">{step.name}</span>
+                    </div>
+                  ))}
+                  {workflowSteps.length > 5 && (
+                    <p className="text-xs text-gray-400 pl-7">+{workflowSteps.length - 5} more steps</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Overwrite warning */}
+              {showOverwriteConfirm && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+                  <span className="text-amber-500 text-lg leading-none mt-0.5">!</span>
+                  <div>
+                    <p className="text-sm font-medium text-amber-800">A workflow named &quot;{workflowName}&quot; already exists.</p>
+                    <p className="text-xs text-amber-600 mt-0.5">Click Save again to overwrite it.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 px-6 py-4 bg-gray-50 border-t border-gray-100">
               <button
-                onClick={() => setShowSaveDialog(false)}
-                className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                onClick={() => { setShowSaveDialog(false); setShowOverwriteConfirm(false); }}
+                className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={saveWorkflow}
                 disabled={!workflowName.trim()}
-                className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                className={`px-5 py-2 text-sm text-white rounded-lg transition-colors flex items-center gap-2 ${
+                  showOverwriteConfirm
+                    ? 'bg-amber-600 hover:bg-amber-700'
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                } disabled:opacity-50`}
               >
-                Save
+                <BookmarkIcon className="h-4 w-4" />
+                {showOverwriteConfirm ? 'Overwrite' : 'Save'}
               </button>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 };

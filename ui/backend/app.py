@@ -9068,392 +9068,22 @@ async def list_workflow_templates():
 # Cluster Actions / Feature Action Engine API
 # ============================================================================
 
-# Feature registry: maps Feature Test Dashboard suite groupings to actionable features
-# Each feature defines before/action/after states and which playbook/API handles the action
-CLUSTER_FEATURE_REGISTRY = {
-    "suites": [
-        {
-            "id": "cluster-config",
-            "name": "Cluster Configuration",
-            "description": "Core cluster provisioning features that are set at creation time",
-            "category": "Infrastructure",
-            "phase": "Day1",
-            "icon": "server",
-            "features": [
-                {
-                    "id": "private_network",
-                    "name": "Private Network",
-                    "description": "Enable private cluster networking (no public API endpoint)",
-                    "type": "boolean",
-                    "mutable": False,
-                    "default": False,
-                    "k8s_field": ".spec.endpointAccess",
-                    "resource": "ROSAControlPlane",
-                },
-                {
-                    "id": "byon",
-                    "name": "Bring Your Own Network (BYON)",
-                    "description": "Use pre-existing VPC and subnets instead of auto-created ones",
-                    "type": "boolean",
-                    "mutable": False,
-                    "default": False,
-                    "k8s_field": ".spec.network",
-                    "resource": "ROSAControlPlane",
-                },
-                {
-                    "id": "sts",
-                    "name": "STS Mode",
-                    "description": "Use AWS Security Token Service for authentication",
-                    "type": "boolean",
-                    "mutable": False,
-                    "default": True,
-                    "k8s_field": ".spec.sts",
-                    "resource": "ROSAControlPlane",
-                },
-                {
-                    "id": "availability_zones",
-                    "name": "Availability Zones",
-                    "description": "Number of availability zones for HA (1-3)",
-                    "type": "select",
-                    "options": ["1", "2", "3"],
-                    "mutable": False,
-                    "default": "1",
-                    "k8s_field": ".spec.availabilityZones",
-                    "resource": "ROSANetwork",
-                },
-                {
-                    "id": "additional_tags",
-                    "name": "Additional Tags",
-                    "description": "Custom AWS tags applied to all cluster resources",
-                    "type": "key_value",
-                    "mutable": True,
-                    "default": {},
-                    "k8s_field": ".spec.additionalTags",
-                    "resource": "ROSAControlPlane",
-                },
-            ],
-        },
-        {
-            "id": "security-auth",
-            "name": "Security & Authentication",
-            "description": "Identity, encryption, and access control features",
-            "category": "Security",
-            "phase": "Day1",
-            "icon": "shield",
-            "features": [
-                {
-                    "id": "identity_provider",
-                    "name": "Identity Provider",
-                    "description": "Configure cluster identity provider (LDAP, GitHub, etc.)",
-                    "type": "select",
-                    "options": ["none", "htpasswd", "ldap", "github", "google"],
-                    "mutable": True,
-                    "default": "none",
-                    "k8s_field": ".spec.identityProviders",
-                    "resource": "ROSAControlPlane",
-                },
-                {
-                    "id": "external_oidc",
-                    "name": "External OIDC",
-                    "description": "Use external OIDC provider for cluster authentication",
-                    "type": "boolean",
-                    "mutable": False,
-                    "default": False,
-                    "k8s_field": ".spec.externalOIDC",
-                    "resource": "ROSAControlPlane",
-                },
-                {
-                    "id": "security_groups",
-                    "name": "Additional Security Groups",
-                    "description": "Attach extra AWS security groups to cluster nodes",
-                    "type": "list",
-                    "mutable": True,
-                    "default": [],
-                    "k8s_field": ".spec.additionalSecurityGroups",
-                    "resource": "ROSAControlPlane",
-                },
-                {
-                    "id": "etcd_kms",
-                    "name": "ETCD KMS Encryption",
-                    "description": "Encrypt etcd data with AWS KMS key",
-                    "type": "string",
-                    "mutable": False,
-                    "default": "",
-                    "k8s_field": ".spec.etcdEncryptionKMSARN",
-                    "resource": "ROSAControlPlane",
-                    "placeholder": "arn:aws:kms:...",
-                },
-            ],
-        },
-        {
-            "id": "machine-pool-scaling",
-            "name": "Machine Pool & Auto-Scaling",
-            "description": "Worker node pools, autoscaling, and upgrade strategies",
-            "category": "Scaling",
-            "phase": "Day1",
-            "icon": "scale",
-            "features": [
-                {
-                    "id": "default_autoscaling",
-                    "name": "Default MachinePool Auto Scaling",
-                    "description": "Enable autoscaling on the default machine pool",
-                    "type": "range",
-                    "mutable": True,
-                    "default": {"min": 2, "max": 4},
-                    "k8s_field": ".spec.autoscaling",
-                    "resource": "ROSAMachinePool",
-                },
-                {
-                    "id": "machine_pool_autoscaling",
-                    "name": "Additional Machine Pool",
-                    "description": "Create additional machine pool with autoscaling",
-                    "type": "range",
-                    "mutable": True,
-                    "default": {"min": 1, "max": 3},
-                    "k8s_field": ".spec.autoscaling",
-                    "resource": "ROSAMachinePool",
-                },
-                {
-                    "id": "parallel_upgrade",
-                    "name": "Parallel Node Upgrade",
-                    "description": "Upgrade multiple nodes simultaneously during rolling updates",
-                    "type": "number",
-                    "mutable": True,
-                    "default": 1,
-                    "k8s_field": ".spec.strategy.rollingUpdate.maxSurge",
-                    "resource": "ROSAMachinePool",
-                },
-            ],
-        },
-        {
-            "id": "version-lifecycle",
-            "name": "Version & Lifecycle",
-            "description": "Cluster version management and upgrade operations",
-            "category": "Operations",
-            "phase": "Day2",
-            "icon": "arrow-up",
-            "features": [
-                {
-                    "id": "control_plane_upgrade",
-                    "name": "Control Plane Upgrade",
-                    "description": "Upgrade the ROSA HCP control plane version",
-                    "type": "version",
-                    "mutable": True,
-                    "default": "",
-                    "k8s_field": ".spec.version",
-                    "resource": "ROSAControlPlane",
-                    "playbook": "playbooks/upgrade_rosa_control_plane.yml",
-                    "wait_resource": "ROSAControlPlane",
-                    "wait_field": ".status.ready",
-                    "wait_value": "true",
-                    "wait_timeout": 3600,
-                },
-                {
-                    "id": "machine_pool_upgrade",
-                    "name": "Machine Pool Upgrade",
-                    "description": "Upgrade worker node pool version (must match or trail control plane)",
-                    "type": "version",
-                    "mutable": True,
-                    "default": "",
-                    "k8s_field": ".spec.version",
-                    "resource": "ROSAMachinePool",
-                    "playbook": "playbooks/upgrade_rosa_machine_pool.yml",
-                    "wait_resource": "ROSAMachinePool",
-                    "wait_field": ".status.ready",
-                    "wait_value": "true",
-                    "wait_timeout": 3600,
-                    "depends_on": "control_plane_upgrade",
-                },
-                {
-                    "id": "channel_group",
-                    "name": "Channel Group",
-                    "description": "Update channel for version availability (stable, fast, candidate)",
-                    "type": "select",
-                    "options": ["stable", "fast", "candidate"],
-                    "mutable": True,
-                    "default": "stable",
-                    "k8s_field": ".spec.channelGroup",
-                    "resource": "ROSAControlPlane",
-                },
-            ],
-        },
-        {
-            "id": "node-config",
-            "name": "Node Configuration",
-            "description": "Machine pool node types, disk sizes, taints, and labels",
-            "category": "Node Configuration",
-            "phase": "Day1",
-            "icon": "cpu",
-            "features": [
-                {
-                    "id": "instance_type",
-                    "name": "Instance Type",
-                    "description": "AWS EC2 instance type for worker nodes",
-                    "type": "select",
-                    "options": ["m5.xlarge", "m5.2xlarge", "m5.4xlarge", "m6i.xlarge", "m6i.2xlarge", "c5.xlarge", "r5.xlarge"],
-                    "mutable": False,
-                    "default": "m5.xlarge",
-                    "k8s_field": ".spec.instanceType",
-                    "resource": "ROSAMachinePool",
-                },
-                {
-                    "id": "disk_size",
-                    "name": "Root Disk Size (GiB)",
-                    "description": "Worker node root volume size",
-                    "type": "number",
-                    "mutable": False,
-                    "default": 300,
-                    "k8s_field": ".spec.rootVolume.size",
-                    "resource": "ROSAMachinePool",
-                },
-                {
-                    "id": "node_taints",
-                    "name": "Node Taints",
-                    "description": "Kubernetes taints applied to worker nodes",
-                    "type": "key_value",
-                    "mutable": True,
-                    "default": {},
-                    "k8s_field": ".spec.taints",
-                    "resource": "ROSAMachinePool",
-                },
-                {
-                    "id": "node_labels",
-                    "name": "Node Labels",
-                    "description": "Kubernetes labels applied to worker nodes",
-                    "type": "key_value",
-                    "mutable": True,
-                    "default": {},
-                    "k8s_field": ".spec.nodeLabels",
-                    "resource": "ROSAMachinePool",
-                },
-            ],
-        },
-        {
-            "id": "network-connectivity",
-            "name": "Network & Connectivity",
-            "description": "CNI, proxy, and network configuration",
-            "category": "Networking",
-            "phase": "Day1",
-            "icon": "globe",
-            "features": [
-                {
-                    "id": "no_cni",
-                    "name": "No CNI Plugin",
-                    "description": "Deploy cluster without default CNI (BYO CNI)",
-                    "type": "boolean",
-                    "mutable": False,
-                    "default": False,
-                    "k8s_field": ".spec.network.noCNI",
-                    "resource": "ROSAControlPlane",
-                },
-                {
-                    "id": "proxy_enabled",
-                    "name": "Proxy Enabled",
-                    "description": "Route cluster traffic through HTTP/HTTPS proxy",
-                    "type": "boolean",
-                    "mutable": True,
-                    "default": False,
-                    "k8s_field": ".spec.proxy",
-                    "resource": "ROSAControlPlane",
-                },
-            ],
-        },
-        {
-            "id": "storage-registry",
-            "name": "Storage & Registry",
-            "description": "Image registry and storage volume configuration",
-            "category": "Storage",
-            "phase": "Day1",
-            "icon": "database",
-            "features": [
-                {
-                    "id": "image_registry",
-                    "name": "Image Registry Config",
-                    "description": "Configure cluster internal image registry",
-                    "type": "boolean",
-                    "mutable": True,
-                    "default": True,
-                    "k8s_field": ".spec.imageRegistry",
-                    "resource": "ROSAControlPlane",
-                },
-                {
-                    "id": "disk_volume_size",
-                    "name": "MachinePool Disk Volume Size",
-                    "description": "Root volume disk size for machine pool nodes",
-                    "type": "number",
-                    "mutable": False,
-                    "default": 300,
-                    "k8s_field": ".spec.rootVolume.size",
-                    "resource": "ROSAMachinePool",
-                },
-            ],
-        },
-        {
-            "id": "domain-useragent",
-            "name": "Domain & User Agent",
-            "description": "Domain prefix and ROSA CAPA user agent configuration",
-            "category": "Configuration",
-            "phase": "Day1",
-            "icon": "tag",
-            "features": [
-                {
-                    "id": "domain_prefix",
-                    "name": "Domain Prefix",
-                    "description": "Custom domain prefix for cluster API URL (max 15 chars)",
-                    "type": "string",
-                    "mutable": False,
-                    "default": "",
-                    "k8s_field": ".spec.domainPrefix",
-                    "resource": "ROSAControlPlane",
-                    "placeholder": "my-cluster",
-                    "max_length": 15,
-                },
-                {
-                    "id": "user_agent",
-                    "name": "User Agent for ROSA CAPA",
-                    "description": "Custom user agent string sent with ROSA API requests",
-                    "type": "string",
-                    "mutable": True,
-                    "default": "",
-                    "k8s_field": ".spec.userAgent",
-                    "resource": "ROSAControlPlane",
-                },
-            ],
-        },
-        {
-            "id": "day2-operations",
-            "name": "Day2 Operations",
-            "description": "Post-deployment cluster management and monitoring",
-            "category": "Operations",
-            "phase": "Day2",
-            "icon": "wrench",
-            "features": [
-                {
-                    "id": "cluster_delete",
-                    "name": "Cluster Deletion",
-                    "description": "Delete cluster and clean up all AWS resources",
-                    "type": "action",
-                    "mutable": True,
-                    "default": None,
-                    "playbook": "playbooks/delete_rosa_hcp_cluster.yml",
-                    "wait_timeout": 2400,
-                    "destructive": True,
-                },
-                {
-                    "id": "audit_logging",
-                    "name": "Audit Log Forwarding",
-                    "description": "Forward cluster audit logs to CloudWatch or S3",
-                    "type": "select",
-                    "options": ["disabled", "cloudwatch", "s3"],
-                    "mutable": True,
-                    "default": "disabled",
-                    "k8s_field": ".spec.auditLogForwarding",
-                    "resource": "ROSAControlPlane",
-                },
-            ],
-        },
-    ]
-}
+# Feature registry: loaded from schemas/feature-registry.yml (single source of truth)
+_FEATURE_REGISTRY_PATH = os.path.join(_project_root, "schemas", "feature-registry.yml")
+
+
+def _load_feature_registry():
+    """Load feature registry from YAML. Returns dict with 'suites' key."""
+    try:
+        with open(_FEATURE_REGISTRY_PATH, "r") as f:
+            data = yaml.safe_load(f)
+        return {"suites": data.get("suites", [])}
+    except Exception as e:
+        print(f"WARNING: Failed to load feature registry from {_FEATURE_REGISTRY_PATH}: {e}")
+        return {"suites": []}
+
+
+CLUSTER_FEATURE_REGISTRY = _load_feature_registry()
 
 
 @app.get("/api/cluster-actions/features")
@@ -9881,6 +9511,355 @@ async def get_cluster_feature_status(cluster_name: str, namespace: str = "ns-ros
         status["error"] = str(e)
 
     return {"success": True, "cluster_name": cluster_name, "namespace": namespace, "status": status}
+
+
+# ============================================================================
+# ClusterAutomationSpec API - Declarative cluster lifecycle
+# ============================================================================
+
+SPECS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "specs"
+)
+
+FEATURE_REGISTRY_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "schemas", "feature-registry.yml"
+)
+
+
+def _load_feature_registry_yaml():
+    """Load the YAML feature registry (single source of truth)."""
+    try:
+        with open(FEATURE_REGISTRY_PATH) as f:
+            return yaml.safe_load(f)
+    except Exception:
+        return {}
+
+
+def _resolve_spec_to_plan(spec_data: dict) -> list:
+    """Resolve a ClusterAutomationSpec into an execution plan (list of steps)."""
+    registry_yaml = _load_feature_registry_yaml()
+    var_map = registry_yaml.get("var_map", {})
+    dependencies = registry_yaml.get("dependencies", {})
+    sequences = registry_yaml.get("sequences", {})
+
+    # Build feature lookup
+    features_by_id = {}
+    for suite in registry_yaml.get("suites", []):
+        for feat in suite.get("features", []):
+            features_by_id[feat["id"]] = feat
+
+    spec = spec_data.get("spec", {})
+    action = spec.get("action", "create")
+    steps = []
+
+    if action == "create":
+        extra_vars = {
+            "name_prefix": spec.get("name_prefix", ""),
+            "capi_namespace": spec.get("namespace", "ns-rosa-hcp"),
+            "aws_region": spec.get("region", "us-west-2"),
+            "channel_group": spec.get("channel", "stable"),
+        }
+        if spec.get("version"):
+            extra_vars["openshift_version"] = spec["version"]
+        for feat_id, value in spec.get("features", {}).items():
+            var_name = var_map.get(feat_id, feat_id)
+            extra_vars[var_name] = value
+
+        steps.append({
+            "step": 1,
+            "type": "playbook",
+            "name": f"Create cluster {spec.get('name_prefix', 'new')}-rosa-hcp",
+            "playbook": "playbooks/create_rosa_hcp_cluster.yml",
+            "extra_vars": extra_vars,
+            "features_used": list(spec.get("features", {}).keys()),
+        })
+
+    elif action == "upgrade":
+        cluster = spec.get("cluster", "")
+        version = spec.get("version", "")
+        namespace = spec.get("namespace", "ns-rosa-hcp")
+        cp = features_by_id.get("control_plane_upgrade", {})
+        mp = features_by_id.get("machine_pool_upgrade", {})
+
+        steps.append({
+            "step": 1, "type": "playbook",
+            "name": f"Upgrade control plane to {version}",
+            "playbook": cp.get("playbook", "playbooks/upgrade_rosa_control_plane.yml"),
+            "extra_vars": {"cluster_name": cluster, "capi_namespace": namespace, "requested_version": version},
+            "feature": "control_plane_upgrade",
+            "wait_timeout": cp.get("wait_timeout", 3600),
+        })
+        steps.append({
+            "step": 2, "type": "playbook",
+            "name": f"Upgrade machine pool to {version}",
+            "playbook": mp.get("playbook", "playbooks/upgrade_rosa_machine_pool.yml"),
+            "extra_vars": {"cluster_name": cluster, "capi_namespace": namespace, "requested_version": version},
+            "feature": "machine_pool_upgrade",
+            "depends_on": "control_plane_upgrade",
+            "wait_timeout": mp.get("wait_timeout", 3600),
+        })
+
+    elif action == "apply":
+        cluster = spec.get("cluster", "")
+        namespace = spec.get("namespace", "ns-rosa-hcp")
+        for i, act in enumerate(spec.get("actions", [])):
+            feat_id = act.get("feature", "")
+            value = act.get("value")
+            feature = features_by_id.get(feat_id, {})
+            deps = dependencies.get(feat_id, [])
+
+            if feature.get("playbook"):
+                extra_vars = {"cluster_name": cluster, "capi_namespace": namespace}
+                if feat_id in ("control_plane_upgrade", "machine_pool_upgrade") and value:
+                    extra_vars["requested_version"] = str(value)
+                steps.append({
+                    "step": i + 1, "type": "playbook",
+                    "name": feature.get("name", feat_id),
+                    "playbook": feature["playbook"],
+                    "extra_vars": extra_vars,
+                    "feature": feat_id,
+                    "depends_on": deps[0] if deps else None,
+                    "wait_timeout": feature.get("wait_timeout", 600),
+                })
+            else:
+                steps.append({
+                    "step": i + 1, "type": "patch",
+                    "name": f"{feature.get('name', feat_id)} = {value}",
+                    "resource": feature.get("resource", ""),
+                    "k8s_field": feature.get("k8s_field", ""),
+                    "value": value,
+                    "cluster": cluster, "namespace": namespace,
+                    "feature": feat_id,
+                    "depends_on": deps[0] if deps else None,
+                })
+
+    elif action == "delete":
+        cluster = spec.get("cluster", "")
+        namespace = spec.get("namespace", "ns-rosa-hcp")
+        steps.append({
+            "step": 1, "type": "playbook",
+            "name": f"Delete cluster {cluster}",
+            "playbook": "playbooks/delete_rosa_hcp_cluster.yml",
+            "extra_vars": {"cluster_name": cluster, "capi_namespace": namespace},
+            "feature": "cluster_delete",
+        })
+
+    return steps
+
+
+@app.get("/api/cluster-specs")
+async def list_cluster_specs():
+    """List available ClusterAutomationSpec specs by category."""
+    specs = []
+    if os.path.isdir(SPECS_DIR):
+        for root, dirs, files in os.walk(SPECS_DIR):
+            category = os.path.basename(root) if root != SPECS_DIR else "uncategorized"
+            for fname in sorted(files):
+                if not (fname.endswith(".yml") or fname.endswith(".yaml")):
+                    continue
+                try:
+                    with open(os.path.join(root, fname)) as f:
+                        data = yaml.safe_load(f)
+                    spec_section = data.get("spec", {})
+                    specs.append({
+                        "id": os.path.splitext(fname)[0],
+                        "name": data.get("metadata", {}).get("name", fname),
+                        "action": spec_section.get("action", ""),
+                        "features": list(spec_section.get("features", {}).keys()),
+                        "version": spec_section.get("version", ""),
+                        "region": spec_section.get("region", ""),
+                        "category": category,
+                    })
+                except Exception:
+                    continue
+    return {"success": True, "specs": specs}
+
+
+def _find_spec_file(spec_id: str) -> str:
+    """Search specs/ subdirectories for a spec by ID."""
+    for root, dirs, files in os.walk(SPECS_DIR):
+        for ext in (".yml", ".yaml"):
+            candidate = os.path.join(root, f"{spec_id}{ext}")
+            if os.path.exists(candidate):
+                return candidate
+    return ""
+
+
+@app.get("/api/cluster-specs/{spec_id}")
+async def get_cluster_spec(spec_id: str):
+    """Get a specific ClusterAutomationSpec by ID."""
+    spec_path = _find_spec_file(spec_id)
+    if not spec_path:
+        return {"success": False, "error": f"Spec not found: {spec_id}"}
+    try:
+        with open(spec_path) as f:
+            data = yaml.safe_load(f)
+        return {"success": True, "spec": data}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/cluster-specs/plan")
+async def plan_cluster_spec(request: Request):
+    """Resolve a ClusterAutomationSpec into an execution plan (dry run)."""
+    body = await request.json()
+    spec_data = body.get("spec")
+
+    # If spec_id provided, load from file
+    if not spec_data and body.get("spec_id"):
+        spec_path = _find_spec_file(body["spec_id"])
+        if spec_path:
+            with open(spec_path) as f:
+                spec_data = yaml.safe_load(f)
+
+    if not spec_data:
+        return {"success": False, "error": "No spec provided"}
+
+    # Apply overrides
+    overrides = body.get("overrides", {})
+    for k, v in overrides.items():
+        if k in ("cluster", "namespace", "version", "region", "channel", "name_prefix", "action"):
+            spec_data.setdefault("spec", {})[k] = v
+
+    try:
+        plan = _resolve_spec_to_plan(spec_data)
+        return {"success": True, "plan": plan, "step_count": len(plan)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/cluster-specs/execute")
+async def execute_cluster_spec(request: Request):
+    """Execute a ClusterAutomationSpec — resolves to plan and runs each step."""
+    body = await request.json()
+    spec_data = body.get("spec")
+
+    if not spec_data and body.get("spec_id"):
+        spec_path = _find_spec_file(body["spec_id"])
+        if spec_path:
+            with open(spec_path) as f:
+                spec_data = yaml.safe_load(f)
+
+    if not spec_data:
+        return {"success": False, "error": "No spec provided"}
+
+    overrides = body.get("overrides", {})
+    for k, v in overrides.items():
+        if k in ("cluster", "namespace", "version", "region", "channel", "name_prefix", "action"):
+            spec_data.setdefault("spec", {})[k] = v
+
+    try:
+        plan = _resolve_spec_to_plan(spec_data)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    # Execute each step through the existing job system
+    results = []
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    for step in plan:
+        if step["type"] == "playbook":
+            playbook_path = os.path.join(project_root, step["playbook"])
+            if not os.path.exists(playbook_path):
+                results.append({"step": step["step"], "name": step["name"],
+                                "status": "error", "message": f"Playbook not found: {step['playbook']}"})
+                continue
+
+            job_id = str(uuid.uuid4())
+            description = f"[Spec] {step['name']}"
+            jobs[job_id] = {
+                "id": job_id, "status": "pending", "progress": 0,
+                "message": f"Queued: {description}", "logs": [],
+                "created_at": datetime.now(), "playbook": step["playbook"],
+                "description": description,
+            }
+            init_ai_agents(job_id)
+            asyncio.create_task(
+                run_playbook_background(step["playbook"], step.get("extra_vars", {}), job_id, description)
+            )
+            results.append({
+                "step": step["step"], "name": step["name"],
+                "status": "running", "job_id": job_id,
+                "feature": step.get("feature", ""),
+                "depends_on": step.get("depends_on"),
+                "playbook": step["playbook"],
+            })
+
+        elif step["type"] == "patch":
+            resource = step.get("resource", "").lower()
+            field = step.get("k8s_field", "")
+            value = step.get("value")
+            cluster = step.get("cluster", "")
+            namespace = step.get("namespace", "ns-rosa-hcp")
+
+            field_parts = [p for p in field.split(".") if p]
+            patch_obj = {}
+            current = patch_obj
+            for i, part in enumerate(field_parts):
+                if i == len(field_parts) - 1:
+                    current[part] = value
+                else:
+                    current[part] = {}
+                    current = current[part]
+
+            cmd = ["oc", "patch", resource, cluster, "-n", namespace,
+                   "--type=merge", "-p", json.dumps(patch_obj)]
+
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                if result.returncode == 0:
+                    results.append({"step": step["step"], "name": step["name"],
+                                    "status": "completed", "feature": step.get("feature", "")})
+                else:
+                    results.append({"step": step["step"], "name": step["name"],
+                                    "status": "error", "message": result.stderr.strip(),
+                                    "feature": step.get("feature", "")})
+            except Exception as e:
+                results.append({"step": step["step"], "name": step["name"],
+                                "status": "error", "message": str(e),
+                                "feature": step.get("feature", "")})
+
+    return {
+        "success": True,
+        "spec_name": spec_data.get("metadata", {}).get("name", ""),
+        "action": spec_data.get("spec", {}).get("action", ""),
+        "step_count": len(plan),
+        "results": results,
+    }
+
+
+@app.post("/api/cluster-specs/save")
+async def save_cluster_spec(request: Request):
+    """Save a ClusterAutomationSpec to the specs directory."""
+    body = await request.json()
+    spec_data = body.get("spec")
+    spec_id = body.get("id", "")
+
+    if not spec_data or not spec_id:
+        return {"success": False, "error": "spec and id required"}
+
+    # Sanitize filename
+    safe_id = "".join(c for c in spec_id if c.isalnum() or c in "-_").strip()
+    if not safe_id:
+        return {"success": False, "error": "Invalid spec id"}
+
+    # Determine category subdirectory based on action
+    action = spec_data.get("spec", {}).get("action", "apply")
+    category = body.get("category", "")
+    if not category:
+        category = "profiles" if action == "create" else "features"
+    save_dir = os.path.join(SPECS_DIR, category)
+    os.makedirs(save_dir, exist_ok=True)
+    spec_path = os.path.join(save_dir, f"{safe_id}.yml")
+
+    try:
+        with open(spec_path, "w") as f:
+            yaml.dump(spec_data, f, default_flow_style=False, sort_keys=False)
+        return {"success": True, "id": safe_id, "path": spec_path}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # ============================================================================

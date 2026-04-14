@@ -1,0 +1,82 @@
+[
+  {
+    "id": "wf-a08f4af306af",
+    "name": "verify_and_configure",
+    "description": "",
+    "stopOnFailure": true,
+    "globalVars": {},
+    "steps": [
+      {
+        "name": "Verify MCE Environment",
+        "description": "Validate MCE/CAPI/CAPA environment configuration before provisioning",
+        "file": "playbooks/verify_capi_environment.yaml",
+        "suiteName": "Verify MCE Environment",
+        "required": false,
+        "onFailure": "stop",
+        "timeout": 600,
+        "extra_vars": {}
+      },
+      {
+        "name": "Configure MCE Environment",
+        "description": "Set up MCE environment for CAPI/CAPA cluster provisioning",
+        "file": "playbooks/configure_mce_environment.yml",
+        "suiteName": "Configure MCE Environment",
+        "required": true,
+        "onFailure": "stop",
+        "timeout": 600,
+        "extra_vars": {}
+      }
+    ],
+    "savedAt": "2026-04-13T10:28:56.741919"
+  },
+  {
+    "id": "wf-d9dc4f951afa",
+    "name": "verify_configure_provision",
+    "description": "",
+    "stopOnFailure": true,
+    "globalVars": {},
+    "steps": [
+      {
+        "name": "Verify MCE Environment",
+        "description": "Validate MCE/CAPI/CAPA environment configuration before provisioning",
+        "file": "playbooks/verify_capi_environment.yaml",
+        "suiteName": "Verify MCE Environment",
+        "required": false,
+        "onFailure": "stop",
+        "timeout": 600,
+        "extra_vars": {}
+      },
+      {
+        "name": "Configure MCE Environment",
+        "description": "Set up MCE environment for CAPI/CAPA cluster provisioning",
+        "file": "playbooks/configure_mce_environment.yml",
+        "suiteName": "Configure MCE Environment",
+        "required": true,
+        "onFailure": "stop",
+        "timeout": 600,
+        "extra_vars": {}
+      },
+      {
+        "name": "Provision ROSA HCP Cluster",
+        "description": "Provision a ROSA HCP cluster using CAPA with automated network and role configuration, including wait for cluster readiness (RHACM4K-61815)",
+        "file": "playbooks/create_rosa_hcp_cluster.yml",
+        "suiteName": "Provision ROSA HCP Cluster",
+        "required": false,
+        "onFailure": "stop",
+        "timeout": 600,
+        "extra_vars": {
+          "name_prefix": "lop",
+          "openshift_version": "4.20.10",
+          "create_rosa_network": true,
+          "create_rosa_role_config": true,
+          "vpc_cidr_block": "10.0.0.0/16",
+          "availability_zone_count": 1,
+          "aws_region": "us-west-2",
+          "channel_group": "stable",
+          "capi_namespace": "ns-rosa-hcp"
+        }
+      }
+    ],
+    "savedAt": "2026-04-13T10:29:40.143876"
+  }
+]

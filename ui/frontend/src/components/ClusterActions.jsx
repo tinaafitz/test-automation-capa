@@ -468,14 +468,326 @@ const HistoryPanel = ({ clusterName, isOpen, onClose }) => {
 };
 
 // ============================================================================
+// Spec Builder Panel
+// ============================================================================
+const SpecBuilder = ({ clusterName, namespace, clusterStatus, onExecute, onClose }) => {
+  const [specs, setSpecs] = useState([]);
+  const [selectedSpec, setSelectedSpec] = useState(null);
+  const [specData, setSpecData] = useState(null);
+  const [plan, setPlan] = useState(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [overrides, setOverrides] = useState({});
+  const [activeTab, setActiveTab] = useState('profiles'); // profiles | custom
+
+  // Load available specs
+  useEffect(() => {
+    fetch(buildApiUrl('/api/cluster-specs'))
+      .then(r => r.ok ? r.json() : { specs: [] })
+      .then(data => setSpecs(data.specs || []))
+      .catch(() => setSpecs([]));
+  }, []);
+
+  // Load spec details when selected
+  useEffect(() => {
+    if (!selectedSpec) { setSpecData(null); setPlan(null); return; }
+    fetch(buildApiUrl(`/api/cluster-specs/${selectedSpec}`))
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.success) setSpecData(data.spec);
+      })
+      .catch(() => setSpecData(null));
+  }, [selectedSpec]);
+
+  const generatePlan = async () => {
+    if (!specData) return;
+    setPlanLoading(true);
+    setPlan(null);
+    try {
+      const finalOverrides = { ...overrides };
+      if (clusterName && !finalOverrides.cluster) finalOverrides.cluster = clusterName;
+      if (namespace && !finalOverrides.namespace) finalOverrides.namespace = namespace;
+
+      const res = await fetch(buildApiUrl('/api/cluster-specs/plan'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spec: specData, overrides: finalOverrides }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) setPlan(data.plan);
+      }
+    } catch (e) { console.error('Plan failed:', e); }
+    finally { setPlanLoading(false); }
+  };
+
+  const executeSpec = async () => {
+    if (!specData) return;
+    setExecuting(true);
+    try {
+      const finalOverrides = { ...overrides };
+      if (clusterName && !finalOverrides.cluster) finalOverrides.cluster = clusterName;
+      if (namespace && !finalOverrides.namespace) finalOverrides.namespace = namespace;
+
+      const res = await fetch(buildApiUrl('/api/cluster-specs/execute'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spec: specData, overrides: finalOverrides }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && onExecute) {
+          onExecute(data.results);
+        }
+      }
+    } catch (e) { console.error('Execute failed:', e); }
+    finally { setExecuting(false); }
+  };
+
+  const actionIcons = { create: '🚀', upgrade: '⬆️', apply: '🔧', delete: '🗑️', test: '🧪' };
+  const actionColors = {
+    create: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    upgrade: 'bg-blue-100 text-blue-700 border-blue-200',
+    apply: 'bg-amber-100 text-amber-700 border-amber-200',
+    delete: 'bg-red-100 text-red-700 border-red-200',
+    test: 'bg-purple-100 text-purple-700 border-purple-200',
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-violet-600 to-purple-600">
+        <div className="flex items-center gap-2">
+          <span className="text-sm">📋</span>
+          <span className="text-sm font-semibold text-white">Cluster Specs</span>
+          <span className="text-xs text-white/60 ml-1">Declarative cluster lifecycle</span>
+        </div>
+        <button onClick={onClose} className="p-1 text-white/70 hover:text-white transition-colors">
+          <XMarkIcon className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200">
+        {[['profiles', 'Profiles'], ['custom', 'Custom Spec']].map(([id, label]) => (
+          <button key={id} onClick={() => setActiveTab(id)}
+            className={`flex-1 text-xs font-medium py-2.5 transition-colors ${
+              activeTab === id ? 'text-violet-700 border-b-2 border-violet-600 bg-violet-50' : 'text-gray-500 hover:text-gray-700'
+            }`}>{label}</button>
+        ))}
+      </div>
+
+      <div className="p-4 space-y-4">
+        {activeTab === 'profiles' && (
+          <>
+            {/* Spec cards grouped by category (Day2 only — create profiles live in New Cluster) */}
+            {[['features', 'Features', 'Individual actions'], ['workflows', 'Workflows', 'Multi-step sequences']].map(([cat, label, desc]) => {
+              const catSpecs = specs.filter(s => s.category === cat);
+              if (catSpecs.length === 0) return null;
+              return (
+                <div key={cat}>
+                  <div className="flex items-baseline gap-2 mb-2">
+                    <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">{label}</h4>
+                    <span className="text-[10px] text-gray-400">{desc}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {catSpecs.map(spec => (
+                      <button key={spec.id} onClick={() => setSelectedSpec(spec.id)}
+                        className={`text-left p-3 rounded-xl border-2 transition-all ${
+                          selectedSpec === spec.id
+                            ? 'border-violet-400 bg-violet-50 ring-1 ring-violet-200 shadow-sm'
+                            : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'
+                        }`}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{actionIcons[spec.action] || '▶️'}</span>
+                          <span className="text-sm font-semibold text-gray-900">{spec.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${actionColors[spec.action] || 'bg-gray-100 text-gray-600'}`}>
+                            {spec.action}
+                          </span>
+                          {spec.version && <span className="text-[10px] font-mono text-gray-500">v{spec.version}</span>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Overrides */}
+            {selectedSpec && specData && (
+              <div className="space-y-3 bg-gray-50 rounded-xl p-4 border border-gray-200">
+                <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Overrides</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {specData.spec?.action === 'create' && (
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-500 uppercase">Name Prefix</label>
+                      <input type="text" placeholder="e.g., test1"
+                        value={overrides.name_prefix || ''} onChange={e => setOverrides(prev => ({ ...prev, name_prefix: e.target.value }))}
+                        className="w-full text-sm border border-gray-300 rounded-lg px-2.5 py-1.5 mt-0.5 focus:ring-2 focus:ring-violet-500" />
+                    </div>
+                  )}
+                  {['upgrade', 'apply', 'delete'].includes(specData.spec?.action) && (
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-500 uppercase">Cluster</label>
+                      <input type="text" placeholder={clusterName || 'cluster name'}
+                        value={overrides.cluster || clusterName || ''} onChange={e => setOverrides(prev => ({ ...prev, cluster: e.target.value }))}
+                        className="w-full text-sm border border-gray-300 rounded-lg px-2.5 py-1.5 mt-0.5 focus:ring-2 focus:ring-violet-500" />
+                    </div>
+                  )}
+                  {specData.spec?.action === 'upgrade' && (
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-500 uppercase">Target Version</label>
+                      {clusterStatus?.available_upgrades?.length > 0 ? (
+                        <select value={overrides.version || ''} onChange={e => setOverrides(prev => ({ ...prev, version: e.target.value }))}
+                          className="w-full text-sm border border-gray-300 rounded-lg px-2.5 py-1.5 mt-0.5 focus:ring-2 focus:ring-violet-500">
+                          <option value="">Select version...</option>
+                          {clusterStatus.available_upgrades.map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      ) : (
+                        <input type="text" placeholder="4.20.12"
+                          value={overrides.version || ''} onChange={e => setOverrides(prev => ({ ...prev, version: e.target.value }))}
+                          className="w-full text-sm border border-gray-300 rounded-lg px-2.5 py-1.5 mt-0.5 focus:ring-2 focus:ring-violet-500" />
+                      )}
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-[10px] font-medium text-gray-500 uppercase">Region</label>
+                    <select value={overrides.region || specData.spec?.region || 'us-west-2'}
+                      onChange={e => setOverrides(prev => ({ ...prev, region: e.target.value }))}
+                      className="w-full text-sm border border-gray-300 rounded-lg px-2.5 py-1.5 mt-0.5 focus:ring-2 focus:ring-violet-500">
+                      {['us-west-2', 'us-east-1', 'us-east-2', 'eu-west-1', 'ap-southeast-1'].map(r =>
+                        <option key={r} value={r}>{r}</option>
+                      )}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Show spec YAML preview */}
+                {specData.spec?.actions && specData.spec.actions.length > 0 && (
+                  <div className="mt-3">
+                    <label className="text-[10px] font-medium text-gray-500 uppercase">Action Sequence</label>
+                    <div className="mt-1 space-y-1">
+                      {specData.spec.actions.map((a, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs text-gray-700">
+                          <span className="text-gray-400 font-mono w-4 text-right">{i + 1}.</span>
+                          <span className="font-medium">{a.feature}</span>
+                          {a.value && <span className="font-mono text-gray-500">= {typeof a.value === 'object' ? JSON.stringify(a.value) : String(a.value)}</span>}
+                          {a.wait === false && <span className="text-[9px] px-1 bg-amber-100 text-amber-700 rounded">no-wait</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {specData.spec?.features && Object.keys(specData.spec.features).length > 0 && (
+                  <div className="mt-3">
+                    <label className="text-[10px] font-medium text-gray-500 uppercase">Features</label>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {Object.entries(specData.spec.features).map(([k, v]) => (
+                        <span key={k} className="text-[10px] px-2 py-0.5 bg-white border border-gray-200 rounded-full font-mono">
+                          {k}={typeof v === 'object' ? '...' : String(v)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Plan preview */}
+            {plan && (
+              <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                <div className="px-4 py-2 bg-slate-100 border-b border-slate-200">
+                  <span className="text-xs font-semibold text-slate-700">Execution Plan ({plan.length} step{plan.length !== 1 ? 's' : ''})</span>
+                </div>
+                <div className="p-3 space-y-2">
+                  {plan.map((step, i) => (
+                    <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white border border-slate-200">
+                      <span className="text-sm">{step.type === 'playbook' ? '📦' : '🔧'}</span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-medium text-gray-900">{step.name}</span>
+                        {step.depends_on && <span className="text-[10px] text-gray-400 ml-2">after {step.depends_on}</span>}
+                      </div>
+                      <span className="text-[9px] px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded-full uppercase font-semibold">{step.type}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === 'custom' && (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">Create specs via CLI or YAML files in <code className="bg-gray-100 px-1 rounded">specs/</code> directory:</p>
+            <div className="bg-gray-900 rounded-xl p-4 font-mono text-xs text-gray-300 space-y-1 overflow-x-auto">
+              <div><span className="text-gray-500"># Create from profile</span></div>
+              <div><span className="text-emerald-400">./capa</span> create --profile default -e name_prefix=test1</div>
+              <div className="mt-2"><span className="text-gray-500"># Upgrade (auto-sequences CP then MP)</span></div>
+              <div><span className="text-emerald-400">./capa</span> upgrade -c {clusterName || 'cluster-name'} --version 4.20.12</div>
+              <div className="mt-2"><span className="text-gray-500"># Apply Day2 actions from spec file</span></div>
+              <div><span className="text-emerald-400">./capa</span> apply -f specs/day2-test.yml -c {clusterName || 'cluster-name'}</div>
+              <div className="mt-2"><span className="text-gray-500"># Dry run (show plan only)</span></div>
+              <div><span className="text-emerald-400">./capa</span> plan --profile upgrade -c {clusterName || 'cluster-name'} -v 4.20.12</div>
+            </div>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+          {selectedSpec && specData && (
+            <>
+              <button onClick={generatePlan} disabled={planLoading}
+                className="px-4 py-2 text-xs font-medium text-violet-700 bg-white border border-violet-300 rounded-lg hover:bg-violet-50 disabled:opacity-40 flex items-center gap-1.5">
+                {planLoading ? <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" /> : <MagnifyingGlassIcon className="h-3.5 w-3.5" />}
+                Preview Plan
+              </button>
+              <button onClick={executeSpec} disabled={executing || !plan}
+                className="px-5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-purple-600 rounded-lg hover:from-violet-700 hover:to-purple-700 disabled:opacity-40 flex items-center gap-1.5">
+                {executing ? <><ArrowPathIcon className="h-3.5 w-3.5 animate-spin" /> Running...</> : <><PlayIcon className="h-3.5 w-3.5" /> Execute Spec</>}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
 // New Cluster Mode Panel
 // ============================================================================
 const NewClusterPanel = ({ registry, onClose, onProvision }) => {
   const [namePrefix, setNamePrefix] = useState('');
   const [selectedFeatures, setSelectedFeatures] = useState({});
   const [provisioning, setProvisioning] = useState(false);
+  const [createSpecs, setCreateSpecs] = useState([]);
+  const [selectedProfile, setSelectedProfile] = useState(null);
 
   const day1Suites = (registry?.suites || []).filter(s => s.phase === 'Day1');
+
+  // Load create-only spec profiles
+  useEffect(() => {
+    fetch(buildApiUrl('/api/cluster-specs'))
+      .then(r => r.ok ? r.json() : { specs: [] })
+      .then(data => setCreateSpecs((data.specs || []).filter(s => s.action === 'create')))
+      .catch(() => setCreateSpecs([]));
+  }, []);
+
+  const applyProfile = (specId) => {
+    if (selectedProfile === specId) { setSelectedProfile(null); return; }
+    setSelectedProfile(specId);
+    fetch(buildApiUrl(`/api/cluster-specs/${specId}`))
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.success && data.spec?.spec?.features) {
+          setSelectedFeatures(data.spec.spec.features);
+        }
+      })
+      .catch(() => {});
+  };
 
   const toggleFeature = (featureId, value) => {
     setSelectedFeatures(prev => {
@@ -537,9 +849,32 @@ const NewClusterPanel = ({ registry, onClose, onProvision }) => {
           {namePrefix && <p className="text-xs text-gray-400 mt-1">Cluster name: <span className="font-mono text-emerald-600">{namePrefix}-rosa-hcp</span></p>}
         </div>
 
+        {/* Profile presets */}
+        {createSpecs.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">Start from Profile <span className="text-gray-400 font-normal">(optional)</span></h4>
+            <div className="flex flex-wrap gap-2">
+              {createSpecs.map(spec => (
+                <button key={spec.id} onClick={() => applyProfile(spec.id)}
+                  className={`text-xs px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 ${
+                    selectedProfile === spec.id
+                      ? 'border-emerald-400 bg-emerald-50 text-emerald-700 font-semibold ring-1 ring-emerald-200'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                  }`}>
+                  <span>{spec.name}</span>
+                  {spec.features.length > 0 && <span className="text-[9px] text-gray-400">({spec.features.length})</span>}
+                </button>
+              ))}
+            </div>
+            {selectedProfile && (
+              <p className="text-[10px] text-emerald-600 mt-1.5">Profile applied — features pre-filled below. Customize as needed.</p>
+            )}
+          </div>
+        )}
+
         {/* Day1 feature selection */}
         <div>
-          <h4 className="text-sm font-semibold text-gray-700 mb-2">Day1 Features <span className="text-gray-400 font-normal">(optional)</span></h4>
+          <h4 className="text-sm font-semibold text-gray-700 mb-2">Day1 Features <span className="text-gray-400 font-normal">{selectedProfile ? '(from profile)' : '(optional)'}</span></h4>
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {day1Suites.map(suite => (
               <div key={suite.id}>
@@ -631,6 +966,7 @@ const ClusterActions = () => {
   const [discoveredClusters, setDiscoveredClusters] = useState(null);
   const [discovering, setDiscovering] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showSpecs, setShowSpecs] = useState(false);
   const [showNewCluster, setShowNewCluster] = useState(false);
   const [provisionResult, setProvisionResult] = useState(null);
 
@@ -750,16 +1086,22 @@ const ClusterActions = () => {
     }
   };
 
-  const filteredSuites = (registry?.suites || []).filter(suite => {
+  // Cluster Actions shows all features with applies_to including 'apply' (actionable on running clusters)
+  const actionableSuites = (registry?.suites || [])
+    .map(suite => ({
+      ...suite,
+      features: suite.features.filter(f => f.applies_to?.includes('apply')),
+    }))
+    .filter(suite => suite.features.length > 0);
+  const filteredSuites = actionableSuites.filter(suite => {
     const matchesSearch = !searchFilter || suite.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
       suite.description.toLowerCase().includes(searchFilter.toLowerCase()) ||
       suite.features.some(f => f.name.toLowerCase().includes(searchFilter.toLowerCase()));
-    const matchesPhase = phaseFilter === 'all' || suite.phase === phaseFilter;
-    return matchesSearch && matchesPhase;
+    return matchesSearch;
   });
 
-  const totalFeatures = (registry?.suites || []).reduce((acc, s) => acc + s.features.length, 0);
-  const mutableFeatures = (registry?.suites || []).reduce((acc, s) => acc + s.features.filter(f => f.mutable).length, 0);
+  const totalFeatures = actionableSuites.reduce((acc, s) => acc + s.features.length, 0);
+  const mutableFeatures = actionableSuites.reduce((acc, s) => acc + s.features.filter(f => f.mutable).length, 0);
 
   if (loading) {
     return (
@@ -778,7 +1120,7 @@ const ClusterActions = () => {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-xl font-bold text-white">Cluster Actions</h2>
-              <p className="text-indigo-200 text-sm mt-1">Select features to configure or modify on a ROSA HCP cluster. Features are grouped by compatibility.</p>
+              <p className="text-indigo-200 text-sm mt-1">All mutable features you can configure on a running ROSA HCP cluster.</p>
             </div>
             <div className="flex items-center gap-3">
               <div className="text-right"><div className="text-2xl font-bold text-white">{totalFeatures}</div><div className="text-xs text-indigo-200">features</div></div>
@@ -814,10 +1156,6 @@ const ClusterActions = () => {
                 className="px-4 py-2 text-sm font-medium text-indigo-600 bg-white border border-indigo-300 rounded-lg hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
                 {discovering ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <MagnifyingGlassIcon className="h-4 w-4" />}
                 {discovering ? 'Discovering...' : 'Discover Clusters'}
-              </button>
-              <button onClick={() => setShowNewCluster(true)}
-                className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2">
-                <PlusIcon className="h-4 w-4" /> New Cluster
               </button>
             </div>
 
@@ -888,11 +1226,6 @@ const ClusterActions = () => {
         </div>
       </div>
 
-      {/* New Cluster Modal */}
-      {showNewCluster && (
-        <NewClusterPanel registry={registry} onClose={() => setShowNewCluster(false)} onProvision={handleProvision} />
-      )}
-
       {/* Filter bar */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -901,14 +1234,7 @@ const ClusterActions = () => {
             <input type="text" placeholder="Search features..." value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)}
               className="text-sm border border-gray-200 rounded-xl pl-9 pr-3 py-2 w-56 focus:ring-2 focus:ring-indigo-500 bg-white" />
           </div>
-          <div className="flex gap-1 bg-gray-100 rounded-xl p-0.5">
-            {['all', 'Day1', 'Day2'].map(phase => (
-              <button key={phase} onClick={() => setPhaseFilter(phase)}
-                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${phaseFilter === phase ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                {phase === 'all' ? 'All Phases' : phase}
-              </button>
-            ))}
-          </div>
+          <span className="text-xs px-3 py-1.5 rounded-lg font-medium bg-violet-100 text-violet-700">Day2</span>
           <button onClick={() => {
             const allExpanded = filteredSuites.every(s => expandedSuites[s.id]);
             const newState = {};
@@ -920,6 +1246,11 @@ const ClusterActions = () => {
           <button onClick={() => setShowHistory(!showHistory)}
             className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1 ${showHistory ? 'bg-slate-700 text-white' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}>
             <ClockIcon className="h-3.5 w-3.5" /> History
+          </button>
+          <button onClick={() => setShowSpecs(!showSpecs)}
+            className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1 ${showSpecs ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}>
+            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" /></svg>
+            Specs
           </button>
         </div>
 
@@ -944,6 +1275,17 @@ const ClusterActions = () => {
 
       {/* History Panel */}
       <HistoryPanel clusterName={clusterName} isOpen={showHistory} onClose={() => setShowHistory(false)} />
+
+      {/* Spec Builder Panel */}
+      {showSpecs && (
+        <SpecBuilder
+          clusterName={clusterName}
+          namespace={namespace}
+          clusterStatus={clusterStatus}
+          onExecute={(results) => { setExecutionResults(results); setShowSpecs(false); }}
+          onClose={() => setShowSpecs(false)}
+        />
+      )}
 
       {/* Live Execution Panel */}
       {executionResults && (
@@ -975,13 +1317,11 @@ const ClusterActions = () => {
         <div className="flex items-start gap-3">
           <InformationCircleIcon className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
           <div>
-            <h4 className="text-sm font-semibold text-blue-900">How Feature Suites Work</h4>
+            <h4 className="text-sm font-semibold text-blue-900">How Cluster Actions Work</h4>
             <p className="text-xs text-blue-700 mt-1">
-              Features are grouped by the <span className="font-semibold">Feature Test Dashboard</span> compatibility suites.
-              Features within the same suite have been validated to work together on a single cluster.
-              <span className="font-semibold"> Day1</span> features are set at cluster creation time.
-              <span className="font-semibold"> Day2</span> features can be modified on a running cluster.
-              Immutable features are shown for reference but cannot be changed after creation.
+              All features that can be modified on a running cluster. Includes mutable Day1 features and Day2 operations.
+              Features are grouped by compatibility suites. Immutable Day1 features (set at creation only) are not shown.
+              Use <span className="font-semibold">Specs</span> to run declarative upgrade/apply workflows.
             </p>
           </div>
         </div>
