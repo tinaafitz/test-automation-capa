@@ -260,7 +260,8 @@ class ExecutionEngine:
         """Pretty-print a plan step."""
         icon = {"playbook": "📦", "patch": "🔧", "test_suite": "🧪"}.get(step["type"], "▶")
         dep = f" (after {step['depends_on']})" if step.get("depends_on") else ""
-        print(f"  {icon} Step {step['step']}: {step['name']}{dep}")
+        cond = f"  {C.Y}if: {step['if']}{C.E}" if step.get("if") else ""
+        print(f"  {icon} Step {step['step']}: {step['name']}{dep}{cond}")
         if step["type"] == "playbook" and self.verbose:
             for k, v in step.get("extra_vars", {}).items():
                 val = str(v)[:50]
@@ -1312,6 +1313,50 @@ def cmd_generate_specs(args, base_dir, registry):
     print()
 
 
+def _evaluate_condition(condition, results):
+    """Evaluate a step condition against previous results.
+
+    Supported conditions:
+      - None / empty        -> True (always run if no prior failures, handled by caller)
+      - "always"            -> True (run regardless)
+      - "failure"           -> True if any previous step failed
+      - "success"           -> True if all previous steps completed
+      - "steps.N.status == 'completed'"  -> check specific step status
+      - "steps.N.status != 'failed'"     -> negative check
+    """
+    if not condition:
+        return True
+    cond = condition.strip()
+
+    if cond == "always":
+        return True
+    if cond == "failure":
+        return any(r.get("status") == "failed" for r in results)
+    if cond == "success":
+        return all(r.get("status") == "completed" for r in results)
+
+    # Parse: steps.N.status == 'value' or steps.N.status != 'value'
+    import re as _re
+    m = _re.match(r"steps\.(\d+)\.status\s*(==|!=)\s*['\"](\w+)['\"]", cond)
+    if m:
+        step_num = int(m.group(1))
+        op = m.group(2)
+        expected = m.group(3)
+        # Find result for step_num
+        step_result = next((r for r in results if r.get("step") == step_num), None)
+        if not step_result:
+            return False  # Referenced step hasn't run yet
+        actual = step_result.get("status", "")
+        if op == "==":
+            return actual == expected
+        elif op == "!=":
+            return actual != expected
+
+    # Unknown condition — warn and skip
+    print(f"  {C.Y}Unknown condition: {cond} — skipping step{C.E}")
+    return False
+
+
 def cmd_workflow(args, base_dir, registry):
     """List, show, or run saved workflows."""
     action = getattr(args, "workflow_action", None) or "list"
@@ -1384,6 +1429,7 @@ def cmd_workflow(args, base_dir, registry):
                     "extra_vars": merged_vars,
                     "on_failure": step.get("onFailure", "stop"),
                     "timeout": step.get("timeout", 600),
+                    "if": step.get("if"),
                 })
         elif wf_type == "yaml":
             global_vars = wf.get("spec", {}).get("vars", {})
@@ -1399,6 +1445,7 @@ def cmd_workflow(args, base_dir, registry):
                     "extra_vars": merged_vars,
                     "on_failure": step.get("on_failure", "stop"),
                     "timeout": step.get("timeout", 600),
+                    "if": step.get("if"),
                 })
         return steps
 
@@ -1456,6 +1503,8 @@ def cmd_workflow(args, base_dir, registry):
                 print(f"    {i}. {step.get('name', '?')}")
                 print(f"       playbook: {step.get('file', '?')}")
                 print(f"       on_failure: {step.get('onFailure', 'stop')}")
+                if step.get("if"):
+                    print(f"       {C.Y}if: {step['if']}{C.E}")
                 ev = step.get("extra_vars", {})
                 if ev:
                     print(f"       extra_vars: {json.dumps(ev, indent=2).replace(chr(10), chr(10) + '       ')}")
@@ -1474,6 +1523,8 @@ def cmd_workflow(args, base_dir, registry):
                 print(f"    {i}. {step.get('name', '?')}")
                 print(f"       playbook: {step.get('playbook', '?')}")
                 print(f"       on_failure: {step.get('on_failure', 'stop')}")
+                if step.get("if"):
+                    print(f"       {C.Y}if: {step['if']}{C.E}")
                 sv = step.get("vars", {})
                 if sv:
                     print(f"       vars: {json.dumps(sv, indent=2).replace(chr(10), chr(10) + '       ')}")
@@ -1522,7 +1573,22 @@ def cmd_workflow(args, base_dir, registry):
 
         print(f"\n{C.BOLD}Executing...{C.E}\n")
         results = []
+        workflow_failed = False
         for step in plan:
+            # Evaluate conditional
+            cond = step.get("if")
+            if cond:
+                should_run = _evaluate_condition(cond, results)
+                if not should_run:
+                    print(f"  {C.Y}○ Step {step['step']}: {step['name']} — skipped (condition: {cond}){C.E}")
+                    results.append({"step": step["step"], "name": step["name"], "status": "skipped"})
+                    continue
+            elif workflow_failed:
+                # No explicit condition, but a prior step failed — skip unless on_failure allows
+                print(f"  {C.Y}○ Step {step['step']}: {step['name']} — skipped (prior failure){C.E}")
+                results.append({"step": step["step"], "name": step["name"], "status": "skipped"})
+                continue
+
             result = engine._execute_step(step)
             results.append(result)
 
@@ -1530,9 +1596,10 @@ def cmd_workflow(args, base_dir, registry):
                 on_failure = step.get("on_failure", "stop")
                 if on_failure == "stop" or (on_failure != "skip" and stop_on_failure):
                     print(f"\n{C.R}Step {step['step']} failed — stopping workflow.{C.E}")
-                    for remaining in plan[step["step"]:]:
-                        results.append({"step": remaining["step"], "name": remaining["name"], "status": "skipped"})
-                    break
+                    workflow_failed = True
+                    # Only skip remaining steps that don't have an explicit condition
+                    # Steps with conditions (like "always" or "failure") still get evaluated
+                    continue
                 elif on_failure == "skip":
                     print(f"  {C.Y}Step failed — skipping (on_failure: skip){C.E}")
 

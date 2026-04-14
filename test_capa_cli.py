@@ -42,6 +42,7 @@ C = capa_cli.C
 load_spec = capa_cli.load_spec
 _validate_feature_value = capa_cli._validate_feature_value_exit
 _validate_feature_value_check = capa_cli._validate_feature_value_check
+_evaluate_condition = capa_cli._evaluate_condition
 
 # Also import the shared core validation for direct testing
 from capa_core import validate_feature_value
@@ -1887,6 +1888,98 @@ class TestCmdWorkflow:
         out = capsys.readouterr().out
         assert "kind: Workflow" in out
         assert "playbooks/validate.yml" in out
+
+    def test_evaluate_condition_none(self):
+        assert _evaluate_condition(None, []) is True
+        assert _evaluate_condition("", []) is True
+
+    def test_evaluate_condition_always(self):
+        assert _evaluate_condition("always", []) is True
+        assert _evaluate_condition("always", [{"status": "failed"}]) is True
+
+    def test_evaluate_condition_failure(self):
+        assert _evaluate_condition("failure", []) is False
+        assert _evaluate_condition("failure", [{"status": "completed"}]) is False
+        assert _evaluate_condition("failure", [{"status": "failed"}]) is True
+        assert _evaluate_condition("failure", [{"status": "completed"}, {"status": "failed"}]) is True
+
+    def test_evaluate_condition_success(self):
+        assert _evaluate_condition("success", []) is True  # vacuously true
+        assert _evaluate_condition("success", [{"status": "completed"}]) is True
+        assert _evaluate_condition("success", [{"status": "completed"}, {"status": "completed"}]) is True
+        assert _evaluate_condition("success", [{"status": "completed"}, {"status": "failed"}]) is False
+
+    def test_evaluate_condition_step_reference(self):
+        results = [
+            {"step": 0, "status": "completed"},
+            {"step": 1, "status": "failed"},
+        ]
+        assert _evaluate_condition("steps.0.status == 'completed'", results) is True
+        assert _evaluate_condition("steps.0.status == 'failed'", results) is False
+        assert _evaluate_condition("steps.1.status == 'failed'", results) is True
+        assert _evaluate_condition("steps.1.status != 'completed'", results) is True
+        assert _evaluate_condition("steps.1.status != 'failed'", results) is False
+        # Reference to step that hasn't run
+        assert _evaluate_condition("steps.5.status == 'completed'", results) is False
+
+    def test_evaluate_condition_unknown(self, capsys):
+        assert _evaluate_condition("some_unknown_condition", []) is False
+        out = capsys.readouterr().out
+        assert "Unknown condition" in out
+
+    def test_run_dry_run_shows_conditions(self, workflow_env, minimal_registry, capsys):
+        """Dry-run output should show if: conditions on steps."""
+        # Add a YAML workflow with conditions
+        wf_dir = workflow_env / "specs" / "workflows"
+        yaml_wf = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "Workflow",
+            "metadata": {"name": "cond-test", "description": "Conditional test"},
+            "spec": {
+                "vars": {},
+                "steps": [
+                    {"name": "Step A", "playbook": "playbooks/test.yml", "on_failure": "skip", "timeout": 60},
+                    {"name": "Step B", "playbook": "playbooks/test.yml", "on_failure": "stop", "timeout": 60, "if": "steps.0.status == 'completed'"},
+                    {"name": "Cleanup", "playbook": "playbooks/test.yml", "on_failure": "stop", "timeout": 60, "if": "failure"},
+                    {"name": "Report", "playbook": "playbooks/test.yml", "on_failure": "stop", "timeout": 60, "if": "always"},
+                ],
+            },
+        }
+        with open(wf_dir / "cond-test.yml", "w") as f:
+            yaml.dump(yaml_wf, f)
+
+        args = argparse.Namespace(
+            workflow_action="run", name="cond-test",
+            dry_run=True, verbose=False, extra_vars=None,
+        )
+        capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "if: steps.0.status == 'completed'" in out
+        assert "if: failure" in out
+        assert "if: always" in out
+
+    def test_show_yaml_displays_conditions(self, workflow_env, minimal_registry, capsys):
+        """Show command should display if: conditions."""
+        wf_dir = workflow_env / "specs" / "workflows"
+        yaml_wf = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "Workflow",
+            "metadata": {"name": "cond-show", "description": "Conditional show test"},
+            "spec": {
+                "vars": {},
+                "steps": [
+                    {"name": "Step A", "playbook": "playbooks/test.yml", "on_failure": "stop", "timeout": 60},
+                    {"name": "Cleanup", "playbook": "playbooks/test.yml", "on_failure": "stop", "timeout": 60, "if": "always"},
+                ],
+            },
+        }
+        with open(wf_dir / "cond-show.yml", "w") as f:
+            yaml.dump(yaml_wf, f)
+
+        args = argparse.Namespace(workflow_action="show", name="cond-show", dry_run=False, verbose=False)
+        capa_cli.cmd_workflow(args, workflow_env, minimal_registry)
+        out = capsys.readouterr().out
+        assert "if: always" in out
 
     def test_export_yaml_already(self, workflow_env, minimal_registry, capsys):
         args = argparse.Namespace(
