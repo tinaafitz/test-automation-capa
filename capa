@@ -1082,7 +1082,7 @@ def cmd_completion(args, base_dir, registry):
     commands = ["create", "upgrade", "apply", "delete", "plan", "status",
                 "specs", "features", "set", "validate", "test",
                 "generate-specs", "version", "list-clusters", "logs",
-                "history", "watch", "completion"]
+                "history", "watch", "completion", "workflow"]
     feature_ids = " ".join(sorted(registry.all_features().keys()))
 
     suite_ids = ""
@@ -1094,6 +1094,32 @@ def cmd_completion(args, base_dir, registry):
     profiles_dir = base_dir / "specs" / "profiles"
     if profiles_dir.exists():
         profiles = " ".join(sorted(f.stem for f in profiles_dir.glob("*.yml")))
+
+    # Gather workflow names for completion
+    workflow_names = []
+    wf_json = base_dir / "vars" / "saved_workflows.json"
+    if wf_json.exists():
+        try:
+            import json as _json
+            with open(wf_json) as f:
+                for wf in _json.load(f):
+                    if wf.get("name"):
+                        workflow_names.append(wf["name"])
+        except (json.JSONDecodeError, IOError):
+            pass
+    wf_yaml_dir = base_dir / "specs" / "workflows"
+    if wf_yaml_dir.exists():
+        for yf in sorted(wf_yaml_dir.glob("*.yml")):
+            try:
+                with open(yf) as f:
+                    data = yaml.safe_load(f)
+                if data and data.get("kind") == "Workflow":
+                    name = data.get("metadata", {}).get("name", yf.stem)
+                    if name not in workflow_names:
+                        workflow_names.append(name)
+            except (yaml.YAMLError, IOError):
+                pass
+    workflow_names_str = " ".join(workflow_names)
 
     if shell == "bash":
         print(f"""# CAPA CLI bash completion
@@ -1132,6 +1158,14 @@ _capa_complete() {{
             COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
             return 0
             ;;
+        workflow)
+            COMPREPLY=( $(compgen -W "list show run export {workflow_names_str}" -- "$cur") )
+            return 0
+            ;;
+        show|run|export)
+            COMPREPLY=( $(compgen -W "{workflow_names_str}" -- "$cur") )
+            return 0
+            ;;
     esac
 
     if [[ "$cur" == -* ]]; then
@@ -1167,6 +1201,7 @@ _capa() {{
         'history:Show operation history'
         'watch:Poll cluster status until ready'
         'completion:Generate shell completion'
+        'workflow:List, show, run, or export workflows'
     )
 
     _arguments '1: :->command' '*:: :->args'
@@ -1182,6 +1217,9 @@ _capa() {{
                     ;;
                 test)
                     _arguments '1:suite:({suite_ids})' '--ai-agent' '--format:format:(json html junit all)' '--list' '--all'
+                    ;;
+                workflow)
+                    _arguments '1:action:(list show run export)' '2:name:({workflow_names_str})'
                     ;;
                 *)
                     _arguments '--cluster[Cluster name]:cluster:' '--namespace[Namespace]:namespace:' '--verbose' '--dry-run'

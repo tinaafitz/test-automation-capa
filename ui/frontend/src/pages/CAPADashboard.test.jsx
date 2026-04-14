@@ -177,7 +177,6 @@ async function navigateTo(section) {
     resources: 'onResourcesClick',
     environments: 'onEnvironmentsClick',
     credentials: 'onCredentialsClick',
-    test: 'onTestClick',
     'ai-assistant': 'onAIAssistantClick',
     terminal: 'onTerminalClick',
     notifications: 'onNotificationsClick',
@@ -270,12 +269,6 @@ describe('CAPADashboard', () => {
     await navigateTo('credentials');
     expect(screen.getByText('Credentials')).toBeInTheDocument();
     expect(screen.getByTestId('creds-modal')).toBeInTheDocument();
-  });
-
-  it('navigates to test section', async () => {
-    await renderDashboard();
-    await navigateTo('test');
-    expect(screen.getByText('Test Suites')).toBeInTheDocument();
   });
 
   it('navigates to workflows section', async () => {
@@ -1142,16 +1135,6 @@ describe('CAPADashboard', () => {
     await navigateTo('terminal');
     expect(screen.getByText('MCE Terminal')).toBeInTheDocument();
     expect(screen.queryByText('Configure CAPI/CAPA')).not.toBeInTheDocument();
-  });
-
-  // ----------------------------------------------------------
-  // 18. Test section content
-  // ----------------------------------------------------------
-
-  it('shows test suite coming soon message', async () => {
-    await renderDashboard();
-    await navigateTo('test');
-    expect(screen.getByText(/Test suite dashboard coming soon/)).toBeInTheDocument();
   });
 
   // ----------------------------------------------------------
