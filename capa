@@ -1,0 +1,1213 @@
+#!/usr/bin/env python3
+"""
+CAPA CLI - Declarative cluster lifecycle management
+
+Usage:
+    ./capa create -f specs/default.yml -e name_prefix=test1
+    ./capa create --profile default -e name_prefix=test1
+    ./capa upgrade --cluster moo-rosa-hcp --version 4.20.12
+    ./capa apply -f specs/day2-test.yml --cluster moo-rosa-hcp
+    ./capa set channel_group fast -c moo-rosa-hcp     # quick single-feature change
+    ./capa delete --cluster moo-rosa-hcp
+    ./capa status --cluster moo-rosa-hcp
+    ./capa specs                    # list available specs/profiles
+    ./capa features                 # list all features
+    ./capa validate specs/features/channel-group.yml   # validate a spec file
+    ./capa plan -f specs/upgrade.yml --cluster moo --version 4.20.12  # dry run
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+import yaml
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Any
+
+
+# ============================================================================
+# Terminal colors
+# ============================================================================
+class C:
+    H = '\033[95m'; B = '\033[94m'; G = '\033[92m'; Y = '\033[93m'
+    R = '\033[91m'; BOLD = '\033[1m'; E = '\033[0m'; CYAN = '\033[96m'
+
+
+# ============================================================================
+# Feature Registry
+# ============================================================================
+class FeatureRegistry:
+    """Loads and queries the feature registry."""
+
+    def __init__(self, base_dir: Path):
+        self.base_dir = base_dir
+        registry_path = base_dir / "schemas" / "feature-registry.yml"
+        with open(registry_path) as f:
+            self._data = yaml.safe_load(f)
+        self._features = {}
+        for suite in self._data.get("suites", []):
+            for feat in suite.get("features", []):
+                feat["_suite"] = suite["id"]
+                self._features[feat["id"]] = feat
+
+    @property
+    def var_map(self) -> Dict[str, str]:
+        return self._data.get("var_map", {})
+
+    @property
+    def dependencies(self) -> Dict[str, List[str]]:
+        return self._data.get("dependencies", {})
+
+    @property
+    def sequences(self) -> Dict[str, Any]:
+        return self._data.get("sequences", {})
+
+    @property
+    def suites(self) -> List[Dict]:
+        return self._data.get("suites", [])
+
+    def get_feature(self, feature_id: str) -> Optional[Dict]:
+        return self._features.get(feature_id)
+
+    def all_features(self) -> Dict[str, Dict]:
+        return self._features
+
+    def get_deps(self, feature_id: str) -> List[str]:
+        return self.dependencies.get(feature_id, [])
+
+    def resolve_var(self, feature_id: str) -> str:
+        """Map feature ID to playbook extra_var name."""
+        return self.var_map.get(feature_id, feature_id)
+
+
+# ============================================================================
+# Cluster Spec
+# ============================================================================
+class ClusterAutomationSpec:
+    """Parses and validates a ClusterAutomationSpec YAML."""
+
+    def __init__(self, data: Dict, overrides: Optional[Dict] = None):
+        if data.get("apiVersion") != "capa-automation/v1":
+            raise ValueError(f"Unsupported apiVersion: {data.get('apiVersion')}")
+        if data.get("kind") != "ClusterAutomationSpec":
+            raise ValueError(f"Unsupported kind: {data.get('kind')}")
+
+        self.metadata = data.get("metadata", {})
+        self.spec = data.get("spec", {})
+        self.name = self.metadata.get("name", "unnamed")
+
+        # Apply overrides (from CLI -e flags)
+        if overrides:
+            for k, v in overrides.items():
+                if k in ("cluster", "namespace", "version", "region", "channel",
+                          "name_prefix", "action"):
+                    self.spec[k] = v
+                elif k.startswith("feature."):
+                    feat_key = k.split(".", 1)[1]
+                    self.spec.setdefault("features", {})[feat_key] = v
+                else:
+                    self.spec.setdefault("features", {})[k] = v
+
+    @property
+    def action(self) -> str:
+        return self.spec.get("action", "create")
+
+    @property
+    def cluster(self) -> str:
+        return self.spec.get("cluster", "")
+
+    @property
+    def namespace(self) -> str:
+        return self.spec.get("namespace", "ns-rosa-hcp")
+
+    @property
+    def version(self) -> str:
+        return self.spec.get("version", "")
+
+    @property
+    def region(self) -> str:
+        return self.spec.get("region", "us-west-2")
+
+    @property
+    def channel(self) -> str:
+        return self.spec.get("channel", "stable")
+
+    @property
+    def name_prefix(self) -> str:
+        return self.spec.get("name_prefix", "")
+
+    @property
+    def features(self) -> Dict[str, Any]:
+        return self.spec.get("features", {})
+
+    @property
+    def actions(self) -> List[Dict]:
+        return self.spec.get("actions", [])
+
+    @property
+    def profile(self) -> str:
+        return self.metadata.get("profile", "")
+
+
+# ============================================================================
+# Execution Engine
+# ============================================================================
+class ExecutionEngine:
+    """Resolves specs into execution plans and runs them."""
+
+    def __init__(self, registry: FeatureRegistry, base_dir: Path,
+                 dry_run: bool = False, verbose: bool = False):
+        self.registry = registry
+        self.base_dir = base_dir
+        self.dry_run = dry_run
+        self.verbose = verbose
+
+    def plan(self, spec: ClusterAutomationSpec) -> List[Dict]:
+        """Generate an ordered execution plan from a spec."""
+        action = spec.action
+
+        if action == "create":
+            return self._plan_create(spec)
+        elif action == "upgrade":
+            return self._plan_upgrade(spec)
+        elif action == "apply":
+            return self._plan_apply(spec)
+        elif action == "delete":
+            return self._plan_delete(spec)
+        elif action == "test":
+            return self._plan_test(spec)
+        else:
+            raise ValueError(f"Unknown action: {action}")
+
+    def _plan_create(self, spec: ClusterAutomationSpec) -> List[Dict]:
+        """Plan: resolve features to playbook extra_vars, run provision playbook."""
+        extra_vars = {
+            "name_prefix": spec.name_prefix,
+            "capi_namespace": spec.namespace,
+            "aws_region": spec.region,
+            "channel_group": spec.channel,
+        }
+        if spec.version:
+            extra_vars["openshift_version"] = spec.version
+
+        # Map features to playbook vars
+        for feat_id, value in spec.features.items():
+            var_name = self.registry.resolve_var(feat_id)
+            extra_vars[var_name] = value
+
+        return [{
+            "step": 1,
+            "type": "playbook",
+            "name": f"Create cluster {spec.name_prefix or 'new'}-rosa-hcp",
+            "playbook": "playbooks/create_rosa_hcp_cluster.yml",
+            "extra_vars": extra_vars,
+            "wait": True,
+            "features_used": list(spec.features.keys()),
+        }]
+
+    def _plan_upgrade(self, spec: ClusterAutomationSpec) -> List[Dict]:
+        """Plan: upgrade control plane then machine pool (auto-sequenced)."""
+        if not spec.cluster:
+            raise ValueError("upgrade requires --cluster")
+        if not spec.version:
+            raise ValueError("upgrade requires --version")
+
+        steps = []
+
+        # Step 1: Control plane upgrade
+        cp_feature = self.registry.get_feature("control_plane_upgrade")
+        steps.append({
+            "step": 1,
+            "type": "playbook",
+            "name": f"Upgrade control plane to {spec.version}",
+            "playbook": cp_feature["playbook"],
+            "extra_vars": {
+                "cluster_name": spec.cluster,
+                "capi_namespace": spec.namespace,
+                "requested_version": spec.version,
+            },
+            "wait": True,
+            "wait_resource": cp_feature.get("wait_resource"),
+            "wait_field": cp_feature.get("wait_field"),
+            "wait_value": cp_feature.get("wait_value"),
+            "wait_timeout": cp_feature.get("wait_timeout", 3600),
+            "feature": "control_plane_upgrade",
+        })
+
+        # Step 2: Machine pool upgrade (depends on CP)
+        mp_feature = self.registry.get_feature("machine_pool_upgrade")
+        steps.append({
+            "step": 2,
+            "type": "playbook",
+            "name": f"Upgrade machine pool to {spec.version}",
+            "playbook": mp_feature["playbook"],
+            "extra_vars": {
+                "cluster_name": spec.cluster,
+                "capi_namespace": spec.namespace,
+                "requested_version": spec.version,
+            },
+            "wait": True,
+            "wait_resource": mp_feature.get("wait_resource"),
+            "wait_field": mp_feature.get("wait_field"),
+            "wait_value": mp_feature.get("wait_value"),
+            "wait_timeout": mp_feature.get("wait_timeout", 3600),
+            "feature": "machine_pool_upgrade",
+            "depends_on": "control_plane_upgrade",
+        })
+
+        return steps
+
+    def _plan_apply(self, spec: ClusterAutomationSpec) -> List[Dict]:
+        """Plan: execute explicit action list with dependency ordering."""
+        if not spec.cluster:
+            raise ValueError("apply requires --cluster")
+
+        raw_actions = spec.actions
+        if not raw_actions:
+            raise ValueError("apply requires actions list")
+
+        # Build steps, respecting depends_on from registry
+        steps = []
+        for i, action in enumerate(raw_actions):
+            feat_id = action["feature"]
+            value = action.get("value")
+            wait = action.get("wait", True)
+            feature = self.registry.get_feature(feat_id)
+
+            if not feature:
+                raise ValueError(f"Unknown feature: {feat_id}")
+
+            deps = self.registry.get_deps(feat_id)
+            depends_on = deps[0] if deps else None
+
+            if feature.get("playbook"):
+                extra_vars = {
+                    "cluster_name": spec.cluster,
+                    "capi_namespace": spec.namespace,
+                }
+                if value:
+                    if feat_id in ("control_plane_upgrade", "machine_pool_upgrade"):
+                        extra_vars["requested_version"] = str(value)
+
+                steps.append({
+                    "step": i + 1,
+                    "type": "playbook",
+                    "name": f"{feature['name']}",
+                    "playbook": feature["playbook"],
+                    "extra_vars": extra_vars,
+                    "wait": wait,
+                    "wait_resource": feature.get("wait_resource"),
+                    "wait_field": feature.get("wait_field"),
+                    "wait_value": feature.get("wait_value"),
+                    "wait_timeout": feature.get("wait_timeout", 600),
+                    "feature": feat_id,
+                    "depends_on": depends_on,
+                })
+            else:
+                # K8s patch
+                steps.append({
+                    "step": i + 1,
+                    "type": "patch",
+                    "name": f"{feature['name']} = {value}",
+                    "resource": feature.get("resource", ""),
+                    "k8s_field": feature.get("k8s_field", ""),
+                    "value": value,
+                    "cluster": spec.cluster,
+                    "namespace": spec.namespace,
+                    "wait": wait,
+                    "feature": feat_id,
+                    "depends_on": depends_on,
+                })
+
+        return steps
+
+    def _plan_delete(self, spec: ClusterAutomationSpec) -> List[Dict]:
+        """Plan: delete cluster."""
+        if not spec.cluster:
+            raise ValueError("delete requires --cluster")
+
+        return [{
+            "step": 1,
+            "type": "playbook",
+            "name": f"Delete cluster {spec.cluster}",
+            "playbook": "playbooks/delete_rosa_hcp_cluster.yml",
+            "extra_vars": {
+                "cluster_name": spec.cluster,
+                "capi_namespace": spec.namespace,
+            },
+            "wait": True,
+            "feature": "cluster_delete",
+        }]
+
+    def _plan_test(self, spec: ClusterAutomationSpec) -> List[Dict]:
+        """Plan: run test suites against cluster."""
+        suites = spec.spec.get("test_suites", [])
+        if not suites:
+            # Default: test all mutable features
+            suites = [s["id"] for s in self.registry.suites if s["phase"] == "Day2"]
+
+        steps = []
+        for i, suite_id in enumerate(suites):
+            steps.append({
+                "step": i + 1,
+                "type": "test_suite",
+                "name": f"Test suite: {suite_id}",
+                "suite_id": suite_id,
+                "cluster": spec.cluster,
+                "namespace": spec.namespace,
+            })
+        return steps
+
+    def execute(self, plan: List[Dict]) -> List[Dict]:
+        """Execute a plan, returning results for each step."""
+        results = []
+        print(f"\n{C.BOLD}{C.CYAN}{'=' * 60}{C.E}")
+        print(f"{C.BOLD}  Execution Plan: {len(plan)} step(s){C.E}")
+        print(f"{C.BOLD}{C.CYAN}{'=' * 60}{C.E}\n")
+
+        for step in plan:
+            self._print_step(step)
+
+        if self.dry_run:
+            print(f"\n{C.Y}DRY RUN — no changes made.{C.E}\n")
+            return [{"step": s["step"], "name": s["name"], "status": "dry_run"} for s in plan]
+
+        print(f"\n{C.BOLD}Executing...{C.E}\n")
+
+        for step in plan:
+            result = self._execute_step(step)
+            results.append(result)
+
+            if result["status"] == "failed":
+                print(f"\n{C.R}Step {step['step']} failed: {result.get('error', 'unknown')}{C.E}")
+                print(f"{C.R}Stopping execution.{C.E}\n")
+                # Mark remaining steps as skipped
+                for remaining in plan[step["step"]:]:
+                    results.append({
+                        "step": remaining["step"],
+                        "name": remaining["name"],
+                        "status": "skipped",
+                    })
+                break
+
+        self._print_summary(results)
+        return results
+
+    def _execute_step(self, step: Dict) -> Dict:
+        """Execute a single step."""
+        step_type = step["type"]
+        print(f"{C.B}[Step {step['step']}]{C.E} {step['name']}...")
+
+        if step_type == "playbook":
+            return self._run_playbook(step)
+        elif step_type == "patch":
+            return self._run_patch(step)
+        elif step_type == "test_suite":
+            return self._run_test_suite(step)
+        else:
+            return {"step": step["step"], "name": step["name"],
+                    "status": "failed", "error": f"Unknown step type: {step_type}"}
+
+    def _run_playbook(self, step: Dict) -> Dict:
+        """Run an Ansible playbook."""
+        playbook_path = self.base_dir / step["playbook"]
+        if not playbook_path.exists():
+            return {"step": step["step"], "name": step["name"],
+                    "status": "failed", "error": f"Playbook not found: {step['playbook']}"}
+
+        cmd = ["ansible-playbook", str(playbook_path)]
+        for key, value in step.get("extra_vars", {}).items():
+            if isinstance(value, (dict, list)):
+                cmd.extend(["-e", f"{key}={json.dumps(value)}"])
+            elif isinstance(value, bool):
+                cmd.extend(["-e", f"{key}={'true' if value else 'false'}"])
+            else:
+                cmd.extend(["-e", f"{key}={value}"])
+
+        if self.verbose:
+            cmd.append("-vvv")
+
+        start = time.time()
+        print(f"  {C.CYAN}$ {' '.join(cmd[:6])}...{C.E}")
+
+        try:
+            result = subprocess.run(
+                cmd, cwd=str(self.base_dir),
+                capture_output=not self.verbose,
+                text=True, timeout=step.get("wait_timeout", 7200)
+            )
+            elapsed = time.time() - start
+
+            if result.returncode == 0:
+                print(f"  {C.G}Done ({elapsed:.0f}s){C.E}")
+                return {"step": step["step"], "name": step["name"],
+                        "status": "completed", "elapsed": elapsed}
+            else:
+                error = (result.stderr or result.stdout or "")[-500:]
+                print(f"  {C.R}Failed ({elapsed:.0f}s){C.E}")
+                return {"step": step["step"], "name": step["name"],
+                        "status": "failed", "elapsed": elapsed, "error": error}
+
+        except subprocess.TimeoutExpired:
+            elapsed = time.time() - start
+            print(f"  {C.R}Timeout ({elapsed:.0f}s){C.E}")
+            return {"step": step["step"], "name": step["name"],
+                    "status": "failed", "elapsed": elapsed, "error": "Timeout"}
+
+    def _run_patch(self, step: Dict) -> Dict:
+        """Execute an oc patch command."""
+        resource = step["resource"].lower()
+        field = step["k8s_field"]
+        value = step["value"]
+        cluster = step["cluster"]
+        namespace = step["namespace"]
+
+        # Build JSON merge patch
+        field_parts = [p for p in field.split(".") if p]
+        patch_obj = {}
+        current = patch_obj
+        for i, part in enumerate(field_parts):
+            if i == len(field_parts) - 1:
+                current[part] = value
+            else:
+                current[part] = {}
+                current = current[part]
+
+        patch_json = json.dumps(patch_obj)
+        cmd = ["oc", "patch", resource, cluster, "-n", namespace,
+               "--type=merge", "-p", patch_json]
+
+        print(f"  {C.CYAN}$ oc patch {resource} {cluster} ...{C.E}")
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                print(f"  {C.G}Patched: {field} = {value}{C.E}")
+                return {"step": step["step"], "name": step["name"],
+                        "status": "completed"}
+            else:
+                error = result.stderr.strip()
+                print(f"  {C.R}Failed: {error}{C.E}")
+                return {"step": step["step"], "name": step["name"],
+                        "status": "failed", "error": error}
+        except Exception as e:
+            return {"step": step["step"], "name": step["name"],
+                    "status": "failed", "error": str(e)}
+
+    def _run_test_suite(self, step: Dict) -> Dict:
+        """Run a test suite via run-test-suite.py."""
+        # Map suite ID to test suite file
+        suite_id = step["suite_id"]
+        cmd = [sys.executable, str(self.base_dir / "run-test-suite.py")]
+
+        # Find matching test suite JSON
+        test_suites_dir = self.base_dir / "test-suites"
+        suite_files = sorted(test_suites_dir.glob("*.json"))
+        matched = None
+        for sf in suite_files:
+            try:
+                with open(sf) as f:
+                    data = json.load(f)
+                    if data.get("name", "").lower().replace(" ", "-") == suite_id:
+                        matched = sf
+                        break
+            except (json.JSONDecodeError, IOError):
+                continue
+
+        if matched:
+            cmd.append(matched.stem)
+        else:
+            cmd.append(suite_id)
+
+        if step.get("cluster"):
+            cmd.extend(["-e", f"cluster_name={step['cluster']}"])
+        if step.get("namespace"):
+            cmd.extend(["-e", f"capi_namespace={step['namespace']}"])
+
+        print(f"  {C.CYAN}$ {' '.join(cmd)}{C.E}")
+
+        try:
+            result = subprocess.run(cmd, cwd=str(self.base_dir), text=True, timeout=3600)
+            if result.returncode == 0:
+                print(f"  {C.G}Suite passed{C.E}")
+                return {"step": step["step"], "name": step["name"],
+                        "status": "completed"}
+            else:
+                print(f"  {C.R}Suite failed{C.E}")
+                return {"step": step["step"], "name": step["name"],
+                        "status": "failed", "error": "Test suite failed"}
+        except Exception as e:
+            return {"step": step["step"], "name": step["name"],
+                    "status": "failed", "error": str(e)}
+
+    def _print_step(self, step: Dict):
+        """Pretty-print a plan step."""
+        icon = {"playbook": "📦", "patch": "🔧", "test_suite": "🧪"}.get(step["type"], "▶")
+        dep = f" (after {step['depends_on']})" if step.get("depends_on") else ""
+        print(f"  {icon} Step {step['step']}: {step['name']}{dep}")
+        if step["type"] == "playbook" and self.verbose:
+            for k, v in step.get("extra_vars", {}).items():
+                val = str(v)[:50]
+                print(f"      {k}: {val}")
+
+    def _print_summary(self, results: List[Dict]):
+        """Print execution summary."""
+        total = len(results)
+        passed = sum(1 for r in results if r["status"] == "completed")
+        failed = sum(1 for r in results if r["status"] == "failed")
+        skipped = sum(1 for r in results if r["status"] == "skipped")
+
+        print(f"\n{C.BOLD}{C.CYAN}{'=' * 60}{C.E}")
+        print(f"{C.BOLD}  Results: {passed}/{total} passed", end="")
+        if failed:
+            print(f", {C.R}{failed} failed{C.E}", end="")
+        if skipped:
+            print(f", {C.Y}{skipped} skipped{C.E}", end="")
+        print(f"{C.E}")
+        print(f"{C.BOLD}{C.CYAN}{'=' * 60}{C.E}\n")
+
+        for r in results:
+            icon = {"completed": C.G + "✓", "failed": C.R + "✗",
+                    "skipped": C.Y + "○", "dry_run": C.B + "◇"}.get(r["status"], "?")
+            elapsed = f" ({r['elapsed']:.0f}s)" if "elapsed" in r else ""
+            print(f"  {icon} Step {r['step']}: {r['name']}{elapsed}{C.E}")
+
+        print()
+
+
+# ============================================================================
+# CLI
+# ============================================================================
+def load_spec(args, base_dir: Path) -> ClusterAutomationSpec:
+    """Load a ClusterAutomationSpec from file, profile, or inline args."""
+    overrides = {}
+    if hasattr(args, "extra_vars") and args.extra_vars:
+        for ev in args.extra_vars:
+            if "=" in ev:
+                k, v = ev.split("=", 1)
+                # Auto-parse booleans and numbers
+                if v.lower() in ("true", "false"):
+                    v = v.lower() == "true"
+                try:
+                    v = int(v)
+                except (ValueError, TypeError):
+                    pass
+                overrides[k] = v
+
+    # Override from explicit CLI args
+    if hasattr(args, "cluster") and args.cluster:
+        overrides["cluster"] = args.cluster
+    if hasattr(args, "version") and args.version:
+        overrides["version"] = args.version
+    if hasattr(args, "namespace") and args.namespace:
+        overrides["namespace"] = args.namespace
+    if hasattr(args, "name_prefix") and args.name_prefix:
+        overrides["name_prefix"] = args.name_prefix
+
+    if hasattr(args, "file") and args.file:
+        with open(args.file) as f:
+            data = yaml.safe_load(f)
+        return ClusterAutomationSpec(data, overrides)
+
+    if hasattr(args, "profile") and args.profile:
+        # Search all subdirectories under specs/
+        profile_path = None
+        for candidate in (base_dir / "specs").rglob(f"{args.profile}.yml"):
+            profile_path = candidate
+            break
+        if not profile_path or not profile_path.exists():
+            print(f"{C.R}Profile not found: {args.profile}{C.E}")
+            all_specs = [p.stem for p in (base_dir / "specs").rglob("*.yml")]
+            print(f"Available: {', '.join(sorted(all_specs))}")
+            sys.exit(1)
+        with open(profile_path) as f:
+            data = yaml.safe_load(f)
+        return ClusterAutomationSpec(data, overrides)
+
+    # Build inline spec from command args
+    action = args.command if hasattr(args, "command") else "status"
+    data = {
+        "apiVersion": "capa-automation/v1",
+        "kind": "ClusterAutomationSpec",
+        "metadata": {"name": f"cli-{action}"},
+        "spec": {"action": action},
+    }
+    return ClusterAutomationSpec(data, overrides)
+
+
+def cmd_create(args, base_dir, registry):
+    spec = load_spec(args, base_dir)
+    spec.spec["action"] = "create"
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose)
+    plan = engine.plan(spec)
+    engine.execute(plan)
+
+
+def cmd_upgrade(args, base_dir, registry):
+    spec = load_spec(args, base_dir)
+    spec.spec["action"] = "upgrade"
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose)
+    plan = engine.plan(spec)
+    engine.execute(plan)
+
+
+def cmd_apply(args, base_dir, registry):
+    spec = load_spec(args, base_dir)
+    spec.spec["action"] = "apply"
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose)
+    plan = engine.plan(spec)
+    engine.execute(plan)
+
+
+def cmd_delete(args, base_dir, registry):
+    spec = load_spec(args, base_dir)
+    spec.spec["action"] = "delete"
+    if not args.yes:
+        cluster = spec.cluster or args.cluster
+        confirm = input(f"{C.R}Delete cluster '{cluster}'? This cannot be undone. [y/N]: {C.E}")
+        if confirm.lower() != "y":
+            print("Cancelled.")
+            return
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose)
+    plan = engine.plan(spec)
+    engine.execute(plan)
+
+
+def cmd_plan(args, base_dir, registry):
+    """Show execution plan without running anything."""
+    args.dry_run = True
+    spec = load_spec(args, base_dir)
+    engine = ExecutionEngine(registry, base_dir, dry_run=True, verbose=args.verbose)
+    plan = engine.plan(spec)
+    engine.execute(plan)
+
+
+def cmd_status(args, base_dir, registry):
+    """Show cluster status."""
+    cluster = args.cluster
+    namespace = args.namespace or "ns-rosa-hcp"
+    if not cluster:
+        print(f"{C.R}--cluster required{C.E}")
+        sys.exit(1)
+
+    print(f"\n{C.BOLD}Cluster: {cluster}{C.E}")
+    print(f"Namespace: {namespace}\n")
+
+    # ROSAControlPlane
+    try:
+        result = subprocess.run(
+            ["oc", "get", "rosacontrolplane", cluster, "-n", namespace,
+             "-o", "jsonpath={.spec.version}|{.status.version}|{.status.ready}|{.status.availableUpgrades}"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            parts = result.stdout.split("|")
+            spec_ver = parts[0] if len(parts) > 0 else "?"
+            status_ver = parts[1] if len(parts) > 1 else "?"
+            ready = parts[2] if len(parts) > 2 else "?"
+            upgrades = parts[3] if len(parts) > 3 else "[]"
+            upgrading = spec_ver != status_ver and status_ver
+
+            print(f"  Control Plane:")
+            print(f"    Version: {status_ver}", end="")
+            if upgrading:
+                print(f" {C.Y}-> {spec_ver} (upgrading){C.E}")
+            else:
+                print()
+            print(f"    Ready: {C.G if ready == 'true' else C.R}{ready}{C.E}")
+            if upgrades and upgrades != "[]":
+                print(f"    Available: {upgrades}")
+    except Exception as e:
+        print(f"  {C.R}Error reading ROSAControlPlane: {e}{C.E}")
+
+    # ROSAMachinePool
+    try:
+        result = subprocess.run(
+            ["oc", "get", "rosamachinepool", cluster, "-n", namespace,
+             "-o", "jsonpath={.spec.version}|{.status.ready}|{.status.availableUpgrades}|{.status.replicas}"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            parts = result.stdout.split("|")
+            mp_ver = parts[0] if len(parts) > 0 else "?"
+            mp_ready = parts[1] if len(parts) > 1 else "?"
+            mp_upgrades = parts[2] if len(parts) > 2 else "[]"
+            mp_replicas = parts[3] if len(parts) > 3 else "?"
+
+            print(f"\n  Machine Pool:")
+            print(f"    Version: {mp_ver}")
+            print(f"    Ready: {C.G if mp_ready == 'true' else C.R}{mp_ready}{C.E}")
+            print(f"    Replicas: {mp_replicas}")
+            if mp_upgrades and mp_upgrades != "[]":
+                print(f"    Available: {mp_upgrades}")
+    except Exception:
+        pass
+
+    print()
+
+
+def cmd_specs(args, base_dir, registry):
+    """List available specs by category."""
+    specs_dir = base_dir / "specs"
+    categories = [
+        ("Profiles", specs_dir / "profiles", "Cluster creation presets"),
+        ("Features", specs_dir / "features", "Individual feature actions"),
+        ("Workflows", specs_dir / "workflows", "Multi-step sequences"),
+    ]
+    print(f"\n{C.BOLD}Available Specs:{C.E}")
+    for cat_name, cat_dir, cat_desc in categories:
+        if not cat_dir.exists():
+            continue
+        files = sorted(cat_dir.glob("*.yml"))
+        if not files:
+            continue
+        print(f"\n  {C.BOLD}{C.CYAN}{cat_name}{C.E} — {cat_desc}")
+        for spec_file in files:
+            with open(spec_file) as f:
+                data = yaml.safe_load(f)
+            name = data.get("metadata", {}).get("name", spec_file.stem)
+            action = data.get("spec", {}).get("action", "?")
+            features = data.get("spec", {}).get("features", {})
+            actions_list = data.get("spec", {}).get("actions", [])
+            detail = ""
+            if features:
+                detail = ", ".join(list(features.keys())[:4])
+            elif actions_list:
+                detail = " → ".join(a.get("feature", "") for a in actions_list)
+            print(f"    {C.BOLD}{spec_file.stem}{C.E}")
+            print(f"      {action} | {detail or '(no features)'}")
+    print()
+
+
+def cmd_features(args, base_dir, registry):
+    """List all features from the registry."""
+    print(f"\n{C.BOLD}Feature Registry:{C.E}\n")
+    for suite in registry.suites:
+        phase_color = C.B if suite["phase"] == "Day2" else C.CYAN
+        print(f"  {C.BOLD}{suite['name']}{C.E} {phase_color}[{suite['phase']}]{C.E}")
+        for feat in suite["features"]:
+            mutable = f"{C.G}mutable{C.E}" if feat["mutable"] else f"{C.Y}immutable{C.E}"
+            applies = ",".join(feat.get("applies_to", []))
+            deps = registry.get_deps(feat["id"])
+            dep_str = f" (after {', '.join(deps)})" if deps else ""
+            print(f"    {feat['id']:30s} {mutable}  {applies:14s} {feat['type']:10s} {feat.get('resource', '')}{dep_str}")
+    print()
+
+
+def cmd_set(args, base_dir, registry):
+    """Quick shorthand: set a single feature value on a running cluster.
+
+    Examples:
+        ./capa set channel_group fast --cluster moo-rosa-hcp
+        ./capa set audit_logging cloudwatch -c moo-rosa-hcp
+        ./capa set proxy_enabled true -c moo-rosa-hcp
+    """
+    feature_id = args.feature
+    value = args.value
+    cluster = args.cluster
+    namespace = args.namespace or "ns-rosa-hcp"
+
+    feat = registry.get_feature(feature_id)
+    if not feat:
+        print(f"{C.R}Unknown feature: {feature_id}{C.E}")
+        # Suggest similar features
+        all_ids = list(registry.all_features().keys())
+        matches = [f for f in all_ids if feature_id in f or f in feature_id]
+        if matches:
+            print(f"Did you mean: {', '.join(matches)}")
+        sys.exit(1)
+
+    if not feat.get("mutable"):
+        print(f"{C.R}Feature '{feature_id}' is immutable — cannot be changed after creation.{C.E}")
+        sys.exit(1)
+
+    applies_to = feat.get("applies_to", [])
+    if "apply" not in applies_to and "upgrade" not in applies_to:
+        print(f"{C.R}Feature '{feature_id}' does not support apply/upgrade (applies_to: {applies_to}).{C.E}")
+        sys.exit(1)
+
+    # Auto-parse value
+    if value.lower() in ("true", "false"):
+        value = value.lower() == "true"
+    else:
+        try:
+            value = int(value)
+        except (ValueError, TypeError):
+            pass
+
+    # Validate value against type
+    _validate_feature_value(feat, value)
+
+    # Build inline spec
+    data = {
+        "apiVersion": "capa-automation/v1",
+        "kind": "ClusterAutomationSpec",
+        "metadata": {"name": f"set-{feature_id}"},
+        "spec": {
+            "action": "apply",
+            "cluster": cluster,
+            "namespace": namespace,
+            "actions": [{"feature": feature_id, "value": value}],
+        },
+    }
+    spec = ClusterAutomationSpec(data)
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose)
+    plan = engine.plan(spec)
+    engine.execute(plan)
+
+
+def _validate_feature_value(feat, value):
+    """Validate a value against a feature's type constraints. Exits on error."""
+    feat_type = feat.get("type", "string")
+    feat_id = feat["id"]
+
+    if feat_type == "boolean":
+        if not isinstance(value, bool):
+            print(f"{C.R}Feature '{feat_id}' expects a boolean (true/false), got: {value}{C.E}")
+            sys.exit(1)
+
+    elif feat_type == "select":
+        options = feat.get("options", [])
+        if options and str(value) not in [str(o) for o in options]:
+            print(f"{C.R}Feature '{feat_id}' expects one of {options}, got: {value}{C.E}")
+            sys.exit(1)
+
+    elif feat_type == "number":
+        if not isinstance(value, (int, float)):
+            print(f"{C.R}Feature '{feat_id}' expects a number, got: {value}{C.E}")
+            sys.exit(1)
+
+    elif feat_type == "string":
+        max_len = feat.get("max_length")
+        if max_len and len(str(value)) > max_len:
+            print(f"{C.R}Feature '{feat_id}' max length is {max_len}, got {len(str(value))} chars.{C.E}")
+            sys.exit(1)
+
+
+def cmd_validate(args, base_dir, registry):
+    """Validate a ClusterAutomationSpec file against the feature registry."""
+    spec_path = args.file
+    if not os.path.exists(spec_path):
+        print(f"{C.R}File not found: {spec_path}{C.E}")
+        sys.exit(1)
+
+    with open(spec_path) as f:
+        data = yaml.safe_load(f)
+
+    errors = []
+    warnings = []
+
+    # Check required top-level fields
+    if data.get("apiVersion") != "capa-automation/v1":
+        errors.append(f"Invalid apiVersion: {data.get('apiVersion')} (expected capa-automation/v1)")
+    if data.get("kind") != "ClusterAutomationSpec":
+        errors.append(f"Invalid kind: {data.get('kind')} (expected ClusterAutomationSpec)")
+    if not data.get("metadata", {}).get("name"):
+        warnings.append("Missing metadata.name")
+
+    spec = data.get("spec", {})
+    action = spec.get("action", "")
+    valid_actions = ["create", "apply", "upgrade", "delete", "test"]
+    if action not in valid_actions:
+        errors.append(f"Invalid action: '{action}' (expected one of {valid_actions})")
+
+    # Validate features (for create specs)
+    features = spec.get("features", {})
+    for feat_id, value in features.items():
+        feat = registry.get_feature(feat_id)
+        if not feat:
+            errors.append(f"Unknown feature: '{feat_id}'")
+            continue
+        applies_to = feat.get("applies_to", [])
+        if action and action not in applies_to:
+            errors.append(f"Feature '{feat_id}' does not apply to '{action}' (applies_to: {applies_to})")
+        # Type validation
+        _validate_feature_value_check(feat, value, errors, warnings)
+
+    # Validate actions list (for apply/upgrade specs)
+    actions_list = spec.get("actions", [])
+    for i, act in enumerate(actions_list):
+        feat_id = act.get("feature")
+        if not feat_id:
+            errors.append(f"Action [{i}]: missing 'feature' field")
+            continue
+        feat = registry.get_feature(feat_id)
+        if not feat:
+            errors.append(f"Action [{i}]: unknown feature '{feat_id}'")
+            continue
+        applies_to = feat.get("applies_to", [])
+        if action and action not in applies_to:
+            errors.append(f"Action [{i}]: feature '{feat_id}' does not apply to '{action}' (applies_to: {applies_to})")
+        if not feat.get("mutable") and action in ("apply", "upgrade"):
+            errors.append(f"Action [{i}]: feature '{feat_id}' is immutable — cannot be changed after creation")
+        value = act.get("value")
+        if value is not None:
+            _validate_feature_value_check(feat, value, errors, warnings)
+
+    # Check dependency ordering
+    seen_features = set()
+    for i, act in enumerate(actions_list):
+        feat_id = act.get("feature", "")
+        deps = registry.get_deps(feat_id)
+        for dep in deps:
+            if dep not in seen_features:
+                dep_in_list = any(a.get("feature") == dep for a in actions_list)
+                if dep_in_list:
+                    warnings.append(f"Action [{i}]: '{feat_id}' depends on '{dep}' which appears later in the list")
+                else:
+                    warnings.append(f"Action [{i}]: '{feat_id}' depends on '{dep}' which is not in the spec")
+        seen_features.add(feat_id)
+
+    # Cluster required for certain actions
+    if action in ("apply", "upgrade", "delete") and not spec.get("cluster"):
+        warnings.append(f"No cluster specified — will need --cluster at runtime")
+
+    # Print results
+    print(f"\n{C.BOLD}Validating: {spec_path}{C.E}")
+    print(f"  Kind: {data.get('kind', '?')}")
+    print(f"  Action: {action}")
+    print(f"  Features: {len(features)}, Actions: {len(actions_list)}")
+
+    if errors:
+        print(f"\n  {C.R}{C.BOLD}{len(errors)} error(s):{C.E}")
+        for e in errors:
+            print(f"    {C.R}✗ {e}{C.E}")
+
+    if warnings:
+        print(f"\n  {C.Y}{len(warnings)} warning(s):{C.E}")
+        for w in warnings:
+            print(f"    {C.Y}⚠ {w}{C.E}")
+
+    if not errors and not warnings:
+        print(f"\n  {C.G}✓ Valid spec — no issues found.{C.E}")
+    elif not errors:
+        print(f"\n  {C.G}✓ Valid spec (with warnings).{C.E}")
+    else:
+        print(f"\n  {C.R}✗ Invalid spec.{C.E}")
+        sys.exit(1)
+
+    print()
+
+
+def _validate_feature_value_check(feat, value, errors, warnings):
+    """Validate a value against feature type, appending to errors/warnings lists."""
+    feat_type = feat.get("type", "string")
+    feat_id = feat["id"]
+
+    if feat_type == "boolean":
+        if not isinstance(value, bool):
+            errors.append(f"Feature '{feat_id}' expects boolean, got: {type(value).__name__} ({value})")
+
+    elif feat_type == "select":
+        options = feat.get("options", [])
+        if options and str(value) not in [str(o) for o in options]:
+            errors.append(f"Feature '{feat_id}' expects one of {options}, got: {value}")
+
+    elif feat_type == "number":
+        if not isinstance(value, (int, float)):
+            errors.append(f"Feature '{feat_id}' expects number, got: {type(value).__name__} ({value})")
+
+    elif feat_type == "string":
+        max_len = feat.get("max_length")
+        if max_len and len(str(value)) > max_len:
+            errors.append(f"Feature '{feat_id}' max length is {max_len}, got {len(str(value))} chars")
+
+    elif feat_type == "key_value":
+        if not isinstance(value, dict):
+            errors.append(f"Feature '{feat_id}' expects key-value dict, got: {type(value).__name__}")
+
+    elif feat_type == "list":
+        if not isinstance(value, list):
+            errors.append(f"Feature '{feat_id}' expects list, got: {type(value).__name__}")
+
+    elif feat_type == "range":
+        if isinstance(value, dict):
+            if "min" not in value or "max" not in value:
+                errors.append(f"Feature '{feat_id}' range expects {{min, max}}, got: {value}")
+            elif value["min"] > value["max"]:
+                errors.append(f"Feature '{feat_id}' range: min ({value['min']}) > max ({value['max']})")
+        else:
+            errors.append(f"Feature '{feat_id}' expects range {{min, max}}, got: {type(value).__name__}")
+
+
+def cmd_generate_specs(args, base_dir, registry):
+    """Auto-generate feature spec files from the registry."""
+    features_dir = base_dir / "specs" / "features"
+    features_dir.mkdir(parents=True, exist_ok=True)
+
+    generated = 0
+    skipped = 0
+    for feat_id, feat in registry.all_features().items():
+        applies_to = feat.get("applies_to", [])
+        # Only generate specs for features that can be applied to running clusters
+        if "apply" not in applies_to and "upgrade" not in applies_to and "delete" not in applies_to:
+            continue
+
+        filename = feat_id.replace("_", "-") + ".yml"
+        filepath = features_dir / filename
+
+        if filepath.exists() and not args.force:
+            skipped += 1
+            continue
+
+        # Determine action type
+        if feat.get("destructive"):
+            action = "delete"
+        else:
+            action = "apply"
+
+        # Build default value based on type
+        default_value = feat.get("default", "")
+        if feat["type"] == "boolean":
+            default_value = True
+        elif feat["type"] == "select":
+            opts = feat.get("options", [])
+            default_value = opts[0] if opts else ""
+        elif feat["type"] == "key_value":
+            default_value = None  # user must provide
+        elif feat["type"] == "range":
+            default_value = feat.get("default", {"min": 2, "max": 4})
+        elif feat["type"] == "version":
+            default_value = ""  # user must provide via -e version=
+
+        spec = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "ClusterAutomationSpec",
+            "metadata": {"name": feat_id.replace("_", "-")},
+            "spec": {
+                "action": action,
+                "cluster": "",
+                "namespace": "ns-rosa-hcp",
+            },
+        }
+
+        if action == "delete":
+            # Delete specs don't need actions list
+            pass
+        else:
+            action_entry = {"feature": feat_id}
+            if default_value is not None and default_value != "":
+                action_entry["value"] = default_value
+            if feat.get("wait_timeout"):
+                action_entry["wait"] = True
+            spec["spec"]["actions"] = [action_entry]
+
+        # Write with comments
+        with open(filepath, "w") as f:
+            f.write(f"# Auto-generated from feature-registry.yml\n")
+            f.write(f"# Feature: {feat.get('name', feat_id)}\n")
+            f.write(f"# Applies to: {', '.join(applies_to)}\n")
+            yaml.dump(spec, f, default_flow_style=False, sort_keys=False)
+
+        generated += 1
+        print(f"  {C.G}+{C.E} {filename}")
+
+    print(f"\n{C.BOLD}Generated: {generated} specs, skipped: {skipped} (already exist){C.E}")
+    if skipped > 0:
+        print(f"  Use --force to overwrite existing specs")
+    print()
+
+
+def main():
+    base_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+    registry = FeatureRegistry(base_dir)
+
+    parser = argparse.ArgumentParser(
+        prog="capa",
+        description="CAPA CLI - Declarative cluster lifecycle management",
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument("--dry-run", action="store_true", help="Show plan without executing")
+
+    subparsers = parser.add_subparsers(dest="command", help="Command")
+
+    # Shared args for most commands
+    def add_common_args(p):
+        p.add_argument("-f", "--file", help="ClusterAutomationSpec YAML file")
+        p.add_argument("--profile", "-p", help="Profile name from specs/")
+        p.add_argument("-e", "--extra-vars", nargs="*", metavar="KEY=VAL", help="Override variables")
+        p.add_argument("--cluster", "-c", help="Cluster name")
+        p.add_argument("--namespace", "-n", help="Namespace", default="ns-rosa-hcp")
+        p.add_argument("--version", help="OpenShift version")
+
+    # create
+    p_create = subparsers.add_parser("create", help="Create a new cluster")
+    add_common_args(p_create)
+    p_create.add_argument("--name-prefix", help="Cluster name prefix")
+
+    # upgrade
+    p_upgrade = subparsers.add_parser("upgrade", help="Upgrade cluster (CP + MP)")
+    add_common_args(p_upgrade)
+
+    # apply
+    p_apply = subparsers.add_parser("apply", help="Apply Day2 actions from spec")
+    add_common_args(p_apply)
+
+    # delete
+    p_delete = subparsers.add_parser("delete", help="Delete a cluster")
+    add_common_args(p_delete)
+    p_delete.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+
+    # plan
+    p_plan = subparsers.add_parser("plan", help="Show execution plan (dry run)")
+    add_common_args(p_plan)
+
+    # status
+    p_status = subparsers.add_parser("status", help="Show cluster status")
+    p_status.add_argument("--cluster", "-c", required=True, help="Cluster name")
+    p_status.add_argument("--namespace", "-n", default="ns-rosa-hcp")
+
+    # specs
+    subparsers.add_parser("specs", help="List available profiles")
+
+    # features
+    subparsers.add_parser("features", help="List all features from registry")
+
+    # set
+    p_set = subparsers.add_parser("set", help="Set a single feature on a running cluster")
+    p_set.add_argument("feature", help="Feature ID (e.g., channel_group)")
+    p_set.add_argument("value", help="Target value (e.g., fast)")
+    p_set.add_argument("--cluster", "-c", required=True, help="Cluster name")
+    p_set.add_argument("--namespace", "-n", default="ns-rosa-hcp", help="Namespace")
+    p_set.add_argument("--dry-run", action="store_true", help="Show plan without executing")
+
+    # validate
+    p_validate = subparsers.add_parser("validate", help="Validate a spec file against the registry")
+    p_validate.add_argument("file", help="Path to ClusterAutomationSpec YAML file")
+
+    # generate-specs
+    p_gen = subparsers.add_parser("generate-specs", help="Auto-generate feature specs from registry")
+    p_gen.add_argument("--force", action="store_true", help="Overwrite existing spec files")
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    commands = {
+        "create": cmd_create,
+        "upgrade": cmd_upgrade,
+        "apply": cmd_apply,
+        "delete": cmd_delete,
+        "plan": cmd_plan,
+        "status": cmd_status,
+        "specs": cmd_specs,
+        "features": cmd_features,
+        "set": cmd_set,
+        "validate": cmd_validate,
+        "generate-specs": cmd_generate_specs,
+    }
+
+    cmd_fn = commands.get(args.command)
+    if cmd_fn in (cmd_status, cmd_specs, cmd_features):
+        cmd_fn(args, base_dir, registry)
+    else:
+        cmd_fn(args, base_dir, registry)
+
+
+if __name__ == "__main__":
+    main()
