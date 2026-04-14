@@ -1413,40 +1413,31 @@ def cmd_workflow(args, base_dir, registry):
     def _workflow_to_plan(wf, wf_type, extra_vars_overrides=None):
         """Convert a workflow (saved JSON or YAML) to an execution plan."""
         steps = []
-        global_vars = {}
 
-        if wf_type == "saved":
-            global_vars = wf.get("globalVars", {})
-            for i, step in enumerate(wf.get("steps", [])):
-                merged_vars = {**global_vars, **(step.get("extra_vars", {}))}
-                if extra_vars_overrides:
-                    merged_vars.update(extra_vars_overrides)
-                steps.append({
-                    "step": i + 1,
-                    "type": "playbook",
-                    "name": step.get("name", f"Step {i+1}"),
-                    "playbook": step.get("file", ""),
-                    "extra_vars": merged_vars,
-                    "on_failure": step.get("onFailure", "stop"),
-                    "timeout": step.get("timeout", 600),
-                    "if": step.get("if"),
-                })
-        elif wf_type == "yaml":
+        # Extract global vars and steps from either format
+        if wf_type == "yaml":
             global_vars = wf.get("spec", {}).get("vars", {})
-            for i, step in enumerate(wf.get("spec", {}).get("steps", [])):
-                merged_vars = {**global_vars, **(step.get("vars", {}))}
-                if extra_vars_overrides:
-                    merged_vars.update(extra_vars_overrides)
-                steps.append({
-                    "step": i + 1,
-                    "type": "playbook",
-                    "name": step.get("name", f"Step {i+1}"),
-                    "playbook": step.get("playbook", ""),
-                    "extra_vars": merged_vars,
-                    "on_failure": step.get("on_failure", "stop"),
-                    "timeout": step.get("timeout", 600),
-                    "if": step.get("if"),
-                })
+            raw_steps = wf.get("spec", {}).get("steps", [])
+        else:
+            # Saved: support both old (globalVars/file/onFailure/extra_vars) and new (vars/playbook/on_failure/vars)
+            global_vars = wf.get("vars", wf.get("globalVars", {}))
+            raw_steps = wf.get("steps", [])
+
+        for i, step in enumerate(raw_steps):
+            step_vars = step.get("vars", step.get("extra_vars", {}))
+            merged_vars = {**global_vars, **step_vars}
+            if extra_vars_overrides:
+                merged_vars.update(extra_vars_overrides)
+            steps.append({
+                "step": i + 1,
+                "type": "playbook",
+                "name": step.get("name", f"Step {i+1}"),
+                "playbook": step.get("playbook", step.get("file", "")),
+                "extra_vars": merged_vars,
+                "on_failure": step.get("on_failure", step.get("onFailure", "stop")),
+                "timeout": step.get("timeout", 600),
+                "if": step.get("if"),
+            })
         return steps
 
     if action == "list":
@@ -1489,45 +1480,35 @@ def cmd_workflow(args, base_dir, registry):
             sys.exit(1)
 
         if wf_type == "saved":
-            print(f"\n{C.BOLD}Workflow: {wf['name']}{C.E}")
+            wf_name = wf.get("name", name)
+            print(f"\n{C.BOLD}Workflow: {wf_name}{C.E}")
             print(f"  ID: {wf.get('id', 'n/a')}")
-            print(f"  Stop on failure: {wf.get('stopOnFailure', True)}")
-            gv = wf.get("globalVars", {})
-            if gv:
-                print(f"\n  {C.BOLD}Global Variables:{C.E}")
-                for k, v in gv.items():
-                    display_v = "***" if "secret" in k.lower() or "password" in k.lower() else v
-                    print(f"    {k} = {display_v}")
-            print(f"\n  {C.BOLD}Steps:{C.E}")
-            for i, step in enumerate(wf.get("steps", []), 1):
-                print(f"    {i}. {step.get('name', '?')}")
-                print(f"       playbook: {step.get('file', '?')}")
-                print(f"       on_failure: {step.get('onFailure', 'stop')}")
-                if step.get("if"):
-                    print(f"       {C.Y}if: {step['if']}{C.E}")
-                ev = step.get("extra_vars", {})
-                if ev:
-                    print(f"       extra_vars: {json.dumps(ev, indent=2).replace(chr(10), chr(10) + '       ')}")
+            print(f"  Stop on failure: {wf.get('stop_on_failure', wf.get('stopOnFailure', True))}")
+            gv = wf.get("vars", wf.get("globalVars", {}))
         elif wf_type == "yaml":
-            print(f"\n{C.BOLD}Workflow: {wf['metadata']['name']}{C.E}  ({wf.get('_source', '')})")
-            print(f"  Description: {wf['metadata'].get('description', '')}")
-            spec = wf.get("spec", {})
-            gv = spec.get("vars", {})
-            if gv:
-                print(f"\n  {C.BOLD}Global Variables:{C.E}")
-                for k, v in gv.items():
-                    display_v = "***" if "secret" in k.lower() or "password" in k.lower() else v
-                    print(f"    {k} = {display_v}")
-            print(f"\n  {C.BOLD}Steps:{C.E}")
-            for i, step in enumerate(spec.get("steps", []), 1):
-                print(f"    {i}. {step.get('name', '?')}")
-                print(f"       playbook: {step.get('playbook', '?')}")
-                print(f"       on_failure: {step.get('on_failure', 'stop')}")
-                if step.get("if"):
-                    print(f"       {C.Y}if: {step['if']}{C.E}")
-                sv = step.get("vars", {})
-                if sv:
-                    print(f"       vars: {json.dumps(sv, indent=2).replace(chr(10), chr(10) + '       ')}")
+            wf_name = wf.get("metadata", {}).get("name", name)
+            print(f"\n{C.BOLD}Workflow: {wf_name}{C.E}  ({wf.get('_source', '')})")
+            print(f"  Description: {wf.get('metadata', {}).get('description', '')}")
+            gv = wf.get("spec", {}).get("vars", {})
+
+        if gv:
+            print(f"\n  {C.BOLD}Variables:{C.E}")
+            for k, v in gv.items():
+                display_v = "***" if "secret" in k.lower() or "password" in k.lower() else v
+                print(f"    {k} = {display_v}")
+
+        # Steps — unified display for both formats
+        raw_steps = wf.get("steps", []) if wf_type == "saved" else wf.get("spec", {}).get("steps", [])
+        print(f"\n  {C.BOLD}Steps:{C.E}")
+        for i, step in enumerate(raw_steps, 1):
+            print(f"    {i}. {step.get('name', '?')}")
+            print(f"       playbook: {step.get('playbook', step.get('file', '?'))}")
+            print(f"       on_failure: {step.get('on_failure', step.get('onFailure', 'stop'))}")
+            if step.get("if"):
+                print(f"       {C.Y}if: {step['if']}{C.E}")
+            sv = step.get("vars", step.get("extra_vars", {}))
+            if sv:
+                print(f"       vars: {json.dumps(sv, indent=2).replace(chr(10), chr(10) + '       ')}")
         print()
 
     elif action == "run":
@@ -1557,7 +1538,7 @@ def cmd_workflow(args, base_dir, registry):
         engine = ExecutionEngine(registry, base_dir, dry_run=dry_run, verbose=args.verbose)
 
         # Use the workflow's on_failure policy per step
-        stop_on_failure = wf.get("stopOnFailure", True) if wf_type == "saved" else True
+        stop_on_failure = wf.get("stop_on_failure", wf.get("stopOnFailure", True)) if wf_type == "saved" else True
 
         print(f"\n{C.BOLD}{C.CYAN}{'=' * 60}{C.E}")
         wf_name = wf.get("name") or wf.get("metadata", {}).get("name", name)
@@ -1628,20 +1609,22 @@ def cmd_workflow(args, base_dir, registry):
                 "description": wf.get("description", ""),
             },
             "spec": {
-                "vars": wf.get("globalVars", {}),
+                "vars": wf.get("vars", wf.get("globalVars", {})),
                 "steps": [],
             },
         }
         for step in wf.get("steps", []):
             yaml_step = {
                 "name": step.get("name", ""),
-                "playbook": step.get("file", ""),
-                "on_failure": step.get("onFailure", "stop"),
+                "playbook": step.get("playbook", step.get("file", "")),
+                "on_failure": step.get("on_failure", step.get("onFailure", "stop")),
                 "timeout": step.get("timeout", 600),
             }
-            ev = step.get("extra_vars", {})
-            if ev:
-                yaml_step["vars"] = ev
+            if step.get("if"):
+                yaml_step["if"] = step["if"]
+            sv = step.get("vars", step.get("extra_vars", {}))
+            if sv:
+                yaml_step["vars"] = sv
             yaml_wf["spec"]["steps"].append(yaml_step)
 
         out_path = base_dir / "specs" / "workflows" / f"{wf['name']}.yml"

@@ -8872,13 +8872,42 @@ WORKFLOWS_FILE = os.path.join(
 )
 
 
+def _normalize_workflow(wf):
+    """Normalize a workflow to canonical snake_case format (migrates old camelCase)."""
+    # Top-level fields
+    if "globalVars" in wf and "vars" not in wf:
+        wf["vars"] = wf.pop("globalVars")
+    elif "globalVars" in wf:
+        wf.pop("globalVars")
+    if "stopOnFailure" in wf and "stop_on_failure" not in wf:
+        wf["stop_on_failure"] = wf.pop("stopOnFailure")
+    elif "stopOnFailure" in wf:
+        wf.pop("stopOnFailure")
+    # Step fields
+    for step in wf.get("steps", []):
+        if "file" in step and "playbook" not in step:
+            step["playbook"] = step.pop("file")
+        elif "file" in step:
+            step.pop("file")
+        if "onFailure" in step and "on_failure" not in step:
+            step["on_failure"] = step.pop("onFailure")
+        elif "onFailure" in step:
+            step.pop("onFailure")
+        if "extra_vars" in step and "vars" not in step:
+            step["vars"] = step.pop("extra_vars")
+        elif "extra_vars" in step:
+            step.pop("extra_vars")
+    return wf
+
+
 def _load_workflows():
-    """Load saved workflows from disk"""
+    """Load saved workflows from disk (auto-migrates old camelCase format)."""
     if not os.path.exists(WORKFLOWS_FILE):
         return []
     try:
         with open(WORKFLOWS_FILE, "r") as f:
-            return json.load(f)
+            workflows = json.load(f)
+        return [_normalize_workflow(wf) for wf in workflows]
     except (json.JSONDecodeError, IOError):
         return []
 
@@ -8893,9 +8922,12 @@ def _save_workflows(workflows):
 class WorkflowSave(BaseModel):
     name: str
     description: str = ""
-    stopOnFailure: bool = True
-    globalVars: dict = {}
+    stop_on_failure: bool = True
+    vars: dict = {}
     steps: list = []
+    # Backward compat: accept old camelCase fields
+    stopOnFailure: bool = None
+    globalVars: dict = None
 
 
 @app.get("/api/workflows")
@@ -8905,15 +8937,16 @@ async def list_workflows():
     # Return summary info (strip globalVars values for security)
     summaries = []
     for wf in workflows:
+        wf_vars = wf.get("vars", {})
         summaries.append({
             "id": wf.get("id"),
             "name": wf.get("name"),
             "description": wf.get("description", ""),
             "stepCount": len(wf.get("steps", [])),
             "stepNames": [s.get("name", "") for s in wf.get("steps", [])],
-            "hasGlobalVars": len(wf.get("globalVars", {})) > 0,
-            "globalVarKeys": list(wf.get("globalVars", {}).keys()),
-            "stopOnFailure": wf.get("stopOnFailure", True),
+            "hasGlobalVars": len(wf_vars) > 0,
+            "globalVarKeys": list(wf_vars.keys()),
+            "stop_on_failure": wf.get("stop_on_failure", True),
             "savedAt": wf.get("savedAt"),
             "lastRunAt": wf.get("lastRunAt"),
         })
@@ -8938,15 +8971,19 @@ async def save_workflow(workflow: WorkflowSave):
     # Check for existing workflow with same name
     existing_idx = next((i for i, w in enumerate(workflows) if w.get("name") == workflow.name), None)
 
+    # Resolve backward-compat fields: prefer new snake_case, fall back to old camelCase
+    resolved_stop = workflow.stop_on_failure if workflow.stopOnFailure is None else workflow.stopOnFailure
+    resolved_vars = workflow.vars if workflow.globalVars is None else workflow.globalVars
     wf_data = {
         "id": workflows[existing_idx]["id"] if existing_idx is not None else f"wf-{uuid.uuid4().hex[:12]}",
         "name": workflow.name,
         "description": workflow.description,
-        "stopOnFailure": workflow.stopOnFailure,
-        "globalVars": workflow.globalVars,
+        "stop_on_failure": resolved_stop,
+        "vars": resolved_vars,
         "steps": workflow.steps,
         "savedAt": datetime.now().isoformat(),
     }
+    _normalize_workflow(wf_data)
 
     if existing_idx is not None:
         # Preserve lastRunAt from existing
@@ -8967,14 +9004,18 @@ async def update_workflow(workflow_id: str, workflow: WorkflowSave):
     if idx is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    workflows[idx].update({
+    resolved_stop = workflow.stop_on_failure if workflow.stopOnFailure is None else workflow.stopOnFailure
+    resolved_vars = workflow.vars if workflow.globalVars is None else workflow.globalVars
+    update_data = {
         "name": workflow.name,
         "description": workflow.description,
-        "stopOnFailure": workflow.stopOnFailure,
-        "globalVars": workflow.globalVars,
+        "stop_on_failure": resolved_stop,
+        "vars": resolved_vars,
         "steps": workflow.steps,
         "savedAt": datetime.now().isoformat(),
-    })
+    }
+    _normalize_workflow(update_data)
+    workflows[idx].update(update_data)
 
     _save_workflows(workflows)
     return {"success": True, "workflow": workflows[idx]}
@@ -9032,13 +9073,13 @@ async def list_workflow_templates():
             "description": "Complete end-to-end test: validate environment, provision a ROSA HCP cluster, verify it, then delete and clean up.",
             "icon": "rocket",
             "steps": [
-                {"name": "Validate CAPA Environment", "file": "playbooks/validate-capa-environment.yml", "onFailure": "stop", "timeout": 120, "extra_vars": {}},
-                {"name": "Provision ROSA HCP Cluster", "file": "playbooks/provision_rosa_hcp_cluster.yml", "onFailure": "stop", "timeout": 2400, "extra_vars": {}},
-                {"name": "Verify ROSA HCP Cluster", "file": "playbooks/verify_rosa_hcp_cluster.yml", "onFailure": "skip", "timeout": 600, "extra_vars": {}},
-                {"name": "Delete ROSA HCP Cluster", "file": "playbooks/delete_rosa_hcp_cluster.yml", "onFailure": "stop", "timeout": 2400, "extra_vars": {}},
+                {"name": "Validate CAPA Environment", "playbook": "playbooks/validate-capa-environment.yml", "on_failure": "stop", "timeout": 120, "vars": {}},
+                {"name": "Provision ROSA HCP Cluster", "playbook": "playbooks/provision_rosa_hcp_cluster.yml", "on_failure": "stop", "timeout": 2400, "vars": {}},
+                {"name": "Verify ROSA HCP Cluster", "playbook": "playbooks/verify_rosa_hcp_cluster.yml", "on_failure": "skip", "timeout": 600, "vars": {}},
+                {"name": "Delete ROSA HCP Cluster", "playbook": "playbooks/delete_rosa_hcp_cluster.yml", "on_failure": "stop", "timeout": 2400, "vars": {}},
             ],
-            "globalVars": {},
-            "stopOnFailure": True,
+            "vars": {},
+            "stop_on_failure": True,
         },
         {
             "id": "tpl-provision-only",
@@ -9046,11 +9087,11 @@ async def list_workflow_templates():
             "description": "Validate the environment and provision a ROSA HCP cluster.",
             "icon": "server",
             "steps": [
-                {"name": "Validate CAPA Environment", "file": "playbooks/validate-capa-environment.yml", "onFailure": "stop", "timeout": 120, "extra_vars": {}},
-                {"name": "Provision ROSA HCP Cluster", "file": "playbooks/provision_rosa_hcp_cluster.yml", "onFailure": "stop", "timeout": 2400, "extra_vars": {}},
+                {"name": "Validate CAPA Environment", "playbook": "playbooks/validate-capa-environment.yml", "on_failure": "stop", "timeout": 120, "vars": {}},
+                {"name": "Provision ROSA HCP Cluster", "playbook": "playbooks/provision_rosa_hcp_cluster.yml", "on_failure": "stop", "timeout": 2400, "vars": {}},
             ],
-            "globalVars": {},
-            "stopOnFailure": True,
+            "vars": {},
+            "stop_on_failure": True,
         },
         {
             "id": "tpl-delete-cleanup",
@@ -9058,10 +9099,10 @@ async def list_workflow_templates():
             "description": "Delete a ROSA HCP cluster and clean up any orphaned AWS resources.",
             "icon": "trash",
             "steps": [
-                {"name": "Delete ROSA HCP Cluster", "file": "playbooks/delete_rosa_hcp_cluster.yml", "onFailure": "skip", "timeout": 2400, "extra_vars": {}},
+                {"name": "Delete ROSA HCP Cluster", "playbook": "playbooks/delete_rosa_hcp_cluster.yml", "on_failure": "skip", "timeout": 2400, "vars": {}},
             ],
-            "globalVars": {},
-            "stopOnFailure": False,
+            "vars": {},
+            "stop_on_failure": False,
         },
         {
             "id": "tpl-validate-env",
@@ -9069,10 +9110,10 @@ async def list_workflow_templates():
             "description": "Run all validation checks to ensure your CAPA environment is properly configured.",
             "icon": "check",
             "steps": [
-                {"name": "Validate CAPA Environment", "file": "playbooks/validate-capa-environment.yml", "onFailure": "stop", "timeout": 120, "extra_vars": {"soft_verify": "true"}},
+                {"name": "Validate CAPA Environment", "playbook": "playbooks/validate-capa-environment.yml", "on_failure": "stop", "timeout": 120, "vars": {"soft_verify": "true"}},
             ],
-            "globalVars": {},
-            "stopOnFailure": True,
+            "vars": {},
+            "stop_on_failure": True,
         },
     ]
     return {"success": True, "templates": templates}
@@ -9098,6 +9139,7 @@ async def list_yaml_workflows():
             meta = data.get("metadata", {})
             spec = data.get("spec", {})
             steps = spec.get("steps", [])
+            wf_vars = spec.get("vars", {})
             results.append({
                 "id": f"yaml-{fname.replace('.yml', '')}",
                 "name": meta.get("name", fname.replace(".yml", "")),
@@ -9105,17 +9147,17 @@ async def list_yaml_workflows():
                 "source": f"specs/workflows/{fname}",
                 "stepCount": len(steps),
                 "stepNames": [s.get("name", "") for s in steps],
-                "globalVars": spec.get("vars", {}),
-                "hasGlobalVars": len(spec.get("vars", {})) > 0,
-                "globalVarKeys": list(spec.get("vars", {}).keys()),
-                "stopOnFailure": True,
+                "vars": wf_vars,
+                "hasGlobalVars": len(wf_vars) > 0,
+                "globalVarKeys": list(wf_vars.keys()),
+                "stop_on_failure": True,
                 "steps": [
                     {
                         "name": s.get("name", ""),
-                        "file": s.get("playbook", ""),
-                        "onFailure": s.get("on_failure", "stop"),
+                        "playbook": s.get("playbook", ""),
+                        "on_failure": s.get("on_failure", "stop"),
                         "timeout": s.get("timeout", 600),
-                        "extra_vars": s.get("vars", {}),
+                        "vars": s.get("vars", {}),
                         **({"condition": s["if"]} if s.get("if") else {}),
                     }
                     for s in steps
