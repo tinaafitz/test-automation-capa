@@ -1,0 +1,39 @@
+# Dependencies (rebuilt in container)
+ui/frontend/node_modules/
+ui/backend/venv/
+__pycache__/
+*.pyc
+
+# Build artifacts
+ui/frontend/build/
+htmlcov/
+.coverage
+*.egg-info/
+
+# Test results
+test-results/
+results/
+
+# Generated
+generated-yamls/
+
+# Git
+.git/
+.github/
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets (must be mounted at runtime)
+vars/user_vars.yml
+*.pem
+*.key
+*.crt
+kubeconfig
+
+# Docs
+docs/
+
+# Claude
+.claude/

@@ -12,9 +12,8 @@ const getApiBaseUrl = () => {
     return 'http://localhost:8000';
   }
 
-  // Production should always use environment variable
-  // This prevents accidental localhost usage in production
-  throw new Error('REACT_APP_API_BASE_URL must be set for production builds');
+  // Production: use relative URLs (works behind nginx/reverse proxy)
+  return '';
 };
 
 export const API_BASE_URL = getApiBaseUrl();

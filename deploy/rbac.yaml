@@ -1,0 +1,55 @@
+# ClusterRole: read/patch CAPA resources across all namespaces
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: capa-automation
+  labels:
+    app: capa-automation
+rules:
+  # CAPA resources — get, list, watch, patch
+  - apiGroups: ["controlplane.cluster.x-k8s.io"]
+    resources: ["rosacontrolplanes"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    resources: ["rosanetworks", "rosamachinepools", "rosaroleconfigs"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["cluster.x-k8s.io"]
+    resources: ["clusters", "machinepools"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # Read namespaces
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  # Secrets for credentials
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  # ConfigMaps
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  # Delete resources (for cluster deletion)
+  - apiGroups: ["controlplane.cluster.x-k8s.io"]
+    resources: ["rosacontrolplanes"]
+    verbs: ["delete"]
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    resources: ["rosanetworks", "rosamachinepools", "rosaroleconfigs"]
+    verbs: ["delete"]
+  - apiGroups: ["cluster.x-k8s.io"]
+    resources: ["clusters", "machinepools"]
+    verbs: ["delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: capa-automation
+  labels:
+    app: capa-automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: capa-automation
+subjects:
+  - kind: ServiceAccount
+    name: capa-automation
+    namespace: capa-automation

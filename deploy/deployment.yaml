@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capa-automation
+  namespace: capa-automation
+  labels:
+    app: capa-automation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: capa-automation
+  template:
+    metadata:
+      labels:
+        app: capa-automation
+    spec:
+      serviceAccountName: capa-automation
+      containers:
+        - name: capa-automation
+          # Update with your registry/image path
+          image: quay.io/YOUR_ORG/capa-automation:latest
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: ROSA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: capa-automation-credentials
+                  key: ROSA_TOKEN
+                  optional: true
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: capa-automation-credentials
+                  key: AWS_ACCESS_KEY_ID
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: capa-automation-credentials
+                  key: AWS_SECRET_ACCESS_KEY
+                  optional: true
+            - name: AWS_DEFAULT_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: capa-automation-credentials
+                  key: AWS_DEFAULT_REGION
+                  optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /app/vars
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: capa-automation-data
