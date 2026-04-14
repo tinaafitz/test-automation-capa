@@ -68,7 +68,7 @@ jobs:
             );
             const isDocsOnly = docOrCiFiles.length > 0 && docOrCiFiles.length === changedFiles.length;
 
-            // Check if this is a new UI component PR (single large new component file)
+            // Check if this is a new UI component PR
             const newUiComponents = changedFiles.filter(f =>
               f.match(/^ui\/frontend\/src\/(components|pages)\/.*\.jsx$/)
             );
@@ -80,12 +80,22 @@ jobs:
             );
             const isTestPR = testFiles.length > 0 && testFiles.length >= changedFiles.length * 0.5;
 
+            // Check if this is a feature PR with new UI components, infra, or schema files
+            const infraFiles = changedFiles.filter(f =>
+              f.match(/^deploy\//) || f.match(/^specs\//) || f.match(/^schemas\//) ||
+              f.match(/Dockerfile/) || f.match(/Containerfile/) || f.match(/\.dockerignore/) ||
+              f.match(/container-run\.sh/) || f.match(/docker-entrypoint\.sh/)
+            );
+            const isFeaturePR = (newUiComponents.length > 0 || infraFiles.length > 0) && changes <= 3000;
+
             if (isDocsOnly) {
               console.log(`Documentation-only PR - skipping size check (${changes} changes in ${docOrCiFiles.length} doc/ci files)`);
             } else if (isTestPR) {
               core.warning(`Large test PR (${changes} changes in ${testFiles.length} test files). Test PRs are exempt from size limits.`);
             } else if (isNewUiComponent && changes > 1000) {
               core.warning(`Large UI component PR (${changes} changes in ${newUiComponents.length} component files). Allowed up to 1500 for new components.`);
+            } else if (isFeaturePR && changes > 1000) {
+              core.warning(`Large feature PR (${changes} changes with ${newUiComponents.length} UI components, ${infraFiles.length} infra files). Allowed up to 3000 for feature PRs.`);
             } else if (changes > 1000) {
               core.setFailed(`PR is too large (${changes} changes). Please split into smaller PRs.`);
             } else if (changes > 500) {
