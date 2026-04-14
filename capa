@@ -89,7 +89,8 @@ class FeatureRegistry:
 class ClusterAutomationSpec:
     """Parses and validates a ClusterAutomationSpec YAML."""
 
-    def __init__(self, data: Dict, overrides: Optional[Dict] = None):
+    def __init__(self, data: Dict, overrides: Optional[Dict] = None,
+                 base_dir: Optional[Path] = None):
         if data.get("apiVersion") != "capa-automation/v1":
             raise ValueError(f"Unsupported apiVersion: {data.get('apiVersion')}")
         if data.get("kind") != "ClusterAutomationSpec":
@@ -98,6 +99,11 @@ class ClusterAutomationSpec:
         self.metadata = data.get("metadata", {})
         self.spec = data.get("spec", {})
         self.name = self.metadata.get("name", "unnamed")
+
+        # Profile inheritance: merge parent profile underneath
+        inherits = self.metadata.get("inherits")
+        if inherits and base_dir:
+            self._apply_inheritance(inherits, base_dir)
 
         # Apply overrides (from CLI -e flags)
         if overrides:
@@ -150,6 +156,32 @@ class ClusterAutomationSpec:
     @property
     def profile(self) -> str:
         return self.metadata.get("profile", "")
+
+    def _apply_inheritance(self, parent_name: str, base_dir: Path):
+        """Merge a parent profile's spec underneath this spec (child wins)."""
+        parent_path = None
+        for candidate in (base_dir / "specs").rglob(f"{parent_name}.yml"):
+            parent_path = candidate
+            break
+        if not parent_path or not parent_path.exists():
+            raise ValueError(f"Inherited profile not found: {parent_name}")
+
+        with open(parent_path) as f:
+            parent_data = yaml.safe_load(f)
+
+        parent_spec = parent_data.get("spec", {})
+
+        # Merge parent features under child features (child wins)
+        parent_features = parent_spec.get("features", {})
+        child_features = self.spec.get("features", {})
+        merged_features = {**parent_features, **child_features}
+        if merged_features:
+            self.spec["features"] = merged_features
+
+        # Merge parent top-level spec fields (child wins)
+        for key in ("version", "region", "channel", "namespace"):
+            if key not in self.spec and key in parent_spec:
+                self.spec[key] = parent_spec[key]
 
 
 # ============================================================================
@@ -608,7 +640,7 @@ def load_spec(args, base_dir: Path) -> ClusterAutomationSpec:
     if hasattr(args, "file") and args.file:
         with open(args.file) as f:
             data = yaml.safe_load(f)
-        return ClusterAutomationSpec(data, overrides)
+        return ClusterAutomationSpec(data, overrides, base_dir=base_dir)
 
     if hasattr(args, "profile") and args.profile:
         # Search all subdirectories under specs/
@@ -623,7 +655,7 @@ def load_spec(args, base_dir: Path) -> ClusterAutomationSpec:
             sys.exit(1)
         with open(profile_path) as f:
             data = yaml.safe_load(f)
-        return ClusterAutomationSpec(data, overrides)
+        return ClusterAutomationSpec(data, overrides, base_dir=base_dir)
 
     # Build inline spec from command args
     action = args.command if hasattr(args, "command") else "status"
@@ -633,7 +665,7 @@ def load_spec(args, base_dir: Path) -> ClusterAutomationSpec:
         "metadata": {"name": f"cli-{action}"},
         "spec": {"action": action},
     }
-    return ClusterAutomationSpec(data, overrides)
+    return ClusterAutomationSpec(data, overrides, base_dir=base_dir)
 
 
 def cmd_create(args, base_dir, registry):

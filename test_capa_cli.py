@@ -983,6 +983,133 @@ class TestCLIIntegration:
 # Real Spec File Validation Tests
 # ============================================================================
 
+class TestProfileInheritance:
+    """Tests for profile inheritance (metadata.inherits)."""
+
+    def test_inheritance_merges_parent_features(self, registry):
+        """Child inherits parent features, child features win on conflict."""
+        data = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "ClusterAutomationSpec",
+            "metadata": {"name": "child", "inherits": "default"},
+            "spec": {
+                "action": "create",
+                "features": {
+                    "instance_type": "m5.4xlarge",  # override parent's m5.xlarge
+                },
+            },
+        }
+        spec = capa_cli.ClusterAutomationSpec(data, base_dir=PROJECT_ROOT)
+        # Child override wins
+        assert spec.features["instance_type"] == "m5.4xlarge"
+        # Parent features inherited
+        assert spec.features["availability_zones"] == "1"
+        assert "automated" in spec.features["additional_tags"]
+
+    def test_inheritance_child_features_win(self, registry):
+        """When both parent and child define the same feature, child wins."""
+        data = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "ClusterAutomationSpec",
+            "metadata": {"name": "override-test", "inherits": "default"},
+            "spec": {
+                "action": "create",
+                "features": {
+                    "additional_tags": {"custom": "value"},
+                },
+            },
+        }
+        spec = capa_cli.ClusterAutomationSpec(data, base_dir=PROJECT_ROOT)
+        # Child's tags replace parent's tags entirely (dict override)
+        assert spec.features["additional_tags"] == {"custom": "value"}
+
+    def test_inheritance_inherits_top_level_fields(self, registry):
+        """Child inherits parent's version, region, channel if not set."""
+        data = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "ClusterAutomationSpec",
+            "metadata": {"name": "minimal", "inherits": "default"},
+            "spec": {
+                "action": "create",
+                "features": {},
+            },
+        }
+        spec = capa_cli.ClusterAutomationSpec(data, base_dir=PROJECT_ROOT)
+        assert spec.version == "4.20.11"  # from default profile
+        assert spec.region == "us-west-2"
+        assert spec.channel == "stable"
+
+    def test_inheritance_child_overrides_top_level(self, registry):
+        """Child's explicit top-level fields override parent."""
+        data = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "ClusterAutomationSpec",
+            "metadata": {"name": "override-region", "inherits": "default"},
+            "spec": {
+                "action": "create",
+                "region": "eu-west-1",
+                "features": {},
+            },
+        }
+        spec = capa_cli.ClusterAutomationSpec(data, base_dir=PROJECT_ROOT)
+        assert spec.region == "eu-west-1"
+
+    def test_inheritance_missing_parent_raises(self):
+        """Inheriting from nonexistent profile raises ValueError."""
+        data = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "ClusterAutomationSpec",
+            "metadata": {"name": "bad-inherit", "inherits": "nonexistent-profile"},
+            "spec": {"action": "create"},
+        }
+        with pytest.raises(ValueError, match="not found"):
+            capa_cli.ClusterAutomationSpec(data, base_dir=PROJECT_ROOT)
+
+    def test_inheritance_no_base_dir_skips(self):
+        """Without base_dir, inheritance is silently skipped."""
+        data = {
+            "apiVersion": "capa-automation/v1",
+            "kind": "ClusterAutomationSpec",
+            "metadata": {"name": "no-basedir", "inherits": "default"},
+            "spec": {"action": "create", "features": {}},
+        }
+        # Should not raise — inheritance is skipped when base_dir is None
+        spec = capa_cli.ClusterAutomationSpec(data)
+        assert spec.features == {}
+
+    def test_real_inherited_profile(self, registry):
+        """Test the real private-encrypted-custom profile that inherits from private-encrypted."""
+        profile_path = PROJECT_ROOT / "specs" / "profiles" / "private-encrypted-custom.yml"
+        if not profile_path.exists():
+            pytest.skip("private-encrypted-custom.yml not found")
+        with open(profile_path) as f:
+            data = yaml.safe_load(f)
+        spec = capa_cli.ClusterAutomationSpec(data, base_dir=PROJECT_ROOT)
+        # From child
+        assert spec.features["instance_type"] == "m5.4xlarge"
+        assert spec.features["disk_size"] == 500
+        # From parent (private-encrypted)
+        assert spec.features["private_network"] is True
+        assert spec.features["availability_zones"] == "3"
+
+    def test_version_type_validation(self, registry):
+        """Test that version type validates semver format."""
+        feat = {"id": "test_version", "type": "version"}
+        errors = []
+        warnings = []
+        capa_cli._validate_feature_value_check(feat, "4.20.11", errors, warnings)
+        assert errors == []
+
+        errors = []
+        capa_cli._validate_feature_value_check(feat, "not-a-version", errors, warnings)
+        assert len(errors) == 1
+        assert "semver" in errors[0]
+
+        errors = []
+        capa_cli._validate_feature_value_check(feat, "4.20", errors, warnings)
+        assert len(errors) == 1  # Missing patch version
+
+
 class TestRealSpecFiles:
     """Validate all spec files in the repo against the registry."""
 
