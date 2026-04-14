@@ -27,6 +27,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+from capa_core import (
+    FeatureRegistry, ClusterAutomationSpec,
+    validate_feature_value, build_json_merge_patch, resolve_spec_to_plan,
+)
+
 
 # ============================================================================
 # Terminal colors
@@ -37,158 +42,10 @@ class C:
 
 
 # ============================================================================
-# Feature Registry
-# ============================================================================
-class FeatureRegistry:
-    """Loads and queries the feature registry."""
-
-    def __init__(self, base_dir: Path):
-        self.base_dir = base_dir
-        registry_path = base_dir / "schemas" / "feature-registry.yml"
-        with open(registry_path) as f:
-            self._data = yaml.safe_load(f)
-        self._features = {}
-        for suite in self._data.get("suites", []):
-            for feat in suite.get("features", []):
-                feat["_suite"] = suite["id"]
-                self._features[feat["id"]] = feat
-
-    @property
-    def var_map(self) -> Dict[str, str]:
-        return self._data.get("var_map", {})
-
-    @property
-    def dependencies(self) -> Dict[str, List[str]]:
-        return self._data.get("dependencies", {})
-
-    @property
-    def sequences(self) -> Dict[str, Any]:
-        return self._data.get("sequences", {})
-
-    @property
-    def suites(self) -> List[Dict]:
-        return self._data.get("suites", [])
-
-    def get_feature(self, feature_id: str) -> Optional[Dict]:
-        return self._features.get(feature_id)
-
-    def all_features(self) -> Dict[str, Dict]:
-        return self._features
-
-    def get_deps(self, feature_id: str) -> List[str]:
-        return self.dependencies.get(feature_id, [])
-
-    def resolve_var(self, feature_id: str) -> str:
-        """Map feature ID to playbook extra_var name."""
-        return self.var_map.get(feature_id, feature_id)
-
-
-# ============================================================================
-# Cluster Spec
-# ============================================================================
-class ClusterAutomationSpec:
-    """Parses and validates a ClusterAutomationSpec YAML."""
-
-    def __init__(self, data: Dict, overrides: Optional[Dict] = None,
-                 base_dir: Optional[Path] = None):
-        if data.get("apiVersion") != "capa-automation/v1":
-            raise ValueError(f"Unsupported apiVersion: {data.get('apiVersion')}")
-        if data.get("kind") != "ClusterAutomationSpec":
-            raise ValueError(f"Unsupported kind: {data.get('kind')}")
-
-        self.metadata = data.get("metadata", {})
-        self.spec = data.get("spec", {})
-        self.name = self.metadata.get("name", "unnamed")
-
-        # Profile inheritance: merge parent profile underneath
-        inherits = self.metadata.get("inherits")
-        if inherits and base_dir:
-            self._apply_inheritance(inherits, base_dir)
-
-        # Apply overrides (from CLI -e flags)
-        if overrides:
-            for k, v in overrides.items():
-                if k in ("cluster", "namespace", "version", "region", "channel",
-                          "name_prefix", "action"):
-                    self.spec[k] = v
-                elif k.startswith("feature."):
-                    feat_key = k.split(".", 1)[1]
-                    self.spec.setdefault("features", {})[feat_key] = v
-                else:
-                    self.spec.setdefault("features", {})[k] = v
-
-    @property
-    def action(self) -> str:
-        return self.spec.get("action", "create")
-
-    @property
-    def cluster(self) -> str:
-        return self.spec.get("cluster", "")
-
-    @property
-    def namespace(self) -> str:
-        return self.spec.get("namespace", "ns-rosa-hcp")
-
-    @property
-    def version(self) -> str:
-        return self.spec.get("version", "")
-
-    @property
-    def region(self) -> str:
-        return self.spec.get("region", "us-west-2")
-
-    @property
-    def channel(self) -> str:
-        return self.spec.get("channel", "stable")
-
-    @property
-    def name_prefix(self) -> str:
-        return self.spec.get("name_prefix", "")
-
-    @property
-    def features(self) -> Dict[str, Any]:
-        return self.spec.get("features", {})
-
-    @property
-    def actions(self) -> List[Dict]:
-        return self.spec.get("actions", [])
-
-    @property
-    def profile(self) -> str:
-        return self.metadata.get("profile", "")
-
-    def _apply_inheritance(self, parent_name: str, base_dir: Path):
-        """Merge a parent profile's spec underneath this spec (child wins)."""
-        parent_path = None
-        for candidate in (base_dir / "specs").rglob(f"{parent_name}.yml"):
-            parent_path = candidate
-            break
-        if not parent_path or not parent_path.exists():
-            raise ValueError(f"Inherited profile not found: {parent_name}")
-
-        with open(parent_path) as f:
-            parent_data = yaml.safe_load(f)
-
-        parent_spec = parent_data.get("spec", {})
-
-        # Merge parent features under child features (child wins)
-        parent_features = parent_spec.get("features", {})
-        child_features = self.spec.get("features", {})
-        merged_features = {**parent_features, **child_features}
-        if merged_features:
-            self.spec["features"] = merged_features
-
-        # Merge parent top-level spec fields (child wins)
-        for key in ("version", "region", "channel", "namespace"):
-            if key not in self.spec and key in parent_spec:
-                self.spec[key] = parent_spec[key]
-
-
-# ============================================================================
-# Execution Engine
+# Execution Engine (CLI-specific: adds terminal output, subprocess execution)
 # ============================================================================
 class ExecutionEngine:
-    """Resolves specs into execution plans and runs them."""
+    """Wraps shared plan resolution with CLI-specific execution (subprocess, terminal output)."""
 
     def __init__(self, registry: FeatureRegistry, base_dir: Path,
                  dry_run: bool = False, verbose: bool = False):
@@ -198,208 +55,8 @@ class ExecutionEngine:
         self.verbose = verbose
 
     def plan(self, spec: ClusterAutomationSpec) -> List[Dict]:
-        """Generate an ordered execution plan from a spec."""
-        action = spec.action
-
-        if action == "create":
-            return self._plan_create(spec)
-        elif action == "upgrade":
-            return self._plan_upgrade(spec)
-        elif action == "apply":
-            return self._plan_apply(spec)
-        elif action == "delete":
-            return self._plan_delete(spec)
-        elif action == "test":
-            return self._plan_test(spec)
-        else:
-            raise ValueError(f"Unknown action: {action}")
-
-    def _plan_create(self, spec: ClusterAutomationSpec) -> List[Dict]:
-        """Plan: resolve features to playbook extra_vars, run provision playbook."""
-        extra_vars = {
-            "name_prefix": spec.name_prefix,
-            "capi_namespace": spec.namespace,
-            "aws_region": spec.region,
-            "channel_group": spec.channel,
-        }
-        if spec.version:
-            extra_vars["openshift_version"] = spec.version
-
-        # Map features to playbook vars
-        for feat_id, value in spec.features.items():
-            var_name = self.registry.resolve_var(feat_id)
-            extra_vars[var_name] = value
-
-        # Read playbook path from registry sequences (single source of truth)
-        provision_seq = self.registry.sequences.get("provision", {})
-        playbook = provision_seq.get("playbook", "playbooks/create_rosa_hcp_cluster.yml")
-
-        return [{
-            "step": 1,
-            "type": "playbook",
-            "name": f"Create cluster {spec.name_prefix or 'new'}-rosa-hcp",
-            "playbook": playbook,
-            "extra_vars": extra_vars,
-            "wait": True,
-            "features_used": list(spec.features.keys()),
-        }]
-
-    def _plan_upgrade(self, spec: ClusterAutomationSpec) -> List[Dict]:
-        """Plan: upgrade control plane then machine pool (auto-sequenced)."""
-        if not spec.cluster:
-            raise ValueError("upgrade requires --cluster")
-        if not spec.version:
-            raise ValueError("upgrade requires --version")
-
-        steps = []
-
-        # Step 1: Control plane upgrade
-        cp_feature = self.registry.get_feature("control_plane_upgrade")
-        steps.append({
-            "step": 1,
-            "type": "playbook",
-            "name": f"Upgrade control plane to {spec.version}",
-            "playbook": cp_feature["playbook"],
-            "extra_vars": {
-                "cluster_name": spec.cluster,
-                "capi_namespace": spec.namespace,
-                "requested_version": spec.version,
-            },
-            "wait": True,
-            "wait_resource": cp_feature.get("wait_resource"),
-            "wait_field": cp_feature.get("wait_field"),
-            "wait_value": cp_feature.get("wait_value"),
-            "wait_timeout": cp_feature.get("wait_timeout", 3600),
-            "feature": "control_plane_upgrade",
-        })
-
-        # Step 2: Machine pool upgrade (depends on CP)
-        mp_feature = self.registry.get_feature("machine_pool_upgrade")
-        steps.append({
-            "step": 2,
-            "type": "playbook",
-            "name": f"Upgrade machine pool to {spec.version}",
-            "playbook": mp_feature["playbook"],
-            "extra_vars": {
-                "cluster_name": spec.cluster,
-                "capi_namespace": spec.namespace,
-                "requested_version": spec.version,
-            },
-            "wait": True,
-            "wait_resource": mp_feature.get("wait_resource"),
-            "wait_field": mp_feature.get("wait_field"),
-            "wait_value": mp_feature.get("wait_value"),
-            "wait_timeout": mp_feature.get("wait_timeout", 3600),
-            "feature": "machine_pool_upgrade",
-            "depends_on": "control_plane_upgrade",
-        })
-
-        return steps
-
-    def _plan_apply(self, spec: ClusterAutomationSpec) -> List[Dict]:
-        """Plan: execute explicit action list with dependency ordering."""
-        if not spec.cluster:
-            raise ValueError("apply requires --cluster")
-
-        raw_actions = spec.actions
-        if not raw_actions:
-            raise ValueError("apply requires actions list")
-
-        # Build steps, respecting depends_on from registry
-        steps = []
-        for i, action in enumerate(raw_actions):
-            feat_id = action["feature"]
-            value = action.get("value")
-            wait = action.get("wait", True)
-            feature = self.registry.get_feature(feat_id)
-
-            if not feature:
-                raise ValueError(f"Unknown feature: {feat_id}")
-
-            deps = self.registry.get_deps(feat_id)
-            depends_on = deps[0] if deps else None
-
-            if feature.get("playbook"):
-                extra_vars = {
-                    "cluster_name": spec.cluster,
-                    "capi_namespace": spec.namespace,
-                }
-                if value:
-                    if feat_id in ("control_plane_upgrade", "machine_pool_upgrade"):
-                        extra_vars["requested_version"] = str(value)
-
-                steps.append({
-                    "step": i + 1,
-                    "type": "playbook",
-                    "name": f"{feature['name']}",
-                    "playbook": feature["playbook"],
-                    "extra_vars": extra_vars,
-                    "wait": wait,
-                    "wait_resource": feature.get("wait_resource"),
-                    "wait_field": feature.get("wait_field"),
-                    "wait_value": feature.get("wait_value"),
-                    "wait_timeout": feature.get("wait_timeout", 600),
-                    "feature": feat_id,
-                    "depends_on": depends_on,
-                })
-            else:
-                # K8s patch
-                steps.append({
-                    "step": i + 1,
-                    "type": "patch",
-                    "name": f"{feature['name']} = {value}",
-                    "resource": feature.get("resource", ""),
-                    "k8s_field": feature.get("k8s_field", ""),
-                    "value": value,
-                    "cluster": spec.cluster,
-                    "namespace": spec.namespace,
-                    "wait": wait,
-                    "feature": feat_id,
-                    "depends_on": depends_on,
-                })
-
-        return steps
-
-    def _plan_delete(self, spec: ClusterAutomationSpec) -> List[Dict]:
-        """Plan: delete cluster."""
-        if not spec.cluster:
-            raise ValueError("delete requires --cluster")
-
-        # Read playbook path from registry sequences (single source of truth)
-        delete_seq = self.registry.sequences.get("delete", {})
-        playbook = delete_seq.get("playbook", "playbooks/delete_rosa_hcp_cluster.yml")
-
-        return [{
-            "step": 1,
-            "type": "playbook",
-            "name": f"Delete cluster {spec.cluster}",
-            "playbook": playbook,
-            "extra_vars": {
-                "cluster_name": spec.cluster,
-                "capi_namespace": spec.namespace,
-            },
-            "wait": True,
-            "feature": "cluster_delete",
-        }]
-
-    def _plan_test(self, spec: ClusterAutomationSpec) -> List[Dict]:
-        """Plan: run test suites against cluster."""
-        suites = spec.spec.get("test_suites", [])
-        if not suites:
-            # Default: test all mutable features
-            suites = [s["id"] for s in self.registry.suites if s["phase"] == "Day2"]
-
-        steps = []
-        for i, suite_id in enumerate(suites):
-            steps.append({
-                "step": i + 1,
-                "type": "test_suite",
-                "name": f"Test suite: {suite_id}",
-                "suite_id": suite_id,
-                "cluster": spec.cluster,
-                "namespace": spec.namespace,
-            })
-        return steps
+        """Generate an ordered execution plan from a spec (delegates to capa_core)."""
+        return resolve_spec_to_plan(self.registry, spec)
 
     def execute(self, plan: List[Dict]) -> List[Dict]:
         """Execute a plan, returning results for each step."""
@@ -505,17 +162,7 @@ class ExecutionEngine:
         cluster = step["cluster"]
         namespace = step["namespace"]
 
-        # Build JSON merge patch
-        field_parts = [p for p in field.split(".") if p]
-        patch_obj = {}
-        current = patch_obj
-        for i, part in enumerate(field_parts):
-            if i == len(field_parts) - 1:
-                current[part] = value
-            else:
-                current[part] = {}
-                current = current[part]
-
+        patch_obj = build_json_merge_patch(field, value)
         patch_json = json.dumps(patch_obj)
         cmd = ["oc", "patch", resource, cluster, "-n", namespace,
                "--type=merge", "-p", patch_json]
@@ -804,8 +451,13 @@ def cmd_specs(args, base_dir, registry):
             continue
         print(f"\n  {C.BOLD}{C.CYAN}{cat_name}{C.E} — {cat_desc}")
         for spec_file in files:
-            with open(spec_file) as f:
-                data = yaml.safe_load(f)
+            try:
+                with open(spec_file) as f:
+                    data = yaml.safe_load(f)
+            except (yaml.YAMLError, IOError) as e:
+                print(f"    {C.BOLD}{spec_file.stem}{C.E}")
+                print(f"      {C.R}(error reading: {e}){C.E}")
+                continue
             name = data.get("metadata", {}).get("name", spec_file.stem)
             action = data.get("spec", {}).get("action", "?")
             features = data.get("spec", {}).get("features", {})
@@ -877,7 +529,7 @@ def cmd_set(args, base_dir, registry):
             pass
 
     # Validate value against type
-    _validate_feature_value(feat, value)
+    _validate_feature_value_exit(feat, value)
 
     # Build inline spec
     data = {
@@ -897,32 +549,12 @@ def cmd_set(args, base_dir, registry):
     engine.execute(plan)
 
 
-def _validate_feature_value(feat, value):
+def _validate_feature_value_exit(feat, value):
     """Validate a value against a feature's type constraints. Exits on error."""
-    feat_type = feat.get("type", "string")
-    feat_id = feat["id"]
-
-    if feat_type == "boolean":
-        if not isinstance(value, bool):
-            print(f"{C.R}Feature '{feat_id}' expects a boolean (true/false), got: {value}{C.E}")
-            sys.exit(1)
-
-    elif feat_type == "select":
-        options = feat.get("options", [])
-        if options and str(value) not in [str(o) for o in options]:
-            print(f"{C.R}Feature '{feat_id}' expects one of {options}, got: {value}{C.E}")
-            sys.exit(1)
-
-    elif feat_type == "number":
-        if not isinstance(value, (int, float)):
-            print(f"{C.R}Feature '{feat_id}' expects a number, got: {value}{C.E}")
-            sys.exit(1)
-
-    elif feat_type == "string":
-        max_len = feat.get("max_length")
-        if max_len and len(str(value)) > max_len:
-            print(f"{C.R}Feature '{feat_id}' max length is {max_len}, got {len(str(value))} chars.{C.E}")
-            sys.exit(1)
+    err = validate_feature_value(feat, value)
+    if err:
+        print(f"{C.R}{err}{C.E}")
+        sys.exit(1)
 
 
 def cmd_validate(args, base_dir, registry):
@@ -1031,49 +663,10 @@ def cmd_validate(args, base_dir, registry):
 
 
 def _validate_feature_value_check(feat, value, errors, warnings):
-    """Validate a value against feature type, appending to errors/warnings lists."""
-    feat_type = feat.get("type", "string")
-    feat_id = feat["id"]
-
-    if feat_type == "boolean":
-        if not isinstance(value, bool):
-            errors.append(f"Feature '{feat_id}' expects boolean, got: {type(value).__name__} ({value})")
-
-    elif feat_type == "select":
-        options = feat.get("options", [])
-        if options and str(value) not in [str(o) for o in options]:
-            errors.append(f"Feature '{feat_id}' expects one of {options}, got: {value}")
-
-    elif feat_type == "number":
-        if not isinstance(value, (int, float)):
-            errors.append(f"Feature '{feat_id}' expects number, got: {type(value).__name__} ({value})")
-
-    elif feat_type == "string":
-        max_len = feat.get("max_length")
-        if max_len and len(str(value)) > max_len:
-            errors.append(f"Feature '{feat_id}' max length is {max_len}, got {len(str(value))} chars")
-
-    elif feat_type == "key_value":
-        if not isinstance(value, dict):
-            errors.append(f"Feature '{feat_id}' expects key-value dict, got: {type(value).__name__}")
-
-    elif feat_type == "list":
-        if not isinstance(value, list):
-            errors.append(f"Feature '{feat_id}' expects list, got: {type(value).__name__}")
-
-    elif feat_type == "version":
-        import re
-        if not isinstance(value, str) or not re.match(r'^\d+\.\d+\.\d+$', str(value)):
-            errors.append(f"Feature '{feat_id}' expects semver (e.g. 4.20.11), got: {value}")
-
-    elif feat_type == "range":
-        if isinstance(value, dict):
-            if "min" not in value or "max" not in value:
-                errors.append(f"Feature '{feat_id}' range expects {{min, max}}, got: {value}")
-            elif value["min"] > value["max"]:
-                errors.append(f"Feature '{feat_id}' range: min ({value['min']}) > max ({value['max']})")
-        else:
-            errors.append(f"Feature '{feat_id}' expects range {{min, max}}, got: {type(value).__name__}")
+    """Validate a value against feature type, appending to errors list."""
+    err = validate_feature_value(feat, value)
+    if err:
+        errors.append(err)
 
 
 def cmd_generate_specs(args, base_dir, registry):
