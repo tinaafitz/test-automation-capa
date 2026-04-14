@@ -29,6 +29,15 @@ from app import (
     init_ai_agents,
     get_agent_stats,
     ai_agent_sessions,
+    _validate_cluster_name,
+    _find_feature,
+    _load_feature_registry_full,
+    _load_action_history,
+    _save_action_history,
+    _record_action,
+    CLUSTER_FEATURE_REGISTRY,
+    _FEATURE_INDEX,
+    ACTION_HISTORY_FILE,
 )
 
 
@@ -802,6 +811,406 @@ class TestAwsUsage:
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
         resp = client.get("/api/aws/usage-trend")
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Cluster Actions: Feature Registry endpoints
+# ---------------------------------------------------------------------------
+
+class TestClusterActionsRegistry:
+    """Tests for /api/cluster-actions/features endpoints."""
+
+    def test_get_feature_registry(self, client):
+        resp = client.get("/api/cluster-actions/features")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "registry" in data
+        assert "suites" in data["registry"]
+        assert len(data["registry"]["suites"]) > 0
+
+    def test_registry_has_expected_suites(self, client):
+        resp = client.get("/api/cluster-actions/features")
+        data = resp.json()
+        suite_ids = [s["id"] for s in data["registry"]["suites"]]
+        assert "cluster-config" in suite_ids
+        assert "security-auth" in suite_ids
+        assert "version-lifecycle" in suite_ids
+
+    def test_each_suite_has_features(self, client):
+        resp = client.get("/api/cluster-actions/features")
+        data = resp.json()
+        for suite in data["registry"]["suites"]:
+            assert "features" in suite
+            assert len(suite["features"]) > 0
+            for feat in suite["features"]:
+                assert "id" in feat
+                assert "name" in feat
+                assert "type" in feat
+                assert "applies_to" in feat
+
+    def test_get_suite_by_id(self, client):
+        resp = client.get("/api/cluster-actions/features/cluster-config")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["suite"]["id"] == "cluster-config"
+
+    def test_get_suite_not_found(self, client):
+        resp = client.get("/api/cluster-actions/features/nonexistent")
+        assert resp.status_code == 404
+
+
+class TestClusterActionsExecute:
+    """Tests for /api/cluster-actions/execute endpoint."""
+
+    def test_execute_unknown_feature(self, client):
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "test-cluster",
+            "namespace": "ns-rosa-hcp",
+            "actions": [{"feature_id": "nonexistent_feature", "target_value": "foo"}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["status"] == "error"
+        assert "Unknown feature" in data["results"][0]["message"]
+
+    def test_execute_immutable_feature(self, client):
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "test-cluster",
+            "namespace": "ns-rosa-hcp",
+            "actions": [{"feature_id": "private_network", "target_value": True}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["status"] == "error"
+        assert "immutable" in data["results"][0]["message"]
+
+    @patch("app.subprocess.run")
+    def test_execute_patch_action(self, mock_run, client):
+        mock_run.return_value = MagicMock(returncode=0, stdout="patched", stderr="")
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "test-cluster",
+            "namespace": "ns-rosa-hcp",
+            "actions": [{"feature_id": "channel_group", "target_value": "fast"}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["status"] == "completed"
+        assert "Patched" in data["results"][0]["message"]
+
+    @patch("app.subprocess.run")
+    def test_execute_patch_failure(self, mock_run, client):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="resource not found")
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "test-cluster",
+            "namespace": "ns-rosa-hcp",
+            "actions": [{"feature_id": "channel_group", "target_value": "fast"}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["status"] == "error"
+
+    @patch("app.subprocess.run")
+    def test_execute_patch_timeout(self, mock_run, client):
+        import subprocess as sp
+        mock_run.side_effect = sp.TimeoutExpired(cmd="oc", timeout=15)
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "test-cluster",
+            "namespace": "ns-rosa-hcp",
+            "actions": [{"feature_id": "channel_group", "target_value": "fast"}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"][0]["status"] == "error"
+        assert "Timeout" in data["results"][0]["message"]
+
+    def test_execute_multiple_actions(self, client):
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "test-cluster",
+            "namespace": "ns-rosa-hcp",
+            "actions": [
+                {"feature_id": "nonexistent_1", "target_value": "a"},
+                {"feature_id": "nonexistent_2", "target_value": "b"},
+            ],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["action_count"] == 2
+
+    def test_execute_returns_cluster_info(self, client):
+        resp = client.post("/api/cluster-actions/execute", json={
+            "cluster_name": "my-cluster",
+            "namespace": "custom-ns",
+            "actions": [],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cluster_name"] == "my-cluster"
+        assert data["namespace"] == "custom-ns"
+
+
+class TestClusterActionsProvision:
+    """Tests for /api/cluster-actions/provision endpoint."""
+
+    def test_provision_requires_name(self, client):
+        resp = client.post("/api/cluster-actions/provision", json={})
+        assert resp.status_code == 400
+
+    def test_provision_validates_cluster_name(self, client):
+        resp = client.post("/api/cluster-actions/provision", json={
+            "cluster_name": "INVALID_NAME",
+        })
+        assert resp.status_code == 400
+
+    def test_provision_rejects_too_long_name(self, client):
+        resp = client.post("/api/cluster-actions/provision", json={
+            "cluster_name": "a" * 55,
+        })
+        assert resp.status_code == 400
+
+    def test_provision_rejects_name_starting_with_number(self, client):
+        resp = client.post("/api/cluster-actions/provision", json={
+            "cluster_name": "1bad-name",
+        })
+        assert resp.status_code == 400
+
+    @patch("app.os.path.exists", return_value=True)
+    @patch("app.asyncio.create_task")
+    def test_provision_with_features(self, mock_task, mock_exists, client):
+        resp = client.post("/api/cluster-actions/provision", json={
+            "name_prefix": "test1",
+            "features": {"private_network": True, "availability_zones": "3"},
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "job_id" in data
+        assert "private_network" in data["features_applied"]
+        assert "availability_zones" in data["features_applied"]
+
+    @patch("app.os.path.exists", return_value=True)
+    @patch("app.asyncio.create_task")
+    def test_provision_with_name_prefix(self, mock_task, mock_exists, client):
+        resp = client.post("/api/cluster-actions/provision", json={
+            "name_prefix": "mytest",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cluster_name"] == "mytest-rosa-hcp"
+
+
+class TestClusterActionsHistory:
+    """Tests for /api/cluster-actions/history endpoint."""
+
+    @patch("app._load_action_history", return_value=[])
+    def test_history_empty(self, mock_load, client):
+        resp = client.get("/api/cluster-actions/history")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["history"] == []
+        assert data["count"] == 0
+
+    @patch("app._load_action_history")
+    def test_history_filter_by_cluster(self, mock_load, client):
+        mock_load.return_value = [
+            {"cluster_name": "c1", "feature_id": "f1"},
+            {"cluster_name": "c2", "feature_id": "f2"},
+            {"cluster_name": "c1", "feature_id": "f3"},
+        ]
+        resp = client.get("/api/cluster-actions/history?cluster_name=c1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] == 2
+
+    @patch("app._load_action_history")
+    def test_history_returns_reversed(self, mock_load, client):
+        mock_load.return_value = [
+            {"cluster_name": "c1", "feature_id": "first"},
+            {"cluster_name": "c1", "feature_id": "second"},
+        ]
+        resp = client.get("/api/cluster-actions/history")
+        data = resp.json()
+        assert data["history"][0]["feature_id"] == "second"
+
+
+class TestClusterActionsDiscover:
+    """Tests for /api/cluster-actions/discover endpoint."""
+
+    @patch("app.subprocess.run")
+    def test_discover_clusters(self, mock_run, client):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"items": [{
+                "metadata": {"name": "test-cluster", "namespace": "ns-rosa-hcp", "creationTimestamp": "2026-01-01"},
+                "spec": {"version": "4.20.11", "channelGroup": "stable"},
+                "status": {"ready": True, "availableUpgrades": ["4.20.12"]},
+            }]}),
+        )
+        resp = client.get("/api/cluster-actions/discover")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["count"] == 1
+        assert data["clusters"][0]["name"] == "test-cluster"
+        assert data["clusters"][0]["version"] == "4.20.11"
+
+    @patch("app.subprocess.run")
+    def test_discover_with_namespace(self, mock_run, client):
+        mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps({"items": []}))
+        resp = client.get("/api/cluster-actions/discover?namespace=custom-ns")
+        assert resp.status_code == 200
+        # Verify namespace flag was passed
+        call_args = mock_run.call_args[0][0]
+        assert "-n" in call_args
+        assert "custom-ns" in call_args
+
+    @patch("app.subprocess.run")
+    def test_discover_oc_failure(self, mock_run, client):
+        mock_run.return_value = MagicMock(returncode=1, stderr="connection refused")
+        resp = client.get("/api/cluster-actions/discover")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+
+    @patch("app.subprocess.run")
+    def test_discover_timeout(self, mock_run, client):
+        import subprocess as sp
+        mock_run.side_effect = sp.TimeoutExpired(cmd="oc", timeout=15)
+        resp = client.get("/api/cluster-actions/discover")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "Timeout" in data["error"]
+
+
+class TestClusterActionsStatus:
+    """Tests for /api/cluster-actions/cluster/{name}/status endpoint."""
+
+    @patch("app.subprocess.run")
+    def test_cluster_status_found(self, mock_run, client):
+        cp_json = json.dumps({
+            "spec": {"version": "4.20.11", "endpointAccess": "public", "channelGroup": "stable"},
+            "status": {"ready": True, "availableUpgrades": ["4.20.12"]},
+        })
+        mp_json = json.dumps({"items": [{
+            "metadata": {"name": "default"},
+            "spec": {"version": "4.20.11", "instanceType": "m5.xlarge"},
+            "status": {"ready": True},
+        }]})
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=cp_json, stderr=""),
+            MagicMock(returncode=0, stdout=mp_json, stderr=""),
+        ]
+        resp = client.get("/api/cluster-actions/cluster/test-cluster/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"]["cluster_found"] is True
+        assert data["status"]["version"] == "4.20.11"
+        assert len(data["status"]["machine_pools"]) == 1
+
+    @patch("app.subprocess.run")
+    def test_cluster_status_not_found(self, mock_run, client):
+        mock_run.return_value = MagicMock(returncode=1, stderr="not found")
+        resp = client.get("/api/cluster-actions/cluster/missing/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"]["cluster_found"] is False
+
+    @patch("app.subprocess.run")
+    def test_cluster_status_timeout(self, mock_run, client):
+        import subprocess as sp
+        mock_run.side_effect = sp.TimeoutExpired(cmd="oc", timeout=15)
+        resp = client.get("/api/cluster-actions/cluster/test/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"]["cluster_found"] is False
+
+
+class TestClusterNameValidation:
+    """Tests for _validate_cluster_name helper."""
+
+    def test_valid_name(self):
+        assert _validate_cluster_name("my-cluster") is None
+
+    def test_valid_short_name(self):
+        assert _validate_cluster_name("a") is None
+
+    def test_valid_long_name(self):
+        assert _validate_cluster_name("a" * 54) is None
+
+    def test_empty_name(self):
+        assert _validate_cluster_name("") is not None
+
+    def test_too_long(self):
+        assert _validate_cluster_name("a" * 55) is not None
+
+    def test_uppercase(self):
+        assert _validate_cluster_name("MyCluster") is not None
+
+    def test_starts_with_number(self):
+        assert _validate_cluster_name("1cluster") is not None
+
+    def test_starts_with_hyphen(self):
+        assert _validate_cluster_name("-cluster") is not None
+
+    def test_special_chars(self):
+        assert _validate_cluster_name("my_cluster") is not None
+
+    def test_spaces(self):
+        assert _validate_cluster_name("my cluster") is not None
+
+
+class TestFindFeature:
+    """Tests for _find_feature helper."""
+
+    def test_find_known_feature(self):
+        feat = _find_feature("private_network")
+        assert feat is not None
+        assert feat["id"] == "private_network"
+        assert feat["type"] == "boolean"
+
+    def test_find_unknown_feature(self):
+        assert _find_feature("nonexistent") is None
+
+    def test_all_features_indexed(self):
+        registry = _load_feature_registry_full()
+        for suite in registry.get("suites", []):
+            for feat in suite.get("features", []):
+                assert _find_feature(feat["id"]) is not None, f"Feature {feat['id']} not in index"
+
+
+class TestFeatureRegistryLoading:
+    """Tests for registry loading functions."""
+
+    def test_load_full_registry(self):
+        data = _load_feature_registry_full()
+        assert "suites" in data
+        assert "var_map" in data
+        assert "dependencies" in data
+        assert "sequences" in data
+
+    def test_var_map_has_provision_features(self):
+        data = _load_feature_registry_full()
+        var_map = data["var_map"]
+        assert var_map["private_network"] == "private"
+        assert var_map["byon"] == "byon_vpc"
+        assert var_map["etcd_kms"] == "etcd_encryption_kms_arn"
+
+    def test_cluster_delete_is_immutable(self):
+        feat = _find_feature("cluster_delete")
+        assert feat is not None
+        assert feat["mutable"] is False
+
+    def test_registry_feature_types(self):
+        """All features have valid types."""
+        valid_types = {"boolean", "select", "number", "string", "key_value",
+                       "list", "range", "version", "action"}
+        data = _load_feature_registry_full()
+        for suite in data["suites"]:
+            for feat in suite["features"]:
+                assert feat["type"] in valid_types, f"Feature {feat['id']} has invalid type: {feat['type']}"
 
 
 if __name__ == "__main__":
