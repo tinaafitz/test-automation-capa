@@ -2794,3 +2794,169 @@ class TestMinikubeDispatch:
                                   namespace="ns-rosa-hcp", cpus=2, memory=4096, yes=False)
         capa_cli.cmd_minikube(args, Path("/tmp"), None)
         mock_context.assert_called_once_with("mk1")
+
+
+# ============================================================================
+# --target minikube tests
+# ============================================================================
+
+class TestStatusTargetMinikube:
+    @patch("capa_cli.minikube_ops.get_capi_resources")
+    @patch("capa_cli.minikube_ops.verify_cluster")
+    def test_running_profile(self, mock_verify, mock_resources, capsys):
+        mock_verify.return_value = {
+            "exists": True,
+            "accessible": True,
+            "cluster_info": {
+                "driver": "podman",
+                "kubernetesVersion": "v1.32.0",
+                "components": {
+                    "details": [
+                        {"name": "CAPI", "status": "configured", "message": "installed"},
+                    ],
+                },
+            },
+        }
+        mock_resources.return_value = {
+            "count": 1,
+            "resources": [
+                {"type": "ROSAControlPlane", "name": "test", "status": "Ready",
+                 "age": "2d", "namespace": "ns-rosa-hcp", "version": ""},
+            ],
+        }
+        args = argparse.Namespace(cluster="mk1", namespace="ns-rosa-hcp", target="minikube")
+        capa_cli.cmd_status(args, Path("/tmp"), None)
+        out = capsys.readouterr().out
+        assert "mk1" in out
+        assert "Running" in out
+        assert "ROSAControlPlane" in out
+
+    @patch("capa_cli.minikube_ops.verify_cluster")
+    def test_not_found(self, mock_verify):
+        mock_verify.return_value = {"exists": False, "suggestion": "Create it"}
+        args = argparse.Namespace(cluster="gone", namespace="ns-rosa-hcp", target="minikube")
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_status(args, Path("/tmp"), None)
+
+    @patch("capa_cli.minikube_ops.verify_cluster")
+    def test_not_running(self, mock_verify):
+        mock_verify.return_value = {"exists": True, "accessible": False, "suggestion": "Start it"}
+        args = argparse.Namespace(cluster="stopped", namespace="ns-rosa-hcp", target="minikube")
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_status(args, Path("/tmp"), None)
+
+    def test_no_cluster(self):
+        args = argparse.Namespace(cluster=None, namespace="ns-rosa-hcp", target="minikube")
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_status(args, Path("/tmp"), None)
+
+    def test_dispatches_to_minikube(self):
+        """Verify --target minikube routes to _status_minikube."""
+        with patch("capa_cli._status_minikube") as mock:
+            args = argparse.Namespace(cluster="mk1", namespace="ns-rosa-hcp", target="minikube")
+            capa_cli.cmd_status(args, Path("/tmp"), None)
+            mock.assert_called_once_with(args)
+
+    def test_no_target_skips_minikube(self):
+        """Without --target, cmd_status does NOT call _status_minikube."""
+        with patch("capa_cli._status_minikube") as mock:
+            args = argparse.Namespace(cluster="mk1", namespace="ns-rosa-hcp", target=None)
+            # Will fail on oc subprocess, but should NOT call _status_minikube
+            try:
+                capa_cli.cmd_status(args, Path("/tmp"), None)
+            except Exception:
+                pass
+            mock.assert_not_called()
+
+
+class TestListClustersTargetMinikube:
+    @patch("capa_cli.minikube_ops.get_capi_resources")
+    @patch("capa_cli.minikube_ops.get_profile_status")
+    @patch("capa_cli.minikube_ops.list_profiles")
+    def test_with_profiles(self, mock_list, mock_status, mock_resources, capsys):
+        mock_list.return_value = {"minikube_installed": True, "clusters": ["mk1", "mk2"]}
+        mock_status.side_effect = [
+            {"is_running": True, "driver": "podman"},
+            {"is_running": False, "driver": "docker"},
+        ]
+        mock_resources.return_value = {"count": 3, "resources": []}
+        args = argparse.Namespace(namespace=None, target="minikube")
+        capa_cli.cmd_list_clusters(args, Path("/tmp"), None)
+        out = capsys.readouterr().out
+        assert "mk1" in out
+        assert "mk2" in out
+        assert "2 profile(s)" in out
+
+    @patch("capa_cli.minikube_ops.list_profiles")
+    def test_empty(self, mock_list, capsys):
+        mock_list.return_value = {"minikube_installed": True, "clusters": []}
+        args = argparse.Namespace(namespace=None, target="minikube")
+        capa_cli.cmd_list_clusters(args, Path("/tmp"), None)
+        out = capsys.readouterr().out
+        assert "No minikube profiles" in out
+
+    @patch("capa_cli.minikube_ops.list_profiles")
+    def test_not_installed(self, mock_list):
+        mock_list.return_value = {"minikube_installed": False, "clusters": []}
+        args = argparse.Namespace(namespace=None, target="minikube")
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_list_clusters(args, Path("/tmp"), None)
+
+    def test_dispatches_to_minikube(self):
+        with patch("capa_cli._list_clusters_minikube") as mock:
+            args = argparse.Namespace(namespace=None, target="minikube")
+            capa_cli.cmd_list_clusters(args, Path("/tmp"), None)
+            mock.assert_called_once_with(args)
+
+
+class TestWatchTargetMinikube:
+    @patch("capa_cli.minikube_ops.get_capi_resources")
+    @patch("capa_cli.minikube_ops.verify_cluster")
+    def test_ready_immediately(self, mock_verify, mock_resources, capsys):
+        mock_verify.return_value = {
+            "exists": True,
+            "accessible": True,
+            "cluster_info": {
+                "components": {"capi_installed": True, "capa_installed": True},
+            },
+        }
+        mock_resources.return_value = {
+            "count": 2,
+            "resources": [
+                {"status": "Ready"}, {"status": "Active"},
+            ],
+        }
+        args = argparse.Namespace(cluster="mk1", namespace="ns-rosa-hcp",
+                                  interval=1, timeout=10, target="minikube")
+        capa_cli._watch_minikube(args)
+        out = capsys.readouterr().out
+        assert "fully ready" in out
+
+    @patch("capa_cli.minikube_ops.verify_cluster")
+    def test_not_found(self, mock_verify, capsys):
+        """Profile not found — should keep polling (we test one iteration)."""
+        call_count = [0]
+        def side_effect(name):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                raise KeyboardInterrupt
+            return {"exists": False}
+        mock_verify.side_effect = side_effect
+        args = argparse.Namespace(cluster="gone", namespace="ns-rosa-hcp",
+                                  interval=0, timeout=10, target="minikube")
+        capa_cli._watch_minikube(args)
+        out = capsys.readouterr().out
+        assert "not found" in out.lower() or "Stopped" in out
+
+    def test_no_cluster(self):
+        args = argparse.Namespace(cluster=None, namespace="ns-rosa-hcp",
+                                  interval=30, timeout=7200, target="minikube")
+        with pytest.raises(SystemExit):
+            capa_cli._watch_minikube(args)
+
+    def test_dispatches_to_minikube(self):
+        with patch("capa_cli._watch_minikube") as mock:
+            args = argparse.Namespace(cluster="mk1", namespace="ns-rosa-hcp",
+                                      interval=30, timeout=7200, target="minikube")
+            capa_cli.cmd_watch(args, Path("/tmp"), None)
+            mock.assert_called_once_with(args)
