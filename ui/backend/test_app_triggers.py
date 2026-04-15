@@ -19,11 +19,12 @@ from fastapi.testclient import TestClient
 sys.modules.setdefault("anthropic", MagicMock())
 sys.modules.setdefault("app_extensions", MagicMock())
 
-from app import (
-    app, _load_trigger_state, _save_trigger_state, TRIGGER_STATE_FILE,
+from app import app, jobs
+from trigger_service import (
+    _load_trigger_state, _save_trigger_state, TRIGGER_STATE_FILE,
     _trigger_last_fire, _trigger_scheduler, TriggerScheduler,
     _active_trigger_runs, _send_trigger_notification, _fire_trigger_workflow,
-    _update_trigger_after_run, jobs,
+    _update_trigger_after_run,
 )
 
 
@@ -33,21 +34,21 @@ def clean_trigger_state(tmp_path):
     state_file = str(tmp_path / "trigger_state.json")
     _trigger_last_fire.clear()
     _active_trigger_runs.clear()
-    with patch("app.TRIGGER_STATE_FILE", state_file):
+    with patch("trigger_service.TRIGGER_STATE_FILE", state_file):
         yield state_file
 
 
 @pytest.fixture
 def client(clean_trigger_state):
     """FastAPI test client."""
-    with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+    with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
         return TestClient(app)
 
 
 @pytest.fixture
 def sample_trigger(client, clean_trigger_state):
     """Create and return a sample schedule trigger."""
-    with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+    with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
         resp = client.post("/api/triggers", json={
             "workflow_name": "test-wf",
             "type": "schedule",
@@ -60,7 +61,7 @@ def sample_trigger(client, clean_trigger_state):
 @pytest.fixture
 def webhook_trigger(client, clean_trigger_state):
     """Create and return a sample webhook trigger."""
-    with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+    with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
         resp = client.post("/api/triggers", json={
             "workflow_name": "test-wf",
             "type": "webhook",
@@ -205,7 +206,7 @@ class TestTriggerEnableDisable:
 
     def test_enable_resets_consecutive_failures(self, client, clean_trigger_state):
         # Create a trigger with failures
-        with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+        with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
             resp = client.post("/api/triggers", json={
                 "workflow_name": "test",
                 "type": "schedule",
@@ -296,7 +297,7 @@ class TestWebhookEndpoint:
     def test_webhook_invalid_signature(self, client, clean_trigger_state):
         """Webhook with secret configured should reject invalid signatures."""
         with patch.dict(os.environ, {"TEST_SECRET": "my-secret"}):
-            with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+            with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
                 resp = client.post("/api/triggers", json={
                     "workflow_name": "test-wf",
                     "type": "webhook",
@@ -316,7 +317,7 @@ class TestWebhookEndpoint:
         """Webhook with correct HMAC signature should succeed."""
         secret = "my-secret"
         with patch.dict(os.environ, {"TEST_SECRET": secret}):
-            with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+            with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
                 resp = client.post("/api/triggers", json={
                     "workflow_name": "test-wf",
                     "type": "webhook",
@@ -446,7 +447,7 @@ class TestTriggerSchedulerUnit:
         with open(state_file, "w") as f:
             json.dump(trigger_data, f)
 
-        with patch("app.TRIGGER_STATE_FILE", state_file):
+        with patch("trigger_service.TRIGGER_STATE_FILE", state_file):
             with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
                 await scheduler._tick(croniter)
                 mock_fire.assert_called_once()
@@ -478,7 +479,7 @@ class TestTriggerSchedulerUnit:
         with open(state_file, "w") as f:
             json.dump(trigger_data, f)
 
-        with patch("app.TRIGGER_STATE_FILE", state_file):
+        with patch("trigger_service.TRIGGER_STATE_FILE", state_file):
             with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
                 await scheduler._tick(croniter)
                 mock_fire.assert_not_called()
@@ -503,7 +504,7 @@ class TestTriggerSchedulerUnit:
         with open(state_file, "w") as f:
             json.dump(trigger_data, f)
 
-        with patch("app.TRIGGER_STATE_FILE", state_file):
+        with patch("trigger_service.TRIGGER_STATE_FILE", state_file):
             with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
                 await scheduler._tick(croniter)
                 mock_fire.assert_not_called()
@@ -533,7 +534,7 @@ class TestTriggerSchedulerUnit:
         with open(state_file, "w") as f:
             json.dump(trigger_data, f)
 
-        with patch("app.TRIGGER_STATE_FILE", state_file):
+        with patch("trigger_service.TRIGGER_STATE_FILE", state_file):
             with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
                 await scheduler._tick(croniter)
                 await scheduler._tick(croniter)  # second tick same minute
@@ -579,7 +580,7 @@ class TestConcurrentRunPrevention:
             "workflow_source": "yaml",
         }
         assert "trg-cleanup" not in _active_trigger_runs
-        with patch("app._send_trigger_notification"):
+        with patch("trigger_service._send_trigger_notification"):
             success, record = await _fire_trigger_workflow(trigger)
         assert success is False
         assert record["status"] == "failed"
@@ -686,7 +687,7 @@ class TestUpdateTriggerAfterRun:
     """Tests for the shared _update_trigger_after_run helper."""
 
     def test_updates_state_on_success(self, clean_trigger_state):
-        with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+        with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
             state = {"triggers": [{
                 "trigger_id": "trg-upd1", "type": "schedule", "cron": "0 2 * * *",
                 "run_count": 0, "consecutive_failures": 2,
@@ -702,7 +703,7 @@ class TestUpdateTriggerAfterRun:
             assert t.get("next_run_at") is not None
 
     def test_increments_failures_and_auto_disables(self, clean_trigger_state):
-        with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+        with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
             state = {"triggers": [{
                 "trigger_id": "trg-upd2", "type": "webhook",
                 "run_count": 4, "consecutive_failures": 4, "enabled": True,
@@ -742,10 +743,10 @@ class TestJobInitialization:
             {"playbook": "playbooks/test.yml", "name": "Test Step", "on_failure": "stop"},
         ], "vars": {}}]
 
-        with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+        with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
             with patch("app._load_workflows", return_value=mock_workflows):
                 with patch("app._run_playbook_in_thread", side_effect=mock_run_playbook):
-                    with patch("app._send_trigger_notification"):
+                    with patch("trigger_service._send_trigger_notification"):
                         success, record = await _fire_trigger_workflow(trigger)
                         assert success is True
                         assert record["status"] == "completed"
@@ -764,10 +765,10 @@ class TestJobInitialization:
             {"playbook": "playbooks/test.yml", "name": "Step 1"},
         ], "vars": {}}]
 
-        with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+        with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
             with patch("app._load_workflows", return_value=mock_workflows):
                 with patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
-                    with patch("app._send_trigger_notification"):
+                    with patch("trigger_service._send_trigger_notification"):
                         mock_to_thread.return_value = None
                         success, record = await _fire_trigger_workflow(trigger)
                         mock_to_thread.assert_called_once()
@@ -834,13 +835,215 @@ class TestWorkflowSourceDetection:
         }
         mock_workflows = [{"name": "my-saved-wf", "steps": [], "vars": {}}]
 
-        with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+        with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
             with patch("app._load_workflows", return_value=mock_workflows):
-                with patch("app._send_trigger_notification"):
+                with patch("trigger_service._send_trigger_notification"):
                     success, record = await _fire_trigger_workflow(trigger)
                     assert record["status"] == "completed"
                     assert record["steps_completed"] == 0
                     assert record["steps_total"] == 0
+
+
+class TestTimezoneAwareScheduling:
+    """Tests that scheduler correctly handles timezone-aware cron evaluation."""
+
+    @pytest.mark.asyncio
+    async def test_tick_uses_trigger_timezone(self, tmp_path):
+        """Scheduler should evaluate cron in the trigger's configured timezone."""
+        from croniter import croniter
+        from zoneinfo import ZoneInfo
+
+        scheduler = TriggerScheduler()
+        now_utc = datetime.now(timezone.utc)
+        # Use US/Eastern (UTC-4 or UTC-5 depending on DST)
+        eastern = ZoneInfo("US/Eastern")
+        now_eastern = now_utc.astimezone(eastern)
+        # Build a cron that matches the current Eastern time minute
+        eastern_cron = f"{now_eastern.minute} {now_eastern.hour} * * *"
+
+        state_file = str(tmp_path / "trigger_state.json")
+        trigger_data = {
+            "triggers": [{
+                "trigger_id": "trg-tz-east",
+                "workflow_name": "test-wf",
+                "type": "schedule",
+                "trigger_name": "eastern-run",
+                "enabled": True,
+                "cron": eastern_cron,
+                "timezone": "US/Eastern",
+                "consecutive_failures": 0,
+                "vars_override": {},
+            }],
+            "run_history": [],
+        }
+        with open(state_file, "w") as f:
+            json.dump(trigger_data, f)
+
+        with patch("trigger_service.TRIGGER_STATE_FILE", state_file):
+            with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
+                await scheduler._tick(croniter)
+                mock_fire.assert_called_once()
+                assert mock_fire.call_args[0][0]["trigger_id"] == "trg-tz-east"
+
+    @pytest.mark.asyncio
+    async def test_tick_does_not_fire_wrong_timezone(self, tmp_path):
+        """A cron matching UTC but not the trigger's timezone should not fire."""
+        from croniter import croniter
+        from zoneinfo import ZoneInfo
+
+        scheduler = TriggerScheduler()
+        now_utc = datetime.now(timezone.utc)
+        # Build a cron that matches the current UTC minute
+        utc_cron = f"{now_utc.minute} {now_utc.hour} * * *"
+
+        # Use a timezone that is offset from UTC so the cron won't match
+        # Pick a timezone that's at least 2 hours ahead so the minute won't collide
+        test_tz = "Pacific/Auckland"  # UTC+12 or UTC+13
+        tz = ZoneInfo(test_tz)
+        now_local = now_utc.astimezone(tz)
+
+        # Only run if the hour actually differs (it should for Auckland vs UTC)
+        if now_local.hour == now_utc.hour and now_local.minute == now_utc.minute:
+            pytest.skip("Timezone offset happens to match UTC right now")
+
+        state_file = str(tmp_path / "trigger_state.json")
+        trigger_data = {
+            "triggers": [{
+                "trigger_id": "trg-tz-wrong",
+                "workflow_name": "test-wf",
+                "type": "schedule",
+                "trigger_name": "wrong-tz",
+                "enabled": True,
+                "cron": utc_cron,
+                "timezone": test_tz,
+                "consecutive_failures": 0,
+            }],
+            "run_history": [],
+        }
+        with open(state_file, "w") as f:
+            json.dump(trigger_data, f)
+
+        with patch("trigger_service.TRIGGER_STATE_FILE", state_file):
+            with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
+                await scheduler._tick(croniter)
+                mock_fire.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tick_falls_back_to_utc_on_bad_timezone(self, tmp_path):
+        """Invalid timezone should fall back to UTC."""
+        from croniter import croniter
+
+        scheduler = TriggerScheduler()
+        now_utc = datetime.now(timezone.utc)
+        utc_cron = f"{now_utc.minute} {now_utc.hour} * * *"
+
+        state_file = str(tmp_path / "trigger_state.json")
+        trigger_data = {
+            "triggers": [{
+                "trigger_id": "trg-tz-bad",
+                "workflow_name": "test-wf",
+                "type": "schedule",
+                "trigger_name": "bad-tz",
+                "enabled": True,
+                "cron": utc_cron,
+                "timezone": "Invalid/Timezone",
+                "consecutive_failures": 0,
+            }],
+            "run_history": [],
+        }
+        with open(state_file, "w") as f:
+            json.dump(trigger_data, f)
+
+        with patch("trigger_service.TRIGGER_STATE_FILE", state_file):
+            with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
+                await scheduler._tick(croniter)
+                # Falls back to UTC, so cron should match
+                mock_fire.assert_called_once()
+
+
+class TestEmailNotificationPath:
+    """Tests for email notification path in _send_trigger_notification."""
+
+    def test_email_notification_sent_on_failure(self):
+        """Email should be sent when email_enabled and notify_trigger_failure are True."""
+        trigger = {"trigger_id": "trg-e1", "trigger_name": "email-test", "workflow_name": "wf"}
+        run_record = {"run_id": "r1", "steps_completed": 1, "steps_total": 3}
+        config = {
+            "email_enabled": True,
+            "notify_trigger_failure": True,
+        }
+        with patch("builtins.open", MagicMock()):
+            with patch("os.path.exists", return_value=True):
+                with patch("yaml.safe_load", return_value=config):
+                    with patch("app.email_service") as mock_email:
+                        _send_trigger_notification(trigger, run_record, False)
+                        mock_email.reload_config.assert_called_once()
+                        mock_email.send_provisioning_notification.assert_called_once()
+
+    def test_email_notification_skipped_when_disabled(self):
+        """Email should not be sent when email_enabled is False."""
+        trigger = {"trigger_id": "trg-e2", "trigger_name": "email-test", "workflow_name": "wf"}
+        run_record = {"run_id": "r2", "steps_completed": 0, "steps_total": 1}
+        config = {
+            "email_enabled": False,
+            "notify_trigger_failure": True,
+        }
+        with patch("builtins.open", MagicMock()):
+            with patch("os.path.exists", return_value=True):
+                with patch("yaml.safe_load", return_value=config):
+                    with patch("app.email_service") as mock_email:
+                        _send_trigger_notification(trigger, run_record, False)
+                        mock_email.send_provisioning_notification.assert_not_called()
+
+    def test_email_notification_on_success_when_configured(self):
+        """Email sent on success when notify_trigger_success is True."""
+        trigger = {"trigger_id": "trg-e3", "trigger_name": "email-test", "workflow_name": "wf"}
+        run_record = {"run_id": "r3", "steps_completed": 3, "steps_total": 3}
+        config = {
+            "email_enabled": True,
+            "notify_trigger_success": True,
+        }
+        with patch("builtins.open", MagicMock()):
+            with patch("os.path.exists", return_value=True):
+                with patch("yaml.safe_load", return_value=config):
+                    with patch("app.email_service") as mock_email:
+                        _send_trigger_notification(trigger, run_record, True)
+                        mock_email.reload_config.assert_called_once()
+                        mock_email.send_provisioning_notification.assert_called_once()
+
+    def test_email_error_does_not_crash(self):
+        """Email send error should be caught, not propagate."""
+        trigger = {"trigger_id": "trg-e4", "trigger_name": "email-test", "workflow_name": "wf"}
+        run_record = {"run_id": "r4", "steps_completed": 0, "steps_total": 1}
+        config = {
+            "email_enabled": True,
+            "notify_trigger_failure": True,
+        }
+        with patch("builtins.open", MagicMock()):
+            with patch("os.path.exists", return_value=True):
+                with patch("yaml.safe_load", return_value=config):
+                    with patch("app.email_service") as mock_email:
+                        mock_email.reload_config.side_effect = Exception("SMTP connection failed")
+                        # Should not raise
+                        _send_trigger_notification(trigger, run_record, False)
+
+    def test_both_slack_and_email_sent(self):
+        """Both Slack and email should be sent when both enabled."""
+        trigger = {"trigger_id": "trg-e5", "trigger_name": "both-test", "workflow_name": "wf"}
+        run_record = {"run_id": "r5", "steps_completed": 0, "steps_total": 2}
+        config = {
+            "slack_enabled": True,
+            "email_enabled": True,
+            "notify_trigger_failure": True,
+        }
+        with patch("builtins.open", MagicMock()):
+            with patch("os.path.exists", return_value=True):
+                with patch("yaml.safe_load", return_value=config):
+                    with patch("app.slack_service") as mock_slack:
+                        with patch("app.email_service") as mock_email:
+                            _send_trigger_notification(trigger, run_record, False)
+                            mock_slack.send_provisioning_notification.assert_called_once()
+                            mock_email.send_provisioning_notification.assert_called_once()
 
 
 class TestSchedulerPruning:
@@ -863,7 +1066,7 @@ class TestSchedulerPruning:
         with open(state_file, "w") as f:
             json.dump(trigger_data, f)
 
-        with patch("app.TRIGGER_STATE_FILE", state_file):
+        with patch("trigger_service.TRIGGER_STATE_FILE", state_file):
             await scheduler._tick(croniter)
 
         assert "trg-deleted" not in scheduler._last_check

@@ -2215,3 +2215,115 @@ class TestCmdTrigger:
         assert "Declared Triggers" in out
         assert "schedule" in out
         assert "webhook" in out
+
+    def test_fire_missing_target(self, trigger_env, minimal_registry):
+        """Fire without target should exit with error."""
+        args = argparse.Namespace(
+            trigger_action="fire", target=None,
+            dry_run=False, verbose=False, force=False, limit=20,
+        )
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_trigger(args, trigger_env, minimal_registry)
+
+    def test_fire_nonexistent_trigger(self, trigger_env, minimal_registry):
+        """Fire with unknown trigger_id should exit with error."""
+        args = argparse.Namespace(
+            trigger_action="fire", target="trg-nonexistent",
+            dry_run=False, verbose=False, force=False, limit=20,
+        )
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_trigger(args, trigger_env, minimal_registry)
+
+    def test_fire_disabled_trigger_without_force(self, trigger_env, minimal_registry, capsys):
+        """Fire on a disabled trigger should exit unless --force."""
+        # Create a trigger
+        create_args = argparse.Namespace(
+            trigger_action="create", target="test-wf",
+            type="schedule", cron="0 2 * * *", timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(create_args, trigger_env, minimal_registry)
+        capsys.readouterr()
+
+        state = capa_cli._load_trigger_state(trigger_env)
+        trigger_id = state["triggers"][0]["trigger_id"]
+
+        # Disable it
+        disable_args = argparse.Namespace(
+            trigger_action="disable", target=trigger_id,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(disable_args, trigger_env, minimal_registry)
+        capsys.readouterr()
+
+        # Try to fire without --force
+        fire_args = argparse.Namespace(
+            trigger_action="fire", target=trigger_id,
+            dry_run=False, verbose=False, force=False, limit=20,
+        )
+        with pytest.raises(SystemExit):
+            capa_cli.cmd_trigger(fire_args, trigger_env, minimal_registry)
+
+    def test_fire_success(self, trigger_env, minimal_registry, capsys):
+        """Fire should execute workflow and record run history."""
+        # Create a trigger
+        create_args = argparse.Namespace(
+            trigger_action="create", target="test-wf",
+            type="schedule", cron="0 2 * * *", timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(create_args, trigger_env, minimal_registry)
+        capsys.readouterr()
+
+        state = capa_cli._load_trigger_state(trigger_env)
+        trigger_id = state["triggers"][0]["trigger_id"]
+
+        # Mock _run_workflow_by_name to avoid actual playbook execution
+        mock_results = [{"step": 1, "name": "Step 1", "status": "completed"}]
+        with patch.object(capa_cli, "_run_workflow_by_name", return_value=(True, mock_results, 5.0)):
+            fire_args = argparse.Namespace(
+                trigger_action="fire", target=trigger_id,
+                dry_run=False, verbose=False, force=False, limit=20,
+            )
+            capa_cli.cmd_trigger(fire_args, trigger_env, minimal_registry)
+
+        out = capsys.readouterr().out
+        assert "Firing trigger" in out
+
+        # Check state was updated
+        state = capa_cli._load_trigger_state(trigger_env)
+        t = state["triggers"][0]
+        assert t["run_count"] == 1
+        assert t["last_run_status"] == "completed"
+        assert t["consecutive_failures"] == 0
+        assert len(state["run_history"]) == 1
+        assert state["run_history"][0]["status"] == "completed"
+
+    def test_fire_failure_increments_consecutive(self, trigger_env, minimal_registry, capsys):
+        """Failed fire should increment consecutive_failures."""
+        create_args = argparse.Namespace(
+            trigger_action="create", target="test-wf",
+            type="schedule", cron="0 2 * * *", timezone="UTC",
+            secret_env=None, trigger_name=None, force=False,
+            dry_run=False, verbose=False, limit=20,
+        )
+        capa_cli.cmd_trigger(create_args, trigger_env, minimal_registry)
+        capsys.readouterr()
+
+        state = capa_cli._load_trigger_state(trigger_env)
+        trigger_id = state["triggers"][0]["trigger_id"]
+
+        mock_results = [{"step": 1, "name": "Step 1", "status": "failed"}]
+        with patch.object(capa_cli, "_run_workflow_by_name", return_value=(False, mock_results, 3.0)):
+            fire_args = argparse.Namespace(
+                trigger_action="fire", target=trigger_id,
+                dry_run=False, verbose=False, force=False, limit=20,
+            )
+            capa_cli.cmd_trigger(fire_args, trigger_env, minimal_registry)
+
+        state = capa_cli._load_trigger_state(trigger_env)
+        t = state["triggers"][0]
+        assert t["consecutive_failures"] == 1
+        assert t["last_run_status"] == "failed"
