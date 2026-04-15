@@ -9316,6 +9316,140 @@ async def _fire_trigger_workflow(trigger, vars_override=None):
     }
 
 
+# ---------------------------------------------------------------------------
+# Trigger Scheduler — in-process asyncio cron loop using croniter
+# ---------------------------------------------------------------------------
+class TriggerScheduler:
+    """Lightweight in-process scheduler that fires schedule triggers at their cron times."""
+
+    def __init__(self):
+        self._task: Optional[asyncio.Task] = None
+        self._running = False
+        self._check_interval = 30  # seconds between cron checks
+        self._last_check: Dict[str, str] = {}  # trigger_id -> last fired minute ISO
+
+    async def start(self):
+        """Start the scheduler loop."""
+        if self._running:
+            return
+        self._running = True
+        self._task = asyncio.create_task(self._loop())
+        print("[TriggerScheduler] Started")
+
+    async def stop(self):
+        """Stop the scheduler loop."""
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+        print("[TriggerScheduler] Stopped")
+
+    async def _loop(self):
+        """Main scheduler loop — checks every _check_interval seconds."""
+        try:
+            from croniter import croniter
+        except ImportError:
+            print("[TriggerScheduler] croniter not installed — scheduler disabled")
+            return
+
+        while self._running:
+            try:
+                await self._tick(croniter)
+            except Exception as e:
+                print(f"[TriggerScheduler] Error in tick: {e}")
+            await asyncio.sleep(self._check_interval)
+
+    async def _tick(self, croniter_cls):
+        """Single scheduler tick — check all schedule triggers."""
+        from datetime import timezone as _tz
+        from zoneinfo import ZoneInfo
+
+        now_utc = datetime.now(_tz.utc)
+        state = _load_trigger_state()
+        triggers = state.get("triggers", [])
+
+        for trigger in triggers:
+            if trigger.get("type") != "schedule":
+                continue
+            if not trigger.get("enabled", True):
+                continue
+            cron_expr = trigger.get("cron", "")
+            if not cron_expr:
+                continue
+
+            trigger_id = trigger["trigger_id"]
+            tz_name = trigger.get("timezone", "UTC")
+
+            try:
+                tz = ZoneInfo(tz_name)
+            except (KeyError, Exception):
+                tz = ZoneInfo("UTC")
+
+            now_local = now_utc.astimezone(tz)
+
+            # Build a minute-resolution key to prevent double-firing
+            minute_key = now_local.strftime("%Y-%m-%d %H:%M")
+            if self._last_check.get(trigger_id) == minute_key:
+                continue
+
+            # Check if this cron expression matches the current minute
+            try:
+                import datetime as _dt_mod
+                cron = croniter_cls(cron_expr, now_local - _dt_mod.timedelta(minutes=1))
+                next_fire = cron.get_next(datetime)
+                # If next_fire falls in the current minute window, fire
+                if next_fire.strftime("%Y-%m-%d %H:%M") == minute_key:
+                    self._last_check[trigger_id] = minute_key
+                    print(f"[TriggerScheduler] Firing {trigger_id} ({trigger.get('trigger_name', '')}) "
+                          f"for workflow '{trigger.get('workflow_name', '')}'")
+                    asyncio.create_task(self._fire(trigger))
+            except (ValueError, KeyError) as e:
+                print(f"[TriggerScheduler] Bad cron for {trigger_id}: {e}")
+
+    async def _fire(self, trigger):
+        """Fire a single trigger and update state."""
+        trigger_id = trigger["trigger_id"]
+        try:
+            success, run_record = await _fire_trigger_workflow(
+                trigger, trigger.get("vars_override", {})
+            )
+            st = _load_trigger_state()
+            t = next((x for x in st.get("triggers", []) if x.get("trigger_id") == trigger_id), None)
+            if t:
+                t["last_run_at"] = run_record["started_at"]
+                t["last_run_status"] = run_record["status"]
+                t["run_count"] = t.get("run_count", 0) + 1
+                if success:
+                    t["consecutive_failures"] = 0
+                    print(f"[TriggerScheduler] {trigger_id} completed successfully")
+                else:
+                    t["consecutive_failures"] = t.get("consecutive_failures", 0) + 1
+                    if t["consecutive_failures"] >= 5:
+                        t["enabled"] = False
+                        print(f"[TriggerScheduler] {trigger_id} auto-disabled after 5 consecutive failures")
+                    else:
+                        print(f"[TriggerScheduler] {trigger_id} failed (consecutive: {t['consecutive_failures']})")
+                # Update next_run_at
+                try:
+                    from croniter import croniter as _cron
+                    next_t = _cron(trigger.get("cron", ""), datetime.now()).get_next(datetime)
+                    t["next_run_at"] = next_t.isoformat()
+                except Exception:
+                    pass
+            st.setdefault("run_history", []).append(run_record)
+            _save_trigger_state(st)
+        except Exception as e:
+            print(f"[TriggerScheduler] Error firing {trigger_id}: {e}")
+
+
+# Global scheduler instance
+_trigger_scheduler = TriggerScheduler()
+
+
 class TriggerCreate(BaseModel):
     workflow_name: str
     type: str  # "schedule" or "webhook"
@@ -9373,6 +9507,13 @@ async def create_trigger(trigger: TriggerCreate):
     if trigger.type == "schedule":
         trigger_data["cron"] = trigger.cron
         trigger_data["timezone"] = trigger.timezone
+        # Compute next_run_at
+        try:
+            from croniter import croniter
+            next_t = croniter(trigger.cron, datetime.now()).get_next(datetime)
+            trigger_data["next_run_at"] = next_t.isoformat()
+        except Exception:
+            pass
 
     if trigger.type == "webhook":
         if trigger.secret_env:
@@ -9414,6 +9555,7 @@ async def delete_trigger(trigger_id: str):
         raise HTTPException(404, "Trigger not found")
     state["triggers"] = [t for t in triggers if t.get("trigger_id") != trigger_id]
     _save_trigger_state(state)
+    _trigger_scheduler._last_check.pop(trigger_id, None)
     return {"success": True, "deleted": trigger_id}
 
 
@@ -9426,7 +9568,16 @@ async def enable_trigger(trigger_id: str):
         raise HTTPException(404, "Trigger not found")
     trigger["enabled"] = True
     trigger["consecutive_failures"] = 0
+    # Recompute next_run_at for schedule triggers
+    if trigger.get("type") == "schedule" and trigger.get("cron"):
+        try:
+            from croniter import croniter
+            next_t = croniter(trigger["cron"], datetime.now()).get_next(datetime)
+            trigger["next_run_at"] = next_t.isoformat()
+        except Exception:
+            pass
     _save_trigger_state(state)
+    _trigger_scheduler._last_check.pop(trigger_id, None)
     return {"success": True, "trigger": trigger}
 
 
@@ -9565,6 +9716,53 @@ async def webhook_trigger(trigger_id: str, request: Request, background_tasks: B
 
     background_tasks.add_task(_run)
     return {"success": True, "message": "Webhook received", "workflow": trigger["workflow_name"]}
+
+
+@app.get("/api/triggers/scheduler/status")
+async def scheduler_status():
+    """Return the trigger scheduler status and upcoming schedule trigger runs."""
+    try:
+        from croniter import croniter
+        croniter_available = True
+    except ImportError:
+        croniter_available = False
+
+    state = _load_trigger_state()
+    schedule_triggers = [
+        t for t in state.get("triggers", [])
+        if t.get("type") == "schedule" and t.get("enabled", True)
+    ]
+
+    upcoming = []
+    if croniter_available:
+        for t in schedule_triggers:
+            cron_expr = t.get("cron", "")
+            if not cron_expr:
+                continue
+            try:
+                cron = croniter(cron_expr, datetime.now())
+                next_run = cron.get_next(datetime)
+                upcoming.append({
+                    "trigger_id": t["trigger_id"],
+                    "trigger_name": t.get("trigger_name", ""),
+                    "workflow_name": t.get("workflow_name", ""),
+                    "cron": cron_expr,
+                    "timezone": t.get("timezone", "UTC"),
+                    "next_run_at": next_run.isoformat(),
+                })
+            except (ValueError, KeyError):
+                continue
+
+    upcoming.sort(key=lambda x: x.get("next_run_at", ""))
+
+    return {
+        "success": True,
+        "running": _trigger_scheduler._running,
+        "croniter_available": croniter_available,
+        "check_interval": _trigger_scheduler._check_interval,
+        "active_schedule_triggers": len(schedule_triggers),
+        "upcoming": upcoming,
+    }
 
 
 # ============================================================================
@@ -11093,6 +11291,16 @@ async def _aws_usage_snapshot_loop():
         except Exception as e:
             print(f"⚠️ [AWS TREND] Hourly snapshot failed: {e}", flush=True)
         await asyncio.sleep(3600)  # 1 hour
+
+
+@app.on_event("startup")
+async def start_trigger_scheduler():
+    await _trigger_scheduler.start()
+
+
+@app.on_event("shutdown")
+async def stop_trigger_scheduler():
+    await _trigger_scheduler.stop()
 
 
 @app.on_event("startup")
