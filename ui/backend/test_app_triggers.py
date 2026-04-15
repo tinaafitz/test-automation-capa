@@ -24,7 +24,7 @@ from trigger_service import (
     _load_trigger_state, _save_trigger_state, TRIGGER_STATE_FILE,
     _trigger_last_fire, _trigger_scheduler, TriggerScheduler,
     _active_trigger_runs, _send_trigger_notification, _fire_trigger_workflow,
-    _update_trigger_after_run,
+    _update_trigger_after_run, check_rate_limit, AUTO_DISABLE_THRESHOLD,
 )
 
 
@@ -384,6 +384,28 @@ class TestFireTrigger:
         assert resp2.status_code == 429
         assert "Retry-After" in resp2.headers
         assert int(resp2.headers["Retry-After"]) > 0
+
+
+class TestAtomicRateLimit:
+    """Tests for the atomic check_rate_limit function."""
+
+    def test_first_call_allowed(self):
+        _trigger_last_fire.clear()
+        result = check_rate_limit("trg-atomic-1")
+        assert result is None  # allowed
+
+    def test_second_call_blocked(self):
+        _trigger_last_fire.clear()
+        check_rate_limit("trg-atomic-2")
+        result = check_rate_limit("trg-atomic-2")
+        assert result is not None  # blocked
+        assert result > 0  # remaining seconds
+
+    def test_different_triggers_independent(self):
+        _trigger_last_fire.clear()
+        check_rate_limit("trg-atomic-3a")
+        result = check_rate_limit("trg-atomic-3b")
+        assert result is None  # different trigger, allowed
 
 
 class TestSchedulerStatus:

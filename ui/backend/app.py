@@ -9178,6 +9178,7 @@ async def list_yaml_workflows():
 from trigger_service import (
     TRIGGER_STATE_FILE,
     TRIGGER_MIN_INTERVAL,
+    AUTO_DISABLE_THRESHOLD,
     _trigger_last_fire,
     _active_trigger_runs,
     _load_trigger_state,
@@ -9185,6 +9186,7 @@ from trigger_service import (
     _send_trigger_notification,
     _update_trigger_after_run,
     _fire_trigger_workflow,
+    check_rate_limit,
     TriggerScheduler,
     _trigger_scheduler,
 )
@@ -9363,17 +9365,14 @@ async def fire_trigger(trigger_id: str, background_tasks: BackgroundTasks):
     if not trigger:
         raise HTTPException(404, "Trigger not found")
 
-    # Rate limit
-    now = time.time()
-    last_fire = _trigger_last_fire.get(trigger_id, 0)
-    if now - last_fire < TRIGGER_MIN_INTERVAL:
-        remaining = int(TRIGGER_MIN_INTERVAL - (now - last_fire))
+    # Atomic rate limit check
+    remaining = check_rate_limit(trigger_id)
+    if remaining is not None:
         return JSONResponse(
             status_code=429,
             content={"detail": f"Rate limited. Try again in {remaining}s"},
             headers={"Retry-After": str(remaining)},
         )
-    _trigger_last_fire[trigger_id] = now
 
     async def _run():
         success, run_record = await _fire_trigger_workflow(trigger, trigger.get("vars_override", {}))
@@ -9430,17 +9429,14 @@ async def webhook_trigger(trigger_id: str, request: Request, background_tasks: B
     if not trigger or trigger.get("type") != "webhook" or not trigger.get("enabled"):
         raise HTTPException(404, "Not found")
 
-    # Rate limit
-    now = time.time()
-    last_fire = _trigger_last_fire.get(trigger_id, 0)
-    if now - last_fire < TRIGGER_MIN_INTERVAL:
-        remaining = int(TRIGGER_MIN_INTERVAL - (now - last_fire))
+    # Atomic rate limit check
+    remaining = check_rate_limit(trigger_id)
+    if remaining is not None:
         return JSONResponse(
             status_code=429,
             content={"detail": "Rate limited"},
             headers={"Retry-After": str(remaining)},
         )
-    _trigger_last_fire[trigger_id] = now
 
     body = await request.body()
 
