@@ -45,6 +45,7 @@ import {
 import { BookmarkIcon as BookmarkSolidIcon } from '@heroicons/react/24/solid';
 import { buildApiUrl } from '../config/api';
 import { useRecentOperationsContext } from '../store/AppContext';
+import TriggerPanel from './TriggerPanel';
 
 // ============================================================================
 // Draggable Playbook Card (in the palette)
@@ -1736,6 +1737,11 @@ const WorkflowBuilder = () => {
               )}
             </button>
           </div>
+        </div>
+
+        {/* Trigger Panel */}
+        <div className="mx-0 border-x border-gray-200 bg-white">
+          <TriggerPanel workflowName={workflowName} />
         </div>
 
         {/* Status summary bar (shows when workflow has run results) */}
