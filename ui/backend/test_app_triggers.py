@@ -87,6 +87,8 @@ class TestTriggerCRUD:
         assert data["success"] is True
         assert data["triggers"] == []
         assert data["count"] == 0
+        assert "offset" in data
+        assert "limit" in data
 
     def test_create_schedule_trigger(self, client):
         resp = client.post("/api/triggers", json={

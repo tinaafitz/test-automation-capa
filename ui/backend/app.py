@@ -9224,7 +9224,7 @@ async def list_triggers(offset: int = 0, limit: int = 100):
     all_triggers = state.get("triggers", [])
     total = len(all_triggers)
     page = all_triggers[offset:offset + limit]
-    return {"success": True, "triggers": page, "count": len(page), "total": total}
+    return {"success": True, "triggers": page, "count": len(page), "total": total, "offset": offset, "limit": limit}
 
 
 @app.post("/api/triggers")
@@ -9331,6 +9331,7 @@ async def create_trigger(trigger: TriggerCreate):
 
     state.setdefault("triggers", []).append(trigger_data)
     _save_trigger_state(state)
+    _trigger_logger.info("Trigger created", extra={"trigger_id": trigger_id, "type": trigger.type, "workflow": trigger.workflow_name})
     return {"success": True, "trigger": trigger_data}
 
 
@@ -9392,6 +9393,7 @@ async def delete_trigger(trigger_id: str):
     state["triggers"] = [t for t in state.get("triggers", []) if t.get("trigger_id") != trigger_id]
     _save_trigger_state(state)
     _trigger_scheduler._last_check.pop(trigger_id, None)
+    _trigger_logger.info("Trigger deleted", extra={"trigger_id": trigger_id})
     return {"success": True, "deleted": trigger_id}
 
 
@@ -9452,6 +9454,7 @@ async def fire_trigger(trigger_id: str, background_tasks: BackgroundTasks):
             headers={"Retry-After": str(remaining)},
         )
 
+    _trigger_logger.info("Trigger fired", extra={"trigger_id": trigger_id, "workflow": trigger["workflow_name"], "source": "manual"})
     await _fire_and_update(trigger, background_tasks)
     return {"success": True, "message": f"Trigger {trigger_id} fired", "workflow": trigger["workflow_name"]}
 
@@ -9465,7 +9468,7 @@ async def get_trigger_history(trigger_id: str, limit: int = 20, offset: int = 0)
     all_history = [h for h in state.get("run_history", []) if h.get("trigger_id") == trigger_id]
     total = len(all_history)
     page = all_history[offset:offset + limit]
-    return {"success": True, "history": page, "count": len(page), "total": total}
+    return {"success": True, "history": page, "count": len(page), "total": total, "offset": offset, "limit": limit}
 
 
 @app.get("/api/triggers/history/all")
@@ -9476,7 +9479,7 @@ async def get_all_trigger_history(limit: int = 50, offset: int = 0):
     all_history = state.get("run_history", [])
     total = len(all_history)
     page = all_history[offset:offset + limit]
-    return {"success": True, "history": page, "count": len(page), "total": total}
+    return {"success": True, "history": page, "count": len(page), "total": total, "offset": offset, "limit": limit}
 
 
 @app.get("/api/workflows/{workflow_id}/triggers")
@@ -9528,6 +9531,7 @@ async def webhook_trigger(trigger_id: str, request: Request, background_tasks: B
         if not _hmac.compare_digest(signature, expected):
             raise HTTPException(403, "Invalid signature")
 
+    _trigger_logger.info("Webhook trigger fired", extra={"trigger_id": trigger_id, "workflow": trigger["workflow_name"], "source": "webhook"})
     await _fire_and_update(trigger, background_tasks)
     return {"success": True, "message": "Webhook received", "workflow": trigger["workflow_name"]}
 
