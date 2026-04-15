@@ -9169,6 +9169,405 @@ async def list_yaml_workflows():
 
 
 # ============================================================================
+# Trigger Management API
+# ============================================================================
+
+TRIGGER_STATE_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "vars", "trigger_state.json"
+)
+
+# Rate limiting: track last fire time per trigger to prevent abuse
+_trigger_last_fire: Dict[str, float] = {}
+TRIGGER_MIN_INTERVAL = 60  # seconds
+
+
+def _load_trigger_state():
+    """Load trigger state from vars/trigger_state.json."""
+    if not os.path.exists(TRIGGER_STATE_FILE):
+        return {"triggers": [], "run_history": []}
+    try:
+        with open(TRIGGER_STATE_FILE, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {"triggers": [], "run_history": []}
+
+
+def _save_trigger_state(state):
+    """Persist trigger state."""
+    os.makedirs(os.path.dirname(TRIGGER_STATE_FILE), exist_ok=True)
+    if len(state.get("run_history", [])) > 200:
+        state["run_history"] = state["run_history"][-200:]
+    with open(TRIGGER_STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2, default=str)
+
+
+async def _fire_trigger_workflow(trigger, vars_override=None):
+    """Execute a trigger's workflow via the playbook runner. Returns (success, run_record)."""
+    import hashlib
+    workflow_name = trigger["workflow_name"]
+    run_id = f"trun-{hashlib.sha256(os.urandom(16)).hexdigest()[:8]}"
+    started_at = datetime.now().isoformat()
+
+    # Find the workflow
+    wf = None
+    wf_type = trigger.get("workflow_source", "yaml")
+
+    if wf_type == "saved":
+        workflows = _load_workflows()
+        wf = next((w for w in workflows if w.get("name") == workflow_name), None)
+    if not wf:
+        # Try YAML workflows
+        import yaml as _yaml
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        wf_dir = os.path.join(repo_root, "specs", "workflows")
+        if os.path.isdir(wf_dir):
+            for fname in os.listdir(wf_dir):
+                if not fname.endswith(".yml"):
+                    continue
+                fpath = os.path.join(wf_dir, fname)
+                try:
+                    with open(fpath) as f:
+                        data = _yaml.safe_load(f)
+                    if data and data.get("kind") == "Workflow":
+                        name = data.get("metadata", {}).get("name", fname.replace(".yml", ""))
+                        if name == workflow_name:
+                            wf = data
+                            wf_type = "yaml"
+                            break
+                except (_yaml.YAMLError, IOError):
+                    continue
+
+    if not wf:
+        return False, {
+            "trigger_id": trigger["trigger_id"], "run_id": run_id,
+            "workflow_name": workflow_name, "started_at": started_at,
+            "completed_at": datetime.now().isoformat(),
+            "status": "failed", "steps_completed": 0, "steps_total": 0,
+            "triggered_by": trigger["type"], "error": "Workflow not found",
+        }
+
+    # Extract steps
+    if wf_type == "yaml":
+        global_vars = wf.get("spec", {}).get("vars", {})
+        raw_steps = wf.get("spec", {}).get("steps", [])
+    else:
+        global_vars = wf.get("vars", wf.get("globalVars", {}))
+        raw_steps = wf.get("steps", [])
+
+    # Execute steps sequentially
+    steps_completed = 0
+    steps_total = len(raw_steps)
+    step_results = []
+
+    for i, step in enumerate(raw_steps):
+        step_vars = step.get("vars", step.get("extra_vars", {}))
+        merged_vars = {**global_vars, **step_vars}
+        if vars_override:
+            merged_vars.update(vars_override)
+
+        playbook = step.get("playbook", step.get("file", ""))
+        step_name = step.get("name", f"Step {i+1}")
+
+        # Check condition
+        step_if = step.get("if")
+        if step_if:
+            if step_if == "always":
+                pass  # always run
+            elif step_if == "failure":
+                if not any(r.get("status") == "failed" for r in step_results):
+                    step_results.append({"step": i, "status": "skipped"})
+                    continue
+            elif step_if == "success":
+                if not all(r.get("status") == "completed" for r in step_results):
+                    step_results.append({"step": i, "status": "skipped"})
+                    continue
+
+        # Run the playbook
+        job_id = f"trigger-{run_id}-step-{i}"
+        try:
+            _run_playbook_in_thread(playbook, merged_vars, job_id, f"[Trigger: {trigger['trigger_id']}] {step_name}")
+            # Check result
+            job_info = jobs.get(job_id, {})
+            if job_info.get("status") == "completed":
+                steps_completed += 1
+                step_results.append({"step": i, "status": "completed"})
+            else:
+                step_results.append({"step": i, "status": "failed"})
+                on_failure = step.get("on_failure", step.get("onFailure", "stop"))
+                if on_failure == "stop":
+                    break
+        except Exception as e:
+            step_results.append({"step": i, "status": "failed", "error": str(e)})
+            on_failure = step.get("on_failure", step.get("onFailure", "stop"))
+            if on_failure == "stop":
+                break
+
+    completed_at = datetime.now().isoformat()
+    success = steps_completed == steps_total
+
+    return success, {
+        "trigger_id": trigger["trigger_id"], "run_id": run_id,
+        "workflow_name": workflow_name, "started_at": started_at,
+        "completed_at": completed_at,
+        "status": "completed" if success else "failed",
+        "steps_completed": steps_completed, "steps_total": steps_total,
+        "triggered_by": trigger["type"],
+    }
+
+
+class TriggerCreate(BaseModel):
+    workflow_name: str
+    type: str  # "schedule" or "webhook"
+    trigger_name: str = ""
+    cron: str = ""
+    timezone: str = "UTC"
+    secret_env: str = ""
+    vars_override: dict = {}
+    enabled: bool = True
+
+
+@app.get("/api/triggers")
+async def list_triggers():
+    """List all configured triggers."""
+    state = _load_trigger_state()
+    return {"success": True, "triggers": state.get("triggers", []), "count": len(state.get("triggers", []))}
+
+
+@app.post("/api/triggers")
+async def create_trigger(trigger: TriggerCreate):
+    """Create a new trigger."""
+    import hashlib
+
+    state = _load_trigger_state()
+
+    # Validate type
+    if trigger.type not in ("schedule", "webhook"):
+        raise HTTPException(400, "type must be 'schedule' or 'webhook'")
+
+    # Validate cron for schedule triggers
+    if trigger.type == "schedule":
+        if not trigger.cron:
+            raise HTTPException(400, "cron is required for schedule triggers")
+        parts = trigger.cron.strip().split()
+        if len(parts) != 5:
+            raise HTTPException(400, f"Invalid cron expression: {trigger.cron}")
+
+    trigger_id = f"trg-{hashlib.sha256(os.urandom(16)).hexdigest()[:8]}"
+    trigger_data = {
+        "trigger_id": trigger_id,
+        "workflow_name": trigger.workflow_name,
+        "workflow_source": "yaml",  # determined at fire time
+        "type": trigger.type,
+        "trigger_name": trigger.trigger_name or f"{trigger.type}-{trigger.workflow_name}",
+        "enabled": trigger.enabled,
+        "created_at": datetime.now().isoformat(),
+        "last_run_at": None,
+        "last_run_status": None,
+        "next_run_at": None,
+        "run_count": 0,
+        "consecutive_failures": 0,
+        "vars_override": trigger.vars_override,
+    }
+
+    if trigger.type == "schedule":
+        trigger_data["cron"] = trigger.cron
+        trigger_data["timezone"] = trigger.timezone
+
+    if trigger.type == "webhook":
+        if trigger.secret_env:
+            trigger_data["secret_env"] = trigger.secret_env
+            secret_val = os.environ.get(trigger.secret_env, "")
+            if secret_val:
+                trigger_data["webhook_secret_hash"] = hashlib.sha256(secret_val.encode()).hexdigest()
+            else:
+                trigger_data["webhook_secret_hash"] = None
+        else:
+            trigger_data["secret_env"] = None
+            trigger_data["webhook_secret_hash"] = None
+
+    state.setdefault("triggers", []).append(trigger_data)
+    _save_trigger_state(state)
+    return {"success": True, "trigger": trigger_data}
+
+
+@app.get("/api/triggers/{trigger_id}")
+async def get_trigger(trigger_id: str):
+    """Get a single trigger by ID."""
+    state = _load_trigger_state()
+    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
+    if not trigger:
+        raise HTTPException(404, "Trigger not found")
+
+    # Include recent history
+    history = [h for h in state.get("run_history", []) if h.get("trigger_id") == trigger_id][-10:]
+    return {"success": True, "trigger": trigger, "history": history}
+
+
+@app.delete("/api/triggers/{trigger_id}")
+async def delete_trigger(trigger_id: str):
+    """Delete a trigger."""
+    state = _load_trigger_state()
+    triggers = state.get("triggers", [])
+    trigger = next((t for t in triggers if t.get("trigger_id") == trigger_id), None)
+    if not trigger:
+        raise HTTPException(404, "Trigger not found")
+    state["triggers"] = [t for t in triggers if t.get("trigger_id") != trigger_id]
+    _save_trigger_state(state)
+    return {"success": True, "deleted": trigger_id}
+
+
+@app.post("/api/triggers/{trigger_id}/enable")
+async def enable_trigger(trigger_id: str):
+    """Enable a trigger."""
+    state = _load_trigger_state()
+    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
+    if not trigger:
+        raise HTTPException(404, "Trigger not found")
+    trigger["enabled"] = True
+    trigger["consecutive_failures"] = 0
+    _save_trigger_state(state)
+    return {"success": True, "trigger": trigger}
+
+
+@app.post("/api/triggers/{trigger_id}/disable")
+async def disable_trigger(trigger_id: str):
+    """Disable a trigger."""
+    state = _load_trigger_state()
+    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
+    if not trigger:
+        raise HTTPException(404, "Trigger not found")
+    trigger["enabled"] = False
+    _save_trigger_state(state)
+    return {"success": True, "trigger": trigger}
+
+
+@app.post("/api/triggers/{trigger_id}/fire")
+async def fire_trigger(trigger_id: str, background_tasks: BackgroundTasks):
+    """Manually fire a trigger from the UI."""
+    state = _load_trigger_state()
+    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
+    if not trigger:
+        raise HTTPException(404, "Trigger not found")
+
+    # Rate limit
+    now = time.time()
+    last_fire = _trigger_last_fire.get(trigger_id, 0)
+    if now - last_fire < TRIGGER_MIN_INTERVAL:
+        remaining = int(TRIGGER_MIN_INTERVAL - (now - last_fire))
+        raise HTTPException(429, f"Rate limited. Try again in {remaining}s")
+    _trigger_last_fire[trigger_id] = now
+
+    async def _run():
+        success, run_record = await _fire_trigger_workflow(trigger, trigger.get("vars_override", {}))
+        # Update state
+        st = _load_trigger_state()
+        t = next((x for x in st.get("triggers", []) if x.get("trigger_id") == trigger_id), None)
+        if t:
+            t["last_run_at"] = run_record["started_at"]
+            t["last_run_status"] = run_record["status"]
+            t["run_count"] = t.get("run_count", 0) + 1
+            if success:
+                t["consecutive_failures"] = 0
+            else:
+                t["consecutive_failures"] = t.get("consecutive_failures", 0) + 1
+                if t["consecutive_failures"] >= 5:
+                    t["enabled"] = False
+        st.setdefault("run_history", []).append(run_record)
+        _save_trigger_state(st)
+
+    background_tasks.add_task(_run)
+    return {"success": True, "message": f"Trigger {trigger_id} fired", "workflow": trigger["workflow_name"]}
+
+
+@app.get("/api/triggers/{trigger_id}/history")
+async def get_trigger_history(trigger_id: str, limit: int = 20):
+    """Get run history for a specific trigger."""
+    state = _load_trigger_state()
+    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
+    if not trigger:
+        raise HTTPException(404, "Trigger not found")
+    history = [h for h in state.get("run_history", []) if h.get("trigger_id") == trigger_id][-limit:]
+    return {"success": True, "history": history, "count": len(history)}
+
+
+@app.get("/api/triggers/history/all")
+async def get_all_trigger_history(limit: int = 50):
+    """Get all trigger run history."""
+    state = _load_trigger_state()
+    history = state.get("run_history", [])[-limit:]
+    return {"success": True, "history": history, "count": len(history)}
+
+
+@app.get("/api/workflows/{workflow_id}/triggers")
+async def get_workflow_triggers(workflow_id: str):
+    """Get triggers associated with a specific workflow."""
+    state = _load_trigger_state()
+    # workflow_id could be a name or an actual ID
+    triggers = [
+        t for t in state.get("triggers", [])
+        if t.get("workflow_name") == workflow_id
+    ]
+    return {"success": True, "triggers": triggers, "count": len(triggers)}
+
+
+# Webhook endpoint
+@app.post("/api/webhooks/trigger/{trigger_id}")
+async def webhook_trigger(trigger_id: str, request: Request, background_tasks: BackgroundTasks):
+    """Receive a webhook and fire the associated workflow."""
+    import hashlib
+    import hmac as _hmac
+
+    state = _load_trigger_state()
+    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
+
+    # Return generic 404 to prevent trigger enumeration
+    if not trigger or trigger.get("type") != "webhook" or not trigger.get("enabled"):
+        raise HTTPException(404, "Not found")
+
+    # Rate limit
+    now = time.time()
+    last_fire = _trigger_last_fire.get(trigger_id, 0)
+    if now - last_fire < TRIGGER_MIN_INTERVAL:
+        raise HTTPException(429, "Rate limited")
+    _trigger_last_fire[trigger_id] = now
+
+    body = await request.body()
+
+    # Validate HMAC secret if configured
+    if trigger.get("webhook_secret_hash"):
+        secret_env = trigger.get("secret_env", "")
+        secret = os.environ.get(secret_env, "") if secret_env else ""
+        if not secret:
+            raise HTTPException(500, "Webhook secret not configured in environment")
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        expected = "sha256=" + _hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        if not _hmac.compare_digest(signature, expected):
+            raise HTTPException(403, "Invalid signature")
+
+    async def _run():
+        vars_override = trigger.get("vars_override", {})
+        success, run_record = await _fire_trigger_workflow(trigger, vars_override)
+        st = _load_trigger_state()
+        t = next((x for x in st.get("triggers", []) if x.get("trigger_id") == trigger_id), None)
+        if t:
+            t["last_run_at"] = run_record["started_at"]
+            t["last_run_status"] = run_record["status"]
+            t["run_count"] = t.get("run_count", 0) + 1
+            if success:
+                t["consecutive_failures"] = 0
+            else:
+                t["consecutive_failures"] = t.get("consecutive_failures", 0) + 1
+                if t["consecutive_failures"] >= 5:
+                    t["enabled"] = False
+        st.setdefault("run_history", []).append(run_record)
+        _save_trigger_state(st)
+
+    background_tasks.add_task(_run)
+    return {"success": True, "message": "Webhook received", "workflow": trigger["workflow_name"]}
+
+
+# ============================================================================
 # Cluster Actions / Feature Action Engine API
 # ============================================================================
 
