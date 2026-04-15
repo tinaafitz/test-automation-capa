@@ -45,7 +45,12 @@ _validate_feature_value_check = capa_cli._validate_feature_value_check
 _evaluate_condition = capa_cli._evaluate_condition
 
 # Also import the shared core validation for direct testing
-from capa_core import validate_feature_value
+from capa_core import (
+    validate_feature_value,
+    validate_cluster_name,
+    resolve_spec_to_plan,
+    FeatureRegistry as CoreFeatureRegistry,
+)
 
 
 # ============================================================================
@@ -2327,3 +2332,141 @@ class TestCmdTrigger:
         t = state["triggers"][0]
         assert t["consecutive_failures"] == 1
         assert t["last_run_status"] == "failed"
+
+
+# ============================================================================
+# capa_core coverage: FeatureRegistry error paths and edge cases
+# ============================================================================
+
+class TestFeatureRegistryErrors:
+    """Tests for FeatureRegistry error paths in capa_core."""
+
+    def _write_registry(self, tmp_path, content):
+        """Write content to the expected registry path under tmp_path."""
+        schema_dir = tmp_path / "schemas"
+        schema_dir.mkdir(exist_ok=True)
+        reg_file = schema_dir / "feature-registry.yml"
+        reg_file.write_text(content)
+        return reg_file
+
+    def test_registry_file_not_found(self, tmp_path):
+        """FileNotFoundError when registry YAML doesn't exist."""
+        with pytest.raises(FileNotFoundError, match="Feature registry not found"):
+            CoreFeatureRegistry(tmp_path)
+
+    def test_registry_invalid_yaml(self, tmp_path):
+        """ValueError when registry YAML is malformed."""
+        self._write_registry(tmp_path, "{{invalid: yaml: [")
+        with pytest.raises(ValueError, match="Invalid YAML"):
+            CoreFeatureRegistry(tmp_path)
+
+    def test_registry_getmtime_oserror(self, tmp_path):
+        """OSError on getmtime should set mtime to 0 and still load."""
+        self._write_registry(tmp_path, yaml.dump({"version": "1.0", "suites": []}))
+        with patch("capa_core.os.path.getmtime", side_effect=OSError("permission denied")):
+            reg = CoreFeatureRegistry(tmp_path)
+        assert reg.suites == []
+
+    def test_refresh_reloads(self, tmp_path):
+        """refresh() should re-check the file."""
+        reg_file = self._write_registry(tmp_path, yaml.dump({"version": "1.0", "suites": []}))
+        reg = CoreFeatureRegistry(tmp_path)
+        assert reg.suites == []
+        # Update file with a suite — change mtime by writing new content
+        import time
+        time.sleep(0.05)  # ensure mtime changes
+        reg_file.write_text(yaml.dump({
+            "version": "1.0",
+            "suites": [{"id": "new-suite", "name": "New", "phase": "Day2", "features": []}],
+        }))
+        reg.refresh()
+        assert len(reg.suites) == 1
+        assert reg.suites[0]["id"] == "new-suite"
+
+    def test_raw_data_property(self, tmp_path):
+        """raw_data should return the full parsed YAML dict."""
+        self._write_registry(tmp_path, yaml.dump({"version": "1.0", "suites": []}))
+        reg = CoreFeatureRegistry(tmp_path)
+        raw = reg.raw_data
+        assert raw["version"] == "1.0"
+        assert raw["suites"] == []
+
+
+# ============================================================================
+# capa_core coverage: validate_cluster_name
+# ============================================================================
+
+class TestValidateClusterName:
+    """Tests for validate_cluster_name in capa_core."""
+
+    def test_empty_name(self):
+        assert validate_cluster_name("") == "Cluster name is required"
+
+    def test_too_long(self):
+        result = validate_cluster_name("a" * 55)
+        assert "54 characters or fewer" in result
+        assert "got 55" in result
+
+    def test_starts_with_number(self):
+        result = validate_cluster_name("1bad")
+        assert "start with a lowercase letter" in result
+
+    def test_starts_with_uppercase(self):
+        result = validate_cluster_name("Bad")
+        assert "start with a lowercase letter" in result
+
+    def test_has_underscores(self):
+        result = validate_cluster_name("bad_name")
+        assert result is not None
+
+    def test_valid_name(self):
+        assert validate_cluster_name("my-cluster-01") is None
+
+    def test_valid_single_char(self):
+        assert validate_cluster_name("a") is None
+
+    def test_valid_max_length(self):
+        assert validate_cluster_name("a" * 54) is None
+
+
+# ============================================================================
+# capa_core coverage: _plan_test via resolve_spec_to_plan
+# ============================================================================
+
+class TestPlanTest:
+    """Tests for the test action plan resolution in capa_core."""
+
+    def test_plan_test_with_explicit_suites(self, minimal_registry, tmp_path):
+        """test action with explicit test_suites in spec."""
+        data = make_spec(action="test", cluster="my-cluster",
+                         test_suites=["test-suite"])
+        spec = ClusterAutomationSpec(data)
+        engine = ExecutionEngine(minimal_registry, tmp_path, dry_run=True)
+        plan = engine.plan(spec)
+
+        assert len(plan) >= 1
+        assert plan[0]["type"] == "test_suite"
+        assert plan[0]["suite_id"] == "test-suite"
+        assert plan[0]["cluster"] == "my-cluster"
+
+    def test_plan_test_defaults_to_day2_suites(self, minimal_registry, tmp_path):
+        """test action without test_suites should default to Day2 suites."""
+        data = make_spec(action="test", cluster="my-cluster")
+        spec = ClusterAutomationSpec(data)
+        engine = ExecutionEngine(minimal_registry, tmp_path, dry_run=True)
+        plan = engine.plan(spec)
+
+        # minimal_registry has one suite with phase="Day2"
+        assert len(plan) >= 1
+        assert all(s["type"] == "test_suite" for s in plan)
+
+    def test_plan_test_step_numbering(self, minimal_registry, tmp_path):
+        """Steps should be numbered sequentially."""
+        data = make_spec(action="test", cluster="my-cluster",
+                         test_suites=["test-suite"])
+        spec = ClusterAutomationSpec(data)
+        engine = ExecutionEngine(minimal_registry, tmp_path, dry_run=True)
+        plan = engine.plan(spec)
+
+        assert plan[0]["step"] == 1
+        assert plan[0]["name"] == "Test suite: test-suite"
