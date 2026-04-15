@@ -9182,24 +9182,38 @@ _trigger_last_fire: Dict[str, float] = {}
 TRIGGER_MIN_INTERVAL = 60  # seconds
 
 
+import fcntl
+_trigger_state_lock = __import__("threading").Lock()
+
+
 def _load_trigger_state():
-    """Load trigger state from vars/trigger_state.json."""
+    """Load trigger state from vars/trigger_state.json (thread-safe)."""
     if not os.path.exists(TRIGGER_STATE_FILE):
         return {"triggers": [], "run_history": []}
     try:
-        with open(TRIGGER_STATE_FILE, "r") as f:
-            return json.load(f)
+        with _trigger_state_lock:
+            with open(TRIGGER_STATE_FILE, "r") as f:
+                fcntl.flock(f, fcntl.LOCK_SH)
+                try:
+                    return json.load(f)
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
     except (json.JSONDecodeError, IOError):
         return {"triggers": [], "run_history": []}
 
 
 def _save_trigger_state(state):
-    """Persist trigger state."""
+    """Persist trigger state (thread-safe with file locking)."""
     os.makedirs(os.path.dirname(TRIGGER_STATE_FILE), exist_ok=True)
     if len(state.get("run_history", [])) > 200:
         state["run_history"] = state["run_history"][-200:]
-    with open(TRIGGER_STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2, default=str)
+    with _trigger_state_lock:
+        with open(TRIGGER_STATE_FILE, "w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                json.dump(state, f, indent=2, default=str)
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
 
 # Concurrent run prevention: tracks which triggers are currently executing
@@ -9254,6 +9268,33 @@ def _send_trigger_notification(trigger, run_record, success):
         print(f"[Trigger] Notification error: {e}")
 
 
+def _update_trigger_after_run(trigger_id, success, run_record):
+    """Shared helper: update trigger state after a run (avoids duplication across fire/webhook/scheduler)."""
+    st = _load_trigger_state()
+    t = next((x for x in st.get("triggers", []) if x.get("trigger_id") == trigger_id), None)
+    if t:
+        t["last_run_at"] = run_record.get("started_at")
+        t["last_run_status"] = run_record.get("status")
+        t["run_count"] = t.get("run_count", 0) + 1
+        if success:
+            t["consecutive_failures"] = 0
+        else:
+            t["consecutive_failures"] = t.get("consecutive_failures", 0) + 1
+            if t["consecutive_failures"] >= 5:
+                t["enabled"] = False
+                print(f"[Trigger] {trigger_id} auto-disabled after 5 consecutive failures")
+        # Update next_run_at for schedule triggers
+        if t.get("type") == "schedule" and t.get("cron"):
+            try:
+                from croniter import croniter as _cron
+                next_t = _cron(t["cron"], datetime.now()).get_next(datetime)
+                t["next_run_at"] = next_t.isoformat()
+            except Exception:
+                pass
+    st.setdefault("run_history", []).append(run_record)
+    _save_trigger_state(st)
+
+
 async def _fire_trigger_workflow(trigger, vars_override=None):
     """Execute a trigger's workflow via the playbook runner. Returns (success, run_record)."""
     import hashlib
@@ -9277,15 +9318,16 @@ async def _fire_trigger_workflow(trigger, vars_override=None):
     started_at = datetime.now().isoformat()
 
     try:
-        # Find the workflow
+        # Find the workflow — try saved workflows first, then YAML
         wf = None
-        wf_type = trigger.get("workflow_source", "yaml")
+        wf_type = None
 
-        if wf_type == "saved":
-            workflows = _load_workflows()
-            wf = next((w for w in workflows if w.get("name") == workflow_name), None)
+        workflows = _load_workflows()
+        wf = next((w for w in workflows if w.get("name") == workflow_name), None)
+        if wf:
+            wf_type = "saved"
+
         if not wf:
-            # Try YAML workflows
             import yaml as _yaml
             repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             wf_dir = os.path.join(repo_root, "specs", "workflows")
@@ -9353,10 +9395,21 @@ async def _fire_trigger_workflow(trigger, vars_override=None):
                         step_results.append({"step": i, "status": "skipped"})
                         continue
 
-            # Run the playbook
+            # Run the playbook — initialize job entry first, then run in thread
             job_id = f"trigger-{run_id}-step-{i}"
+            jobs[job_id] = {
+                "id": job_id,
+                "status": "pending",
+                "progress": 0,
+                "message": f"Trigger step: {step_name}",
+                "started_at": datetime.now(),
+                "logs": [],
+            }
             try:
-                _run_playbook_in_thread(playbook, merged_vars, job_id, f"[Trigger: {trigger_id}] {step_name}")
+                await asyncio.to_thread(
+                    _run_playbook_in_thread, playbook, merged_vars,
+                    job_id, f"[Trigger: {trigger_id}] {step_name}"
+                )
                 # Check result
                 job_info = jobs.get(job_id, {})
                 if job_info.get("status") == "completed":
@@ -9446,6 +9499,12 @@ class TriggerScheduler:
         state = _load_trigger_state()
         triggers = state.get("triggers", [])
 
+        # Prune _last_check for triggers that no longer exist
+        active_ids = {t["trigger_id"] for t in triggers}
+        stale_keys = [k for k in self._last_check if k not in active_ids]
+        for k in stale_keys:
+            del self._last_check[k]
+
         for trigger in triggers:
             if trigger.get("type") != "schedule":
                 continue
@@ -9491,31 +9550,11 @@ class TriggerScheduler:
             success, run_record = await _fire_trigger_workflow(
                 trigger, trigger.get("vars_override", {})
             )
-            st = _load_trigger_state()
-            t = next((x for x in st.get("triggers", []) if x.get("trigger_id") == trigger_id), None)
-            if t:
-                t["last_run_at"] = run_record["started_at"]
-                t["last_run_status"] = run_record["status"]
-                t["run_count"] = t.get("run_count", 0) + 1
-                if success:
-                    t["consecutive_failures"] = 0
-                    print(f"[TriggerScheduler] {trigger_id} completed successfully")
-                else:
-                    t["consecutive_failures"] = t.get("consecutive_failures", 0) + 1
-                    if t["consecutive_failures"] >= 5:
-                        t["enabled"] = False
-                        print(f"[TriggerScheduler] {trigger_id} auto-disabled after 5 consecutive failures")
-                    else:
-                        print(f"[TriggerScheduler] {trigger_id} failed (consecutive: {t['consecutive_failures']})")
-                # Update next_run_at
-                try:
-                    from croniter import croniter as _cron
-                    next_t = _cron(trigger.get("cron", ""), datetime.now()).get_next(datetime)
-                    t["next_run_at"] = next_t.isoformat()
-                except Exception:
-                    pass
-            st.setdefault("run_history", []).append(run_record)
-            _save_trigger_state(st)
+            _update_trigger_after_run(trigger_id, success, run_record)
+            if success:
+                print(f"[TriggerScheduler] {trigger_id} completed successfully")
+            else:
+                print(f"[TriggerScheduler] {trigger_id} failed")
         except Exception as e:
             print(f"[TriggerScheduler] Error firing {trigger_id}: {e}")
 
@@ -9548,6 +9587,17 @@ async def create_trigger(trigger: TriggerCreate):
     import hashlib
 
     state = _load_trigger_state()
+
+    # Validate input lengths and characters
+    import re as _re
+    if not trigger.workflow_name or len(trigger.workflow_name) > 128:
+        raise HTTPException(400, "workflow_name must be 1-128 characters")
+    if not _re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$', trigger.workflow_name):
+        raise HTTPException(400, "workflow_name contains invalid characters (use alphanumeric, dots, hyphens, underscores)")
+    if trigger.trigger_name and len(trigger.trigger_name) > 128:
+        raise HTTPException(400, "trigger_name must be at most 128 characters")
+    if trigger.trigger_name and not _re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$', trigger.trigger_name):
+        raise HTTPException(400, "trigger_name contains invalid characters")
 
     # Validate type
     if trigger.type not in ("schedule", "webhook"):
@@ -9692,21 +9742,7 @@ async def fire_trigger(trigger_id: str, background_tasks: BackgroundTasks):
 
     async def _run():
         success, run_record = await _fire_trigger_workflow(trigger, trigger.get("vars_override", {}))
-        # Update state
-        st = _load_trigger_state()
-        t = next((x for x in st.get("triggers", []) if x.get("trigger_id") == trigger_id), None)
-        if t:
-            t["last_run_at"] = run_record["started_at"]
-            t["last_run_status"] = run_record["status"]
-            t["run_count"] = t.get("run_count", 0) + 1
-            if success:
-                t["consecutive_failures"] = 0
-            else:
-                t["consecutive_failures"] = t.get("consecutive_failures", 0) + 1
-                if t["consecutive_failures"] >= 5:
-                    t["enabled"] = False
-        st.setdefault("run_history", []).append(run_record)
-        _save_trigger_state(st)
+        _update_trigger_after_run(trigger_id, success, run_record)
 
     background_tasks.add_task(_run)
     return {"success": True, "message": f"Trigger {trigger_id} fired", "workflow": trigger["workflow_name"]}
@@ -9780,20 +9816,7 @@ async def webhook_trigger(trigger_id: str, request: Request, background_tasks: B
     async def _run():
         vars_override = trigger.get("vars_override", {})
         success, run_record = await _fire_trigger_workflow(trigger, vars_override)
-        st = _load_trigger_state()
-        t = next((x for x in st.get("triggers", []) if x.get("trigger_id") == trigger_id), None)
-        if t:
-            t["last_run_at"] = run_record["started_at"]
-            t["last_run_status"] = run_record["status"]
-            t["run_count"] = t.get("run_count", 0) + 1
-            if success:
-                t["consecutive_failures"] = 0
-            else:
-                t["consecutive_failures"] = t.get("consecutive_failures", 0) + 1
-                if t["consecutive_failures"] >= 5:
-                    t["enabled"] = False
-        st.setdefault("run_history", []).append(run_record)
-        _save_trigger_state(st)
+        _update_trigger_after_run(trigger_id, success, run_record)
 
     background_tasks.add_task(_run)
     return {"success": True, "message": "Webhook received", "workflow": trigger["workflow_name"]}
