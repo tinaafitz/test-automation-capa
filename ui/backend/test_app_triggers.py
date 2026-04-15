@@ -1,14 +1,16 @@
 """
-Tests for trigger management API endpoints.
+Tests for trigger management API endpoints and scheduler.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
 import os
 import sys
 import tempfile
-from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,7 +19,10 @@ from fastapi.testclient import TestClient
 sys.modules.setdefault("anthropic", MagicMock())
 sys.modules.setdefault("app_extensions", MagicMock())
 
-from app import app, _load_trigger_state, _save_trigger_state, TRIGGER_STATE_FILE, _trigger_last_fire
+from app import (
+    app, _load_trigger_state, _save_trigger_state, TRIGGER_STATE_FILE,
+    _trigger_last_fire, _trigger_scheduler, TriggerScheduler,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -346,3 +351,194 @@ class TestFireTrigger:
         assert resp1.status_code == 200
         resp2 = client.post(f"/api/triggers/{tid}/fire")
         assert resp2.status_code == 429
+
+
+class TestSchedulerStatus:
+    """Tests for the scheduler status endpoint."""
+
+    def test_scheduler_status(self, client):
+        resp = client.get("/api/triggers/scheduler/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "running" in data
+        assert "croniter_available" in data
+        assert "active_schedule_triggers" in data
+        assert "upcoming" in data
+
+    def test_scheduler_status_with_trigger(self, client, sample_trigger):
+        resp = client.get("/api/triggers/scheduler/status")
+        data = resp.json()
+        assert data["active_schedule_triggers"] == 1
+        assert len(data["upcoming"]) == 1
+        assert data["upcoming"][0]["trigger_id"] == sample_trigger["trigger_id"]
+        assert data["upcoming"][0]["cron"] == "0 2 * * *"
+
+
+class TestCreateTriggerNextRun:
+    """Tests for next_run_at computation on create and enable."""
+
+    def test_create_schedule_sets_next_run(self, client):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test-wf",
+            "type": "schedule",
+            "cron": "0 2 * * *",
+        })
+        trigger = resp.json()["trigger"]
+        assert trigger["next_run_at"] is not None
+
+    def test_enable_recomputes_next_run(self, client, sample_trigger):
+        tid = sample_trigger["trigger_id"]
+        client.post(f"/api/triggers/{tid}/disable")
+        resp = client.post(f"/api/triggers/{tid}/enable")
+        trigger = resp.json()["trigger"]
+        assert trigger.get("next_run_at") is not None
+
+
+class TestTriggerSchedulerUnit:
+    """Unit tests for the TriggerScheduler class."""
+
+    def test_scheduler_init(self):
+        scheduler = TriggerScheduler()
+        assert scheduler._running is False
+        assert scheduler._task is None
+        assert scheduler._check_interval == 30
+
+    @pytest.mark.asyncio
+    async def test_scheduler_start_stop(self):
+        scheduler = TriggerScheduler()
+        # Patch the loop to not actually run
+        with patch.object(scheduler, "_loop", new_callable=AsyncMock):
+            await scheduler.start()
+            assert scheduler._running is True
+            assert scheduler._task is not None
+            await scheduler.stop()
+            assert scheduler._running is False
+
+    @pytest.mark.asyncio
+    async def test_tick_fires_matching_trigger(self, tmp_path):
+        """Scheduler tick should fire a trigger whose cron matches the current minute."""
+        from croniter import croniter
+
+        scheduler = TriggerScheduler()
+        now_utc = datetime.now(timezone.utc)
+        # Build a cron that matches the current UTC minute
+        current_cron = f"{now_utc.minute} {now_utc.hour} * * *"
+
+        state_file = str(tmp_path / "trigger_state.json")
+        trigger_data = {
+            "triggers": [{
+                "trigger_id": "trg-test123",
+                "workflow_name": "test-wf",
+                "type": "schedule",
+                "trigger_name": "test-sched",
+                "enabled": True,
+                "cron": current_cron,
+                "timezone": "UTC",
+                "consecutive_failures": 0,
+                "vars_override": {},
+            }],
+            "run_history": [],
+        }
+        with open(state_file, "w") as f:
+            json.dump(trigger_data, f)
+
+        with patch("app.TRIGGER_STATE_FILE", state_file):
+            with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
+                await scheduler._tick(croniter)
+                mock_fire.assert_called_once()
+                fired_trigger = mock_fire.call_args[0][0]
+                assert fired_trigger["trigger_id"] == "trg-test123"
+
+    @pytest.mark.asyncio
+    async def test_tick_skips_disabled_trigger(self, tmp_path):
+        """Scheduler should skip disabled triggers."""
+        from croniter import croniter
+
+        scheduler = TriggerScheduler()
+        now = datetime.now()
+        current_cron = f"{now.minute} {now.hour} * * *"
+
+        state_file = str(tmp_path / "trigger_state.json")
+        trigger_data = {
+            "triggers": [{
+                "trigger_id": "trg-disabled",
+                "workflow_name": "test-wf",
+                "type": "schedule",
+                "trigger_name": "disabled-sched",
+                "enabled": False,
+                "cron": current_cron,
+                "timezone": "UTC",
+            }],
+            "run_history": [],
+        }
+        with open(state_file, "w") as f:
+            json.dump(trigger_data, f)
+
+        with patch("app.TRIGGER_STATE_FILE", state_file):
+            with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
+                await scheduler._tick(croniter)
+                mock_fire.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tick_skips_webhook_trigger(self, tmp_path):
+        """Scheduler should skip webhook triggers."""
+        from croniter import croniter
+
+        scheduler = TriggerScheduler()
+        state_file = str(tmp_path / "trigger_state.json")
+        trigger_data = {
+            "triggers": [{
+                "trigger_id": "trg-webhook",
+                "workflow_name": "test-wf",
+                "type": "webhook",
+                "trigger_name": "hook",
+                "enabled": True,
+            }],
+            "run_history": [],
+        }
+        with open(state_file, "w") as f:
+            json.dump(trigger_data, f)
+
+        with patch("app.TRIGGER_STATE_FILE", state_file):
+            with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
+                await scheduler._tick(croniter)
+                mock_fire.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tick_no_double_fire(self, tmp_path):
+        """Scheduler should not fire the same trigger twice in the same minute."""
+        from croniter import croniter
+
+        scheduler = TriggerScheduler()
+        now_utc = datetime.now(timezone.utc)
+        current_cron = f"{now_utc.minute} {now_utc.hour} * * *"
+
+        state_file = str(tmp_path / "trigger_state.json")
+        trigger_data = {
+            "triggers": [{
+                "trigger_id": "trg-once",
+                "workflow_name": "test-wf",
+                "type": "schedule",
+                "trigger_name": "once",
+                "enabled": True,
+                "cron": current_cron,
+                "timezone": "UTC",
+            }],
+            "run_history": [],
+        }
+        with open(state_file, "w") as f:
+            json.dump(trigger_data, f)
+
+        with patch("app.TRIGGER_STATE_FILE", state_file):
+            with patch.object(scheduler, "_fire", new_callable=AsyncMock) as mock_fire:
+                await scheduler._tick(croniter)
+                await scheduler._tick(croniter)  # second tick same minute
+                assert mock_fire.call_count == 1
+
+    def test_delete_clears_scheduler_cache(self, client, sample_trigger):
+        """Deleting a trigger should clear the scheduler's _last_check."""
+        tid = sample_trigger["trigger_id"]
+        _trigger_scheduler._last_check[tid] = "2026-04-14 02:00"
+        client.delete(f"/api/triggers/{tid}")
+        assert tid not in _trigger_scheduler._last_check
