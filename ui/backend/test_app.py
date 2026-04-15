@@ -637,15 +637,13 @@ class TestCapiVersions:
 # ---------------------------------------------------------------------------
 
 class TestMinikubeList:
-    @patch("app.subprocess.run")
-    def test_minikube_list_clusters(self, mock_run, client):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout='[{"Name":"test","Status":"Running","Driver":"docker"}]',
-            stderr="",
-        )
-        import app
-        app.minikube_clusters_cache["timestamp"] = 0
+    @patch("app.minikube_ops.list_profiles")
+    def test_minikube_list_clusters(self, mock_list, client):
+        mock_list.return_value = {
+            "clusters": ["test"],
+            "minikube_installed": True,
+            "message": "Found 1 Minikube cluster(s)",
+        }
         resp = client.get("/api/minikube/list-clusters")
         assert resp.status_code == 200
 
@@ -1980,33 +1978,29 @@ class TestMinikubeCreate:
         assert "Invalid" in data["message"]
 
     def test_minikube_not_installed(self, client):
-        mock_result = MagicMock(returncode=1)
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("app.minikube_ops.is_minikube_installed", return_value=False):
             resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "test-mk"})
             data = resp.json()
             assert data["success"] is False
             assert "not installed" in data["message"]
 
     def test_cluster_already_exists(self, client):
-        # First call = minikube version (success), second = minikube status (exists)
-        mock_version = MagicMock(returncode=0)
-        mock_status = MagicMock(returncode=0)  # 0 = cluster exists
-        with patch("subprocess.run", side_effect=[mock_version, mock_status]):
-            resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "existing"})
-            data = resp.json()
-            assert data["success"] is False
-            assert "already exists" in data["message"]
+        with patch("app.minikube_ops.is_minikube_installed", return_value=True):
+            with patch("app.minikube_ops.get_profile_status", return_value={"exists": True}):
+                resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "existing"})
+                data = resp.json()
+                assert data["success"] is False
+                assert "already exists" in data["message"]
 
     def test_create_success(self, client):
-        mock_version = MagicMock(returncode=0)
-        mock_status = MagicMock(returncode=1)  # 1 = doesn't exist
-        with patch("subprocess.run", side_effect=[mock_version, mock_status]):
-            with patch("asyncio.create_task"):
-                resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "new-cluster"})
-                data = resp.json()
-                assert data["success"] is True
-                assert data["cluster_name"] == "new-cluster"
-                assert "job_id" in data
+        with patch("app.minikube_ops.is_minikube_installed", return_value=True):
+            with patch("app.minikube_ops.get_profile_status", return_value={"exists": False}):
+                with patch("asyncio.create_task"):
+                    resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "new-cluster"})
+                    data = resp.json()
+                    assert data["success"] is True
+                    assert data["cluster_name"] == "new-cluster"
+                    assert "job_id" in data
 
 
 class TestMinikubeDelete:
@@ -2018,8 +2012,7 @@ class TestMinikubeDelete:
         assert data["success"] is False
 
     def test_delete_success(self, client):
-        mock_result = MagicMock(returncode=0, stdout="Deleted")
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("app.minikube_ops.delete_profile", return_value={"success": True, "message": "Deleted", "output": "Deleted"}):
             resp = client.post("/api/minikube/delete-cluster", json={"cluster_name": "del-me"})
             data = resp.json()
             assert data["success"] is True
@@ -3057,23 +3050,20 @@ class TestMinikubeListClusters:
     """Tests for GET /api/minikube/list-clusters."""
 
     def test_minikube_not_installed(self, client):
-        from app import minikube_clusters_cache
-        minikube_clusters_cache["data"] = None
-        minikube_clusters_cache["timestamp"] = 0
-        mock_result = MagicMock(returncode=1, stdout="", stderr="not found")
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("app.minikube_ops.list_profiles", return_value={
+            "clusters": [], "minikube_installed": False,
+            "message": "Minikube is not installed",
+        }):
             resp = client.get("/api/minikube/list-clusters")
             assert resp.status_code == 200
             data = resp.json()
             assert data["minikube_installed"] is False
 
     def test_minikube_no_clusters(self, client):
-        from app import minikube_clusters_cache
-        minikube_clusters_cache["data"] = None
-        minikube_clusters_cache["timestamp"] = 0
-        mock_version = MagicMock(returncode=0, stdout="v1.33.0")
-        mock_list = MagicMock(returncode=1, stdout="", stderr="")
-        with patch("subprocess.run", side_effect=[mock_version, mock_list]):
+        with patch("app.minikube_ops.list_profiles", return_value={
+            "clusters": [], "minikube_installed": True,
+            "message": "No Minikube clusters found",
+        }):
             resp = client.get("/api/minikube/list-clusters")
             assert resp.status_code == 200
             data = resp.json()
@@ -3081,13 +3071,10 @@ class TestMinikubeListClusters:
             assert data["clusters"] == []
 
     def test_minikube_with_clusters(self, client):
-        from app import minikube_clusters_cache
-        minikube_clusters_cache["data"] = None
-        minikube_clusters_cache["timestamp"] = 0
-        mock_version = MagicMock(returncode=0, stdout="v1.33.0")
-        profiles_json = json.dumps({"valid": [{"Name": "mycluster"}, {"Name": "dev"}]})
-        mock_list = MagicMock(returncode=0, stdout=profiles_json)
-        with patch("subprocess.run", side_effect=[mock_version, mock_list]):
+        with patch("app.minikube_ops.list_profiles", return_value={
+            "clusters": ["mycluster", "dev"], "minikube_installed": True,
+            "message": "Found 2 Minikube cluster(s)",
+        }):
             resp = client.get("/api/minikube/list-clusters")
             assert resp.status_code == 200
             data = resp.json()
