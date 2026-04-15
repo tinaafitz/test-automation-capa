@@ -35,6 +35,9 @@ Usage:
     ./capa minikube resources my-cluster                   # list CAPI/ROSA resources
     ./capa minikube tools                                  # show clusterctl/minikube/kubectl versions
     ./capa minikube context [profile]                      # show or switch kubectl context
+    ./capa status -c mk1 --target minikube                # cluster status on minikube
+    ./capa list-clusters --target minikube                 # list profiles + CAPI resources
+    ./capa watch -c mk1 --target minikube                  # watch minikube CAPI readiness
 """
 
 import argparse
@@ -408,6 +411,10 @@ def cmd_plan(args, base_dir, registry):
 
 def cmd_status(args, base_dir, registry):
     """Show cluster status."""
+    target = getattr(args, "target", None)
+    if target == "minikube":
+        return _status_minikube(args)
+
     cluster = args.cluster
     namespace = args.namespace or "ns-rosa-hcp"
     if not cluster:
@@ -841,6 +848,10 @@ def cmd_version(args, base_dir, registry):
 
 def cmd_list_clusters(args, base_dir, registry):
     """List all managed ROSA HCP clusters across namespaces."""
+    target = getattr(args, "target", None)
+    if target == "minikube":
+        return _list_clusters_minikube(args)
+
     namespace_flag = ["-n", args.namespace] if args.namespace else ["-A"]
 
     try:
@@ -1002,6 +1013,10 @@ def cmd_history(args, base_dir, registry):
 
 def cmd_watch(args, base_dir, registry):
     """Poll cluster status until ready or timeout."""
+    target = getattr(args, "target", None)
+    if target == "minikube":
+        return _watch_minikube(args)
+
     cluster = args.cluster
     namespace = args.namespace or "ns-rosa-hcp"
     interval = args.interval
@@ -2184,6 +2199,177 @@ def cmd_trigger(args, base_dir, registry):
 
 
 # ============================================================================
+# --target minikube: alternate implementations for status/list/watch
+# ============================================================================
+def _status_minikube(args):
+    """Show minikube profile status (--target minikube)."""
+    cluster = args.cluster
+    if not cluster:
+        print(f"{C.R}--cluster required (minikube profile name){C.E}")
+        sys.exit(1)
+
+    result = minikube_ops.verify_cluster(cluster)
+
+    print(f"\n{C.BOLD}Minikube Profile: {cluster}{C.E}")
+    print(f"{'─' * 60}")
+
+    if not result.get("exists"):
+        print(f"  Status:  {C.R}Not found{C.E}")
+        if result.get("suggestion"):
+            print(f"  Hint:    {result['suggestion']}")
+        print()
+        sys.exit(1)
+
+    if not result.get("accessible"):
+        print(f"  Status:  {C.Y}Exists but not running{C.E}")
+        if result.get("suggestion"):
+            print(f"  Hint:    {result['suggestion']}")
+        print()
+        sys.exit(1)
+
+    info = result.get("cluster_info", {})
+    print(f"  Status:      {C.G}Running{C.E}")
+    print(f"  Driver:      {info.get('driver', 'N/A')}")
+    print(f"  K8s version: {info.get('kubernetesVersion', 'N/A')}")
+
+    # CAPI resources
+    namespace = getattr(args, "namespace", "ns-rosa-hcp") or "ns-rosa-hcp"
+    res = minikube_ops.get_capi_resources(cluster, namespace)
+    if res.get("resources"):
+        print(f"\n  {C.BOLD}CAPI Resources ({namespace}){C.E}")
+        for r in res["resources"]:
+            status = r["status"]
+            sc = C.G if status in ("Ready", "Active", "Running") else C.Y
+            print(f"    {r['type']:30s} {r['name']:25s} {sc}{status}{C.E}  {r['age']}")
+    else:
+        print(f"\n  {C.Y}No CAPI resources in {namespace}{C.E}")
+
+    # Component readiness
+    components = info.get("components", {})
+    if components:
+        print(f"\n  {C.BOLD}Components{C.E}")
+        for detail in components.get("details", []):
+            icon = {
+                "configured": f"{C.G}OK{C.E}",
+                "not_configured": f"{C.Y}WARN{C.E}",
+                "missing": f"{C.R}MISSING{C.E}",
+            }.get(detail["status"], f"{C.Y}?{C.E}")
+            print(f"    {icon:>20s}  {detail['name']}: {detail['message']}")
+    print()
+
+
+def _list_clusters_minikube(args):
+    """List minikube profiles with CAPI resource counts (--target minikube)."""
+    profiles = minikube_ops.list_profiles(use_cache=False)
+
+    if not profiles.get("minikube_installed"):
+        print(f"{C.R}Minikube is not installed.{C.E}")
+        sys.exit(1)
+
+    clusters = profiles.get("clusters", [])
+    if not clusters:
+        print(f"{C.Y}No minikube profiles found.{C.E}")
+        return
+
+    namespace = getattr(args, "namespace", None) or "ns-rosa-hcp"
+    print(f"\n{C.BOLD}{'PROFILE':<25s} {'STATUS':<12s} {'DRIVER':<12s} {'CAPI RESOURCES'}{C.E}")
+    print(f"{'-' * 70}")
+
+    for name in clusters:
+        status_info = minikube_ops.get_profile_status(name)
+        if status_info.get("is_running"):
+            status = f"{C.G}Running{C.E}"
+            driver = status_info.get("driver", "?")
+            res = minikube_ops.get_capi_resources(name, namespace)
+            count = res.get("count", 0)
+            res_str = f"{count} resource(s)" if count else f"{C.Y}none{C.E}"
+        else:
+            status = f"{C.Y}Stopped{C.E}"
+            driver = status_info.get("driver", "?")
+            res_str = "-"
+
+        # Pad without ANSI for alignment
+        status_raw = "Running" if status_info.get("is_running") else "Stopped"
+        pad = " " * max(0, 12 - len(status_raw))
+        print(f"  {name:<23s} {status}{pad} {driver:<12s} {res_str}")
+
+    print(f"\n  {len(clusters)} profile(s) found.\n")
+
+
+def _watch_minikube(args):
+    """Poll minikube profile until CAPI components are ready (--target minikube)."""
+    cluster = args.cluster
+    if not cluster:
+        print(f"{C.R}--cluster required (minikube profile name){C.E}")
+        sys.exit(1)
+
+    interval = getattr(args, "interval", 30)
+    timeout = getattr(args, "timeout", 7200)
+    namespace = getattr(args, "namespace", "ns-rosa-hcp") or "ns-rosa-hcp"
+
+    print(f"\n{C.BOLD}Watching minikube profile: {cluster}{C.E}", flush=True)
+    print(f"  Namespace: {namespace}", flush=True)
+    print(f"  Interval: {interval}s, Timeout: {timeout}s", flush=True)
+    print(f"  {C.CYAN}Press Ctrl+C to stop{C.E}\n", flush=True)
+
+    start = time.time()
+    last_status = None
+
+    try:
+        while True:
+            elapsed = time.time() - start
+            if elapsed > timeout:
+                print(f"\n{C.R}Timeout after {timeout}s{C.E}\n")
+                sys.exit(1)
+
+            ts = datetime.now().strftime("%H:%M:%S")
+            result = minikube_ops.verify_cluster(cluster)
+
+            if not result.get("exists"):
+                print(f"  {ts}  {C.R}Profile not found{C.E}", flush=True)
+                time.sleep(interval)
+                continue
+
+            if not result.get("accessible"):
+                print(f"  {ts}  {C.Y}Profile exists but not running{C.E}", flush=True)
+                time.sleep(interval)
+                continue
+
+            info = result.get("cluster_info", {})
+            components = info.get("components", {})
+            capi_ok = components.get("capi_installed", False)
+            capa_ok = components.get("capa_installed", False)
+
+            # Check CAPI resources
+            res = minikube_ops.get_capi_resources(cluster, namespace)
+            res_count = res.get("count", 0)
+            ready_count = sum(1 for r in res.get("resources", [])
+                              if r.get("status") in ("Ready", "Active", "Running"))
+
+            current_status = f"capi={capi_ok} capa={capa_ok} resources={res_count} ready={ready_count}"
+            changed = " *" if current_status != last_status else ""
+            last_status = current_status
+
+            capi_color = C.G if capi_ok else C.Y
+            capa_color = C.G if capa_ok else C.Y
+            print(f"  {ts}  CAPI: {capi_color}{capi_ok}{C.E}  "
+                  f"CAPA: {capa_color}{capa_ok}{C.E}  "
+                  f"Resources: {res_count} ({ready_count} ready)  "
+                  f"({int(elapsed)}s){changed}", flush=True)
+
+            # Consider ready when CAPI+CAPA installed and all resources ready
+            if capi_ok and capa_ok and res_count > 0 and ready_count == res_count:
+                print(f"\n{C.G}{C.BOLD}Minikube profile '{cluster}' is fully ready! "
+                      f"({res_count} resources, {int(elapsed)}s){C.E}\n")
+                return
+
+            time.sleep(interval)
+
+    except KeyboardInterrupt:
+        print(f"\n\n{C.Y}Stopped watching after {int(time.time() - start)}s.{C.E}\n")
+
+
+# ============================================================================
 # Minikube management-plane commands
 # ============================================================================
 def cmd_minikube(args, base_dir, registry):
@@ -2502,6 +2688,7 @@ def main():
     p_status = subparsers.add_parser("status", help="Show cluster status")
     p_status.add_argument("--cluster", "-c", required=True, help="Cluster name")
     p_status.add_argument("--namespace", "-n", default="ns-rosa-hcp")
+    p_status.add_argument("--target", choices=["minikube"], help="Target platform (default: hub)")
 
     # specs
     subparsers.add_parser("specs", help="List available profiles")
@@ -2541,6 +2728,7 @@ def main():
     # list-clusters
     p_lc = subparsers.add_parser("list-clusters", help="List all managed ROSA HCP clusters")
     p_lc.add_argument("--namespace", "-n", default=None, help="Namespace (default: all)")
+    p_lc.add_argument("--target", choices=["minikube"], help="Target platform (default: hub)")
 
     # logs
     p_logs = subparsers.add_parser("logs", help="Tail sidecar or job logs for a cluster")
@@ -2559,6 +2747,7 @@ def main():
     p_watch.add_argument("--namespace", "-n", default="ns-rosa-hcp", help="Namespace")
     p_watch.add_argument("--interval", "-i", type=int, default=30, help="Poll interval seconds (default: 30)")
     p_watch.add_argument("--timeout", "-t", type=int, default=7200, help="Timeout seconds (default: 7200)")
+    p_watch.add_argument("--target", choices=["minikube"], help="Target platform (default: hub)")
 
     # completion
     p_comp = subparsers.add_parser("completion", help="Generate shell completion script")
