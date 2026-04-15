@@ -39,6 +39,10 @@ _trigger_state_lock = threading.Lock()
 
 # Concurrent run prevention: tracks which triggers are currently executing
 _active_trigger_runs: Dict[str, str] = {}  # trigger_id -> run_id
+_active_runs_lock = threading.Lock()
+
+# Pagination hard cap
+MAX_PAGINATION_LIMIT = 1000
 
 
 def check_rate_limit(trigger_id: str) -> Optional[int]:
@@ -187,21 +191,22 @@ async def _fire_trigger_workflow(trigger, vars_override=None):
 
     workflow_name = trigger["workflow_name"]
     trigger_id = trigger["trigger_id"]
-    run_id = f"trun-{hashlib.sha256(os.urandom(16)).hexdigest()[:8]}"
+    run_id = f"trun-{hashlib.sha256(os.urandom(16)).hexdigest()[:16]}"
 
-    # Concurrent run prevention
-    if trigger_id in _active_trigger_runs:
-        active_run = _active_trigger_runs[trigger_id]
-        logger.info("Skipping trigger — already running", extra={"trigger_id": trigger_id, "active_run": active_run})
-        return False, {
-            "trigger_id": trigger_id, "run_id": run_id,
-            "workflow_name": workflow_name, "started_at": datetime.now().isoformat(),
-            "completed_at": datetime.now().isoformat(),
-            "status": "skipped", "steps_completed": 0, "steps_total": 0,
-            "triggered_by": trigger["type"], "error": f"Already running ({active_run})",
-        }
+    # Concurrent run prevention (thread-safe)
+    with _active_runs_lock:
+        if trigger_id in _active_trigger_runs:
+            active_run = _active_trigger_runs[trigger_id]
+            logger.warning("Skipping trigger — already running", extra={"trigger_id": trigger_id, "active_run": active_run})
+            return False, {
+                "trigger_id": trigger_id, "run_id": run_id,
+                "workflow_name": workflow_name, "started_at": datetime.now().isoformat(),
+                "completed_at": datetime.now().isoformat(),
+                "status": "skipped", "steps_completed": 0, "steps_total": 0,
+                "triggered_by": trigger["type"], "error": f"Already running ({active_run})",
+            }
+        _active_trigger_runs[trigger_id] = run_id
 
-    _active_trigger_runs[trigger_id] = run_id
     started_at = datetime.now().isoformat()
 
     try:
@@ -240,7 +245,7 @@ async def _fire_trigger_workflow(trigger, vars_override=None):
                 "workflow_name": workflow_name, "started_at": started_at,
                 "completed_at": datetime.now().isoformat(),
                 "status": "failed", "steps_completed": 0, "steps_total": 0,
-                "triggered_by": trigger["type"], "error": "Workflow not found",
+                "triggered_by": trigger["type"], "error": f"Workflow not found: {workflow_name}",
             }
             _send_trigger_notification(trigger, run_record, False)
             return False, run_record
@@ -326,7 +331,8 @@ async def _fire_trigger_workflow(trigger, vars_override=None):
         _send_trigger_notification(trigger, run_record, success)
         return success, run_record
     finally:
-        _active_trigger_runs.pop(trigger_id, None)
+        with _active_runs_lock:
+            _active_trigger_runs.pop(trigger_id, None)
 
 
 # ---------------------------------------------------------------------------

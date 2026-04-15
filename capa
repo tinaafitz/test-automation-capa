@@ -1693,7 +1693,7 @@ def _save_trigger_state(base_dir, state):
 def _generate_trigger_id():
     """Generate a short unique trigger ID."""
     import hashlib
-    return "trg-" + hashlib.sha256(os.urandom(16)).hexdigest()[:8]
+    return "trg-" + hashlib.sha256(os.urandom(16)).hexdigest()[:16]
 
 
 def _next_cron_time(cron_expr, tz_name="UTC"):

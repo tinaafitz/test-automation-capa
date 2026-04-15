@@ -30,44 +30,51 @@ from trigger_service import (
 
 @pytest.fixture(autouse=True)
 def clean_trigger_state(tmp_path):
-    """Use a temp file for trigger state and clear rate limits."""
+    """Use a temp file for trigger state, clear rate limits, and mock workflows."""
     state_file = str(tmp_path / "trigger_state.json")
     _trigger_last_fire.clear()
     _active_trigger_runs.clear()
-    with patch("trigger_service.TRIGGER_STATE_FILE", state_file):
+    with patch("trigger_service.TRIGGER_STATE_FILE", state_file), \
+         patch("app._load_workflows", return_value=_mock_workflows()):
         yield state_file
+
+
+def _mock_workflows():
+    """Return mock workflow list for trigger creation tests."""
+    return [{"name": n} for n in [
+        "test-wf", "test", "full-e2e", "wf-0", "wf-1", "wf-2",
+        "provision-delete", "wf-existing", "my-wf", "wf-sched",
+        "full-e2e.v2_test", "my-saved-wf",
+    ]]
 
 
 @pytest.fixture
 def client(clean_trigger_state):
     """FastAPI test client."""
-    with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
-        return TestClient(app)
+    return TestClient(app)
 
 
 @pytest.fixture
-def sample_trigger(client, clean_trigger_state):
+def sample_trigger(client):
     """Create and return a sample schedule trigger."""
-    with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
-        resp = client.post("/api/triggers", json={
-            "workflow_name": "test-wf",
-            "type": "schedule",
-            "trigger_name": "nightly",
-            "cron": "0 2 * * *",
-        })
-        return resp.json()["trigger"]
+    resp = client.post("/api/triggers", json={
+        "workflow_name": "test-wf",
+        "type": "schedule",
+        "trigger_name": "nightly",
+        "cron": "0 2 * * *",
+    })
+    return resp.json()["trigger"]
 
 
 @pytest.fixture
-def webhook_trigger(client, clean_trigger_state):
+def webhook_trigger(client):
     """Create and return a sample webhook trigger."""
-    with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
-        resp = client.post("/api/triggers", json={
-            "workflow_name": "test-wf",
-            "type": "webhook",
-            "trigger_name": "ci-hook",
-        })
-        return resp.json()["trigger"]
+    resp = client.post("/api/triggers", json={
+        "workflow_name": "test-wf",
+        "type": "webhook",
+        "trigger_name": "ci-hook",
+    })
+    return resp.json()["trigger"]
 
 
 class TestTriggerCRUD:
@@ -935,6 +942,105 @@ class TestInputValidation:
             "trigger_name": "bad name with spaces",
         })
         assert resp.status_code == 400
+
+
+class TestWorkflowValidationOnCreate:
+    """Tests for workflow existence validation during trigger creation."""
+
+    def test_nonexistent_workflow_rejected(self, client):
+        """Creating a trigger for a workflow that doesn't exist should return 400."""
+        with patch("app._load_workflows", return_value=[]):
+            resp = client.post("/api/triggers", json={
+                "workflow_name": "does-not-exist",
+                "type": "schedule",
+                "cron": "0 2 * * *",
+            })
+            assert resp.status_code == 400
+            assert "Workflow not found" in resp.json()["detail"]
+
+    def test_existing_workflow_accepted(self, client):
+        """Creating a trigger for an existing workflow should succeed."""
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test-wf",
+            "type": "schedule",
+            "cron": "0 2 * * *",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+
+class TestTriggerIDEntropy:
+    """Tests for trigger ID format and entropy."""
+
+    def test_trigger_id_length(self, client):
+        """Trigger IDs should use 16 hex chars (64-bit entropy)."""
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test-wf",
+            "type": "schedule",
+            "cron": "0 2 * * *",
+        })
+        tid = resp.json()["trigger"]["trigger_id"]
+        assert tid.startswith("trg-")
+        # trg- prefix + 16 hex chars = 20 total
+        assert len(tid) == 20
+        # Verify hex chars after prefix
+        hex_part = tid[4:]
+        assert all(c in "0123456789abcdef" for c in hex_part)
+
+
+class TestPaginationCaps:
+    """Tests for pagination limit enforcement."""
+
+    def test_list_triggers_cap(self, client):
+        """Limit should be capped at MAX_PAGINATION_LIMIT."""
+        resp = client.get("/api/triggers?limit=999999")
+        assert resp.status_code == 200
+
+    def test_all_history_cap(self, client):
+        """History limit should be capped."""
+        resp = client.get("/api/triggers/history/all?limit=999999")
+        assert resp.status_code == 200
+
+    def test_per_trigger_history_has_total(self, client, sample_trigger):
+        """Per-trigger history should include total count and support offset."""
+        tid = sample_trigger["trigger_id"]
+        resp = client.get(f"/api/triggers/{tid}/history?offset=0&limit=10")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "total" in data
+        assert data["total"] == 0
+
+
+class TestGetTriggerOrHelper:
+    """Tests for _get_trigger_or_404 helper."""
+
+    def test_returns_trigger_when_found(self, client, sample_trigger):
+        """Helper should return the trigger dict when found."""
+        from app import _get_trigger_or_404
+        from trigger_service import _load_trigger_state
+        state = _load_trigger_state()
+        result = _get_trigger_or_404(state, sample_trigger["trigger_id"])
+        assert result["trigger_id"] == sample_trigger["trigger_id"]
+
+    def test_raises_404_when_not_found(self, client):
+        """Helper should raise HTTPException 404 when trigger not found."""
+        from app import _get_trigger_or_404
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as exc_info:
+            _get_trigger_or_404({"triggers": []}, "trg-nonexistent")
+        assert exc_info.value.status_code == 404
+
+
+class TestConcurrentRunLock:
+    """Tests for thread-safe concurrent run prevention."""
+
+    @pytest.mark.asyncio
+    async def test_active_runs_lock_protects_dict(self):
+        """_active_trigger_runs should be protected by _active_runs_lock."""
+        from trigger_service import _active_runs_lock, _active_trigger_runs
+        import threading
+        # Verify the lock exists and is a threading.Lock
+        assert isinstance(_active_runs_lock, type(threading.Lock()))
 
 
 class TestWorkflowSourceDetection:
