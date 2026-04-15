@@ -27,6 +27,14 @@ Usage:
     ./capa workflow run verify_and_configure              # run a workflow
     ./capa workflow run verify_and_configure -e key=val   # run with overrides
     ./capa workflow export verify_and_configure           # export saved workflow to YAML
+    ./capa minikube list                                   # list minikube profiles
+    ./capa minikube create my-cluster                      # create a minikube profile
+    ./capa minikube delete my-cluster                      # delete a minikube profile
+    ./capa minikube status my-cluster                      # show profile status + CAPI readiness
+    ./capa minikube configure my-cluster                   # install CAPI/CAPA via clusterctl
+    ./capa minikube resources my-cluster                   # list CAPI/ROSA resources
+    ./capa minikube tools                                  # show clusterctl/minikube/kubectl versions
+    ./capa minikube context [profile]                      # show or switch kubectl context
 """
 
 import argparse
@@ -44,6 +52,7 @@ from capa_core import (
     FeatureRegistry, ClusterAutomationSpec,
     validate_feature_value, build_json_merge_patch, resolve_spec_to_plan,
 )
+import minikube_ops
 
 
 # ============================================================================
@@ -2174,6 +2183,277 @@ def cmd_trigger(args, base_dir, registry):
         sys.exit(1)
 
 
+# ============================================================================
+# Minikube management-plane commands
+# ============================================================================
+def cmd_minikube(args, base_dir, registry):
+    """Manage minikube management-plane clusters."""
+    action = getattr(args, "minikube_action", None) or "list"
+    name = getattr(args, "name", None)
+
+    if action == "list":
+        _mk_list()
+    elif action == "create":
+        _mk_create(name, cpus=args.cpus, memory=args.memory)
+    elif action == "delete":
+        _mk_delete(name, yes=args.yes)
+    elif action == "status":
+        _mk_status(name)
+    elif action == "configure":
+        _mk_configure(name, base_dir)
+    elif action == "resources":
+        _mk_resources(name, namespace=args.namespace)
+    elif action == "tools":
+        _mk_tools()
+    elif action == "context":
+        _mk_context(name)
+
+
+def _mk_list():
+    """List minikube profiles."""
+    result = minikube_ops.list_profiles(use_cache=False)
+
+    if not result["minikube_installed"]:
+        print(f"{C.R}Minikube is not installed.{C.E}")
+        print(f"  Install: {C.CYAN}brew install minikube{C.E}")
+        sys.exit(1)
+
+    clusters = result["clusters"]
+    if not clusters:
+        print(f"\n{C.Y}No minikube profiles found.{C.E}")
+        print(f"  Create one: {C.CYAN}./capa minikube create <name>{C.E}\n")
+        return
+
+    print(f"\n{C.BOLD}Minikube Profiles{C.E}")
+    print(f"{'─' * 60}")
+
+    for name in clusters:
+        status = minikube_ops.get_profile_status(name)
+        if status.get("is_running"):
+            icon = f"{C.G}Running{C.E}"
+            driver = status.get("driver", "")
+            print(f"  {C.BOLD}{name:30s}{C.E} {icon}  ({driver})")
+        else:
+            host = status.get("host", "Stopped")
+            print(f"  {name:30s} {C.Y}{host}{C.E}")
+
+    print(f"\n  {len(clusters)} profile(s) found.\n")
+
+
+def _mk_create(name, cpus=2, memory=4096):
+    """Create a minikube profile."""
+    if not name:
+        print(f"{C.R}Profile name required.{C.E}")
+        print(f"  Usage: {C.CYAN}./capa minikube create <name>{C.E}")
+        sys.exit(1)
+
+    print(f"\n{C.BOLD}Creating minikube profile '{name}'{C.E}")
+    print(f"  CPUs: {cpus}, Memory: {memory}MB\n")
+
+    result = minikube_ops.create_profile(
+        name, cpus=cpus, memory=memory,
+        on_output=lambda line: print(f"  {line}"),
+    )
+
+    if result["success"]:
+        verified = "verified" if result.get("verified") else "created (verification pending)"
+        print(f"\n{C.G}Profile '{name}' {verified}.{C.E}")
+        print(f"  Next: {C.CYAN}./capa minikube configure {name}{C.E}\n")
+    else:
+        print(f"\n{C.R}{result['message']}{C.E}\n")
+        sys.exit(1)
+
+
+def _mk_delete(name, yes=False):
+    """Delete a minikube profile."""
+    if not name:
+        print(f"{C.R}Profile name required.{C.E}")
+        print(f"  Usage: {C.CYAN}./capa minikube delete <name>{C.E}")
+        sys.exit(1)
+
+    if not yes:
+        confirm = input(f"Delete minikube profile '{name}'? [y/N] ").strip().lower()
+        if confirm != "y":
+            print("Aborted.")
+            return
+
+    print(f"\n{C.BOLD}Deleting minikube profile '{name}'{C.E}\n")
+    result = minikube_ops.delete_profile(name)
+
+    if result["success"]:
+        print(f"{C.G}{result['message']}{C.E}\n")
+    else:
+        print(f"{C.R}{result['message']}{C.E}\n")
+        sys.exit(1)
+
+
+def _mk_status(name):
+    """Show detailed status for a minikube profile."""
+    if not name:
+        print(f"{C.R}Profile name required.{C.E}")
+        print(f"  Usage: {C.CYAN}./capa minikube status <name>{C.E}")
+        sys.exit(1)
+
+    print(f"\n{C.BOLD}Minikube Profile: {name}{C.E}")
+    print(f"{'─' * 60}")
+
+    result = minikube_ops.verify_cluster(name)
+
+    if not result.get("exists"):
+        print(f"  Status:  {C.R}Not found{C.E}")
+        if result.get("suggestion"):
+            print(f"  Hint:    {result['suggestion']}")
+        print()
+        sys.exit(1)
+
+    if not result.get("accessible"):
+        print(f"  Status:  {C.Y}Exists but not accessible{C.E}")
+        if result.get("suggestion"):
+            print(f"  Hint:    {result['suggestion']}")
+        print()
+        sys.exit(1)
+
+    info = result.get("cluster_info", {})
+    print(f"  Status:      {C.G}Running{C.E}")
+    print(f"  Driver:      {info.get('driver', 'N/A')}")
+    print(f"  K8s version: {info.get('kubernetesVersion', 'N/A')}")
+    print(f"  Namespace:   {info.get('namespace', 'N/A')}")
+
+    # Component checks
+    components = info.get("components", {})
+    if components:
+        print(f"\n  {C.BOLD}Component Checks{C.E}")
+        for detail in components.get("details", []):
+            status_icon = {
+                "configured": f"{C.G}OK{C.E}",
+                "not_configured": f"{C.Y}WARN{C.E}",
+                "missing": f"{C.R}MISSING{C.E}",
+            }.get(detail["status"], f"{C.Y}?{C.E}")
+            print(f"    {status_icon:>20s}  {detail['name']}: {detail['message']}")
+
+    # Component timestamps
+    timestamps = info.get("component_timestamps", {})
+    if timestamps:
+        print(f"\n  {C.BOLD}Installed Components{C.E}")
+        for comp, ts in timestamps.items():
+            print(f"    {comp:25s} {ts}")
+
+    print()
+
+
+def _mk_configure(name, base_dir):
+    """Install CAPI/CAPA on a minikube profile via clusterctl."""
+    if not name:
+        print(f"{C.R}Profile name required.{C.E}")
+        print(f"  Usage: {C.CYAN}./capa minikube configure <name>{C.E}")
+        sys.exit(1)
+
+    print(f"\n{C.BOLD}Configuring CAPI/CAPA on '{name}'{C.E}")
+    print(f"  Method: clusterctl\n")
+
+    result = minikube_ops.configure_capi(
+        profile_name=name,
+        project_root=str(base_dir),
+        on_output=lambda line: print(f"  {line}"),
+    )
+
+    if result["success"]:
+        print(f"\n{C.G}{result['message']}{C.E}")
+        print(f"  Next: {C.CYAN}./capa minikube status {name}{C.E}")
+        print(f"        {C.CYAN}./capa minikube resources {name}{C.E}\n")
+    else:
+        print(f"\n{C.R}{result['message']}{C.E}\n")
+        sys.exit(1)
+
+
+def _mk_resources(name, namespace="ns-rosa-hcp"):
+    """List CAPI/ROSA resources on a minikube cluster."""
+    if not name:
+        print(f"{C.R}Profile name required.{C.E}")
+        print(f"  Usage: {C.CYAN}./capa minikube resources <name>{C.E}")
+        sys.exit(1)
+
+    print(f"\n{C.BOLD}CAPI/ROSA Resources on '{name}'{C.E} (namespace: {namespace})")
+    print(f"{'─' * 70}")
+
+    result = minikube_ops.get_capi_resources(name, namespace)
+
+    if not result.get("resources"):
+        print(f"  {C.Y}No resources found.{C.E}")
+        print(f"  Provision a cluster first or check the namespace.\n")
+        return
+
+    # Header
+    print(f"  {'TYPE':35s} {'NAME':25s} {'STATUS':15s} {'AGE':>8s}")
+    print(f"  {'─' * 35} {'─' * 25} {'─' * 15} {'─' * 8}")
+
+    for r in result["resources"]:
+        status = r["status"]
+        if status in ("Ready", "Active", "Running"):
+            status_str = f"{C.G}{status}{C.E}"
+        elif status == "Provisioning":
+            status_str = f"{C.Y}{status}{C.E}"
+        else:
+            status_str = f"{C.CYAN}{status}{C.E}"
+
+        # Pad without ANSI codes
+        status_pad = status + " " * max(0, 15 - len(status))
+        status_display = status_str + " " * max(0, 15 - len(status))
+
+        print(f"  {r['type']:35s} {r['name']:25s} {status_display} {r['age']:>8s}")
+
+    print(f"\n  {result['count']} resource(s) found.\n")
+
+
+def _mk_tools():
+    """Show versions of CAPI-related CLI tools."""
+    print(f"\n{C.BOLD}CAPI CLI Tools{C.E}")
+    print(f"{'─' * 40}")
+
+    result = minikube_ops.get_tool_versions()
+    tools = result["tools"]
+
+    for name, info in tools.items():
+        if info["installed"]:
+            print(f"  {name:18s} {C.G}{info['version']}{C.E}")
+        else:
+            print(f"  {name:18s} {C.Y}not installed{C.E}")
+
+    print()
+
+
+def _mk_context(name=None):
+    """Show minikube context info or switch to a minikube profile."""
+    if name:
+        result = minikube_ops.switch_context(name)
+        if result["success"]:
+            print(f"{C.G}{result['message']}{C.E}")
+        else:
+            print(f"{C.R}{result['message']}{C.E}")
+            sys.exit(1)
+    else:
+        profiles = minikube_ops.list_profiles(use_cache=False)
+        profile_names = profiles.get("clusters", [])
+        ctx = minikube_ops.get_current_context()
+        current = ctx.get("current_context", "")
+
+        if current and current in profile_names:
+            print(f"Current context: {C.G}{current}{C.E} (minikube profile)")
+        elif current:
+            print(f"Current context: {C.Y}{current}{C.E} (not a minikube profile)")
+        else:
+            print(f"{C.Y}No kubectl context set{C.E}")
+
+        if profile_names:
+            print(f"\nAvailable minikube profiles:")
+            for p in profile_names:
+                marker = " <-- active" if p == current else ""
+                print(f"  - {p}{marker}")
+            print(f"\nSwitch with: ./capa minikube context <profile-name>")
+        else:
+            print(f"\nNo minikube profiles found. Create one with: ./capa minikube create <name>")
+
+
 def main():
     base_dir = Path(os.path.dirname(os.path.abspath(__file__)))
     registry = FeatureRegistry(base_dir)
@@ -2312,6 +2592,18 @@ def main():
     p_trig.add_argument("--limit", type=int, default=20, help="History entries to show (default: 20)")
     p_trig.add_argument("--force", action="store_true", help="Force fire even if disabled")
 
+    # minikube
+    p_mk = subparsers.add_parser("minikube", help="Manage minikube management-plane clusters")
+    p_mk.add_argument("minikube_action", nargs="?", default="list",
+                       choices=["list", "create", "delete", "status", "configure",
+                                "resources", "tools", "context"],
+                       help="Action: list, create, delete, status, configure, resources, tools, context")
+    p_mk.add_argument("name", nargs="?", help="Minikube profile name")
+    p_mk.add_argument("--namespace", "-n", default="ns-rosa-hcp", help="Namespace for resources")
+    p_mk.add_argument("--cpus", type=int, default=2, help="CPUs for create (default: 2)")
+    p_mk.add_argument("--memory", type=int, default=4096, help="Memory MB for create (default: 4096)")
+    p_mk.add_argument("--yes", "-y", action="store_true", help="Skip confirmation for delete")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -2339,6 +2631,7 @@ def main():
         "generate-specs": cmd_generate_specs,
         "workflow": cmd_workflow,
         "trigger": cmd_trigger,
+        "minikube": cmd_minikube,
     }
 
     cmd_fn = commands.get(args.command)
