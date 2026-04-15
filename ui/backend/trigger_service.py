@@ -29,13 +29,28 @@ TRIGGER_STATE_FILE = os.path.join(
 
 # Rate limiting: track last fire time per trigger to prevent abuse
 _trigger_last_fire: Dict[str, float] = {}
+_rate_limit_lock = threading.Lock()
 TRIGGER_MIN_INTERVAL = 60  # seconds
 MAX_RUN_HISTORY = 200  # max entries kept in run_history
+# Auto-disable triggers after this many consecutive failures
+AUTO_DISABLE_THRESHOLD = 5
 
 _trigger_state_lock = threading.Lock()
 
 # Concurrent run prevention: tracks which triggers are currently executing
 _active_trigger_runs: Dict[str, str] = {}  # trigger_id -> run_id
+
+
+def check_rate_limit(trigger_id: str) -> Optional[int]:
+    """Atomically check and set rate limit. Returns remaining seconds if limited, None if allowed."""
+    import time
+    with _rate_limit_lock:
+        now = time.time()
+        last_fire = _trigger_last_fire.get(trigger_id, 0)
+        if now - last_fire < TRIGGER_MIN_INTERVAL:
+            return int(TRIGGER_MIN_INTERVAL - (now - last_fire))
+        _trigger_last_fire[trigger_id] = now
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -142,9 +157,11 @@ def _update_trigger_after_run(trigger_id, success, run_record):
             t["consecutive_failures"] = 0
         else:
             t["consecutive_failures"] = t.get("consecutive_failures", 0) + 1
-            if t["consecutive_failures"] >= 5:
+            if t["consecutive_failures"] >= AUTO_DISABLE_THRESHOLD:
                 t["enabled"] = False
-                logger.warning("Trigger auto-disabled after 5 consecutive failures", extra={"trigger_id": trigger_id})
+                logger.warning("Trigger auto-disabled after consecutive failures", extra={
+                    "trigger_id": trigger_id, "consecutive_failures": t["consecutive_failures"],
+                })
         # Update next_run_at for schedule triggers
         if t.get("type") == "schedule" and t.get("cron"):
             try:
