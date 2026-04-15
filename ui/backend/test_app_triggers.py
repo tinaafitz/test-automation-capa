@@ -1,0 +1,348 @@
+"""
+Tests for trigger management API endpoints.
+"""
+
+import hashlib
+import hmac
+import json
+import os
+import sys
+import tempfile
+from unittest.mock import patch, MagicMock
+
+import pytest
+from fastapi.testclient import TestClient
+
+# Mock modules before app import
+sys.modules.setdefault("anthropic", MagicMock())
+sys.modules.setdefault("app_extensions", MagicMock())
+
+from app import app, _load_trigger_state, _save_trigger_state, TRIGGER_STATE_FILE, _trigger_last_fire
+
+
+@pytest.fixture(autouse=True)
+def clean_trigger_state(tmp_path):
+    """Use a temp file for trigger state and clear rate limits."""
+    state_file = str(tmp_path / "trigger_state.json")
+    _trigger_last_fire.clear()
+    with patch("app.TRIGGER_STATE_FILE", state_file):
+        yield state_file
+
+
+@pytest.fixture
+def client(clean_trigger_state):
+    """FastAPI test client."""
+    with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+        return TestClient(app)
+
+
+@pytest.fixture
+def sample_trigger(client, clean_trigger_state):
+    """Create and return a sample schedule trigger."""
+    with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test-wf",
+            "type": "schedule",
+            "trigger_name": "nightly",
+            "cron": "0 2 * * *",
+        })
+        return resp.json()["trigger"]
+
+
+@pytest.fixture
+def webhook_trigger(client, clean_trigger_state):
+    """Create and return a sample webhook trigger."""
+    with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test-wf",
+            "type": "webhook",
+            "trigger_name": "ci-hook",
+        })
+        return resp.json()["trigger"]
+
+
+class TestTriggerCRUD:
+    """Tests for trigger CRUD endpoints."""
+
+    def test_list_empty(self, client):
+        resp = client.get("/api/triggers")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["triggers"] == []
+        assert data["count"] == 0
+
+    def test_create_schedule_trigger(self, client):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "full-e2e",
+            "type": "schedule",
+            "cron": "0 2 * * *",
+            "timezone": "UTC",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        trigger = data["trigger"]
+        assert trigger["trigger_id"].startswith("trg-")
+        assert trigger["workflow_name"] == "full-e2e"
+        assert trigger["type"] == "schedule"
+        assert trigger["cron"] == "0 2 * * *"
+        assert trigger["enabled"] is True
+
+    def test_create_webhook_trigger(self, client):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "full-e2e",
+            "type": "webhook",
+            "trigger_name": "github-push",
+        })
+        assert resp.status_code == 200
+        trigger = resp.json()["trigger"]
+        assert trigger["type"] == "webhook"
+        assert trigger["trigger_name"] == "github-push"
+
+    def test_create_webhook_with_secret(self, client):
+        with patch.dict(os.environ, {"MY_SECRET": "test-secret-value"}):
+            resp = client.post("/api/triggers", json={
+                "workflow_name": "full-e2e",
+                "type": "webhook",
+                "secret_env": "MY_SECRET",
+            })
+        trigger = resp.json()["trigger"]
+        assert trigger["secret_env"] == "MY_SECRET"
+        expected_hash = hashlib.sha256(b"test-secret-value").hexdigest()
+        assert trigger["webhook_secret_hash"] == expected_hash
+
+    def test_create_invalid_type(self, client):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test",
+            "type": "invalid",
+        })
+        assert resp.status_code == 400
+
+    def test_create_schedule_missing_cron(self, client):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test",
+            "type": "schedule",
+        })
+        assert resp.status_code == 400
+
+    def test_create_schedule_invalid_cron(self, client):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test",
+            "type": "schedule",
+            "cron": "bad cron",
+        })
+        assert resp.status_code == 400
+
+    def test_get_trigger(self, client, sample_trigger):
+        tid = sample_trigger["trigger_id"]
+        resp = client.get(f"/api/triggers/{tid}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trigger"]["trigger_id"] == tid
+        assert "history" in data
+
+    def test_get_trigger_not_found(self, client):
+        resp = client.get("/api/triggers/trg-nonexistent")
+        assert resp.status_code == 404
+
+    def test_delete_trigger(self, client, sample_trigger):
+        tid = sample_trigger["trigger_id"]
+        resp = client.delete(f"/api/triggers/{tid}")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == tid
+
+        # Verify gone
+        resp2 = client.get(f"/api/triggers/{tid}")
+        assert resp2.status_code == 404
+
+    def test_delete_not_found(self, client):
+        resp = client.delete("/api/triggers/trg-nonexistent")
+        assert resp.status_code == 404
+
+    def test_list_after_create(self, client, sample_trigger):
+        resp = client.get("/api/triggers")
+        assert resp.json()["count"] == 1
+        assert resp.json()["triggers"][0]["trigger_id"] == sample_trigger["trigger_id"]
+
+
+class TestTriggerEnableDisable:
+    """Tests for enable/disable endpoints."""
+
+    def test_enable(self, client, sample_trigger):
+        tid = sample_trigger["trigger_id"]
+        # Disable first
+        client.post(f"/api/triggers/{tid}/disable")
+        resp = client.get(f"/api/triggers/{tid}")
+        assert resp.json()["trigger"]["enabled"] is False
+
+        # Enable
+        resp = client.post(f"/api/triggers/{tid}/enable")
+        assert resp.status_code == 200
+        assert resp.json()["trigger"]["enabled"] is True
+
+    def test_disable(self, client, sample_trigger):
+        tid = sample_trigger["trigger_id"]
+        resp = client.post(f"/api/triggers/{tid}/disable")
+        assert resp.status_code == 200
+        assert resp.json()["trigger"]["enabled"] is False
+
+    def test_enable_not_found(self, client):
+        resp = client.post("/api/triggers/trg-nonexistent/enable")
+        assert resp.status_code == 404
+
+    def test_disable_not_found(self, client):
+        resp = client.post("/api/triggers/trg-nonexistent/disable")
+        assert resp.status_code == 404
+
+    def test_enable_resets_consecutive_failures(self, client, clean_trigger_state):
+        # Create a trigger with failures
+        with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+            resp = client.post("/api/triggers", json={
+                "workflow_name": "test",
+                "type": "schedule",
+                "cron": "0 2 * * *",
+            })
+            tid = resp.json()["trigger"]["trigger_id"]
+
+            # Manually set consecutive_failures
+            state = _load_trigger_state()
+            state["triggers"][0]["consecutive_failures"] = 4
+            _save_trigger_state(state)
+
+            # Enable should reset
+            resp = client.post(f"/api/triggers/{tid}/enable")
+            assert resp.json()["trigger"]["consecutive_failures"] == 0
+
+
+class TestTriggerHistory:
+    """Tests for trigger history endpoints."""
+
+    def test_trigger_history_empty(self, client, sample_trigger):
+        tid = sample_trigger["trigger_id"]
+        resp = client.get(f"/api/triggers/{tid}/history")
+        assert resp.status_code == 200
+        assert resp.json()["history"] == []
+
+    def test_all_history_empty(self, client):
+        resp = client.get("/api/triggers/history/all")
+        assert resp.status_code == 200
+        assert resp.json()["history"] == []
+
+    def test_trigger_history_not_found(self, client):
+        resp = client.get("/api/triggers/trg-nonexistent/history")
+        assert resp.status_code == 404
+
+
+class TestWorkflowTriggers:
+    """Tests for workflow-specific trigger endpoints."""
+
+    def test_get_workflow_triggers(self, client, sample_trigger):
+        resp = client.get(f"/api/workflows/{sample_trigger['workflow_name']}/triggers")
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 1
+        assert resp.json()["triggers"][0]["trigger_id"] == sample_trigger["trigger_id"]
+
+    def test_get_workflow_triggers_empty(self, client):
+        resp = client.get("/api/workflows/nonexistent/triggers")
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 0
+
+
+class TestWebhookEndpoint:
+    """Tests for the webhook trigger endpoint."""
+
+    def test_webhook_not_found(self, client):
+        resp = client.post("/api/webhooks/trigger/trg-nonexistent", content=b"{}")
+        assert resp.status_code == 404
+
+    def test_webhook_disabled_returns_404(self, client, webhook_trigger):
+        tid = webhook_trigger["trigger_id"]
+        client.post(f"/api/triggers/{tid}/disable")
+        resp = client.post(f"/api/webhooks/trigger/{tid}", content=b"{}")
+        assert resp.status_code == 404
+
+    def test_webhook_schedule_type_returns_404(self, client, sample_trigger):
+        """Schedule triggers should not be fireable via webhook endpoint."""
+        tid = sample_trigger["trigger_id"]
+        resp = client.post(f"/api/webhooks/trigger/{tid}", content=b"{}")
+        assert resp.status_code == 404
+
+    def test_webhook_fires_workflow(self, client, webhook_trigger):
+        tid = webhook_trigger["trigger_id"]
+        resp = client.post(f"/api/webhooks/trigger/{tid}", content=b'{"ref": "main"}')
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        assert resp.json()["workflow"] == "test-wf"
+
+    def test_webhook_rate_limited(self, client, webhook_trigger):
+        tid = webhook_trigger["trigger_id"]
+        # First request succeeds
+        resp1 = client.post(f"/api/webhooks/trigger/{tid}", content=b"{}")
+        assert resp1.status_code == 200
+
+        # Second request within 60s is rate limited
+        resp2 = client.post(f"/api/webhooks/trigger/{tid}", content=b"{}")
+        assert resp2.status_code == 429
+
+    def test_webhook_invalid_signature(self, client, clean_trigger_state):
+        """Webhook with secret configured should reject invalid signatures."""
+        with patch.dict(os.environ, {"TEST_SECRET": "my-secret"}):
+            with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+                resp = client.post("/api/triggers", json={
+                    "workflow_name": "test-wf",
+                    "type": "webhook",
+                    "secret_env": "TEST_SECRET",
+                })
+                tid = resp.json()["trigger"]["trigger_id"]
+
+                # Send with wrong signature
+                resp = client.post(
+                    f"/api/webhooks/trigger/{tid}",
+                    content=b'{"test": true}',
+                    headers={"X-Hub-Signature-256": "sha256=wrong"},
+                )
+                assert resp.status_code == 403
+
+    def test_webhook_valid_signature(self, client, clean_trigger_state):
+        """Webhook with correct HMAC signature should succeed."""
+        secret = "my-secret"
+        with patch.dict(os.environ, {"TEST_SECRET": secret}):
+            with patch("app.TRIGGER_STATE_FILE", clean_trigger_state):
+                resp = client.post("/api/triggers", json={
+                    "workflow_name": "test-wf",
+                    "type": "webhook",
+                    "secret_env": "TEST_SECRET",
+                })
+                tid = resp.json()["trigger"]["trigger_id"]
+
+                body = b'{"test": true}'
+                sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+                resp = client.post(
+                    f"/api/webhooks/trigger/{tid}",
+                    content=body,
+                    headers={"X-Hub-Signature-256": sig},
+                )
+                assert resp.status_code == 200
+
+
+class TestFireTrigger:
+    """Tests for the manual fire endpoint."""
+
+    def test_fire_trigger(self, client, sample_trigger):
+        tid = sample_trigger["trigger_id"]
+        resp = client.post(f"/api/triggers/{tid}/fire")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        assert resp.json()["workflow"] == "test-wf"
+
+    def test_fire_not_found(self, client):
+        resp = client.post("/api/triggers/trg-nonexistent/fire")
+        assert resp.status_code == 404
+
+    def test_fire_rate_limited(self, client, sample_trigger):
+        tid = sample_trigger["trigger_id"]
+        resp1 = client.post(f"/api/triggers/{tid}/fire")
+        assert resp1.status_code == 200
+        resp2 = client.post(f"/api/triggers/{tid}/fire")
+        assert resp2.status_code == 429
