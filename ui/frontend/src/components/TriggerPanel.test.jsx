@@ -281,4 +281,197 @@ describe('TriggerPanel', () => {
     });
     expect(screen.queryByText('New Trigger')).not.toBeInTheDocument();
   });
+
+  it('deletes a trigger', async () => {
+    mockFetch.mockImplementation((url, opts) => {
+      if (opts?.method === 'DELETE' && url.includes('/api/triggers/trg-del1')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, deleted: 'trg-del1' }),
+        });
+      }
+      if (url.includes('/api/workflows/')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            triggers: [{
+              trigger_id: 'trg-del1',
+              trigger_name: 'to-delete',
+              type: 'schedule',
+              cron: '0 2 * * *',
+              enabled: true,
+            }],
+            count: 1,
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ success: true, running: true, croniter_available: true, active_schedule_triggers: 0, upcoming: [], history: [] }),
+      });
+    });
+
+    render(<TriggerPanel workflowName="test-wf" />);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Triggers'));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('to-delete')).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Delete trigger'));
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/triggers/trg-del1'),
+        expect.objectContaining({ method: 'DELETE' })
+      );
+    });
+  });
+
+  it('toggles a trigger off', async () => {
+    mockFetch.mockImplementation((url, opts) => {
+      if (opts?.method === 'POST' && url.includes('/api/triggers/trg-tog1/disable')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true }),
+        });
+      }
+      if (url.includes('/api/workflows/')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            triggers: [{
+              trigger_id: 'trg-tog1',
+              trigger_name: 'toggle-me',
+              type: 'schedule',
+              cron: '0 2 * * *',
+              enabled: true,
+            }],
+            count: 1,
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ success: true, running: true, croniter_available: true, active_schedule_triggers: 1, upcoming: [], history: [] }),
+      });
+    });
+
+    render(<TriggerPanel workflowName="test-wf" />);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Triggers'));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('toggle-me')).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Disable'));
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/triggers/trg-tog1/disable'),
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+  });
+
+  it('fires a trigger manually', async () => {
+    mockFetch.mockImplementation((url, opts) => {
+      if (opts?.method === 'POST' && url.includes('/api/triggers/trg-fire1/fire')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true }),
+        });
+      }
+      if (url.includes('/api/workflows/')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            triggers: [{
+              trigger_id: 'trg-fire1',
+              trigger_name: 'fire-me',
+              type: 'schedule',
+              cron: '0 2 * * *',
+              enabled: true,
+            }],
+            count: 1,
+          }),
+        });
+      }
+      if (url.includes('/api/triggers/history')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ history: [] }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ success: true, running: true, croniter_available: true, active_schedule_triggers: 1, upcoming: [], history: [] }),
+      });
+    });
+
+    render(<TriggerPanel workflowName="test-wf" />);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Triggers'));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('fire-me')).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Fire now'));
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/triggers/trg-fire1/fire'),
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+  });
+
+  it('shows rate limit error on 429 response', async () => {
+    mockFetch.mockImplementation((url, opts) => {
+      if (opts?.method === 'POST' && url.includes('/fire')) {
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          json: async () => ({ detail: 'Rate limited' }),
+        });
+      }
+      if (url.includes('/api/workflows/')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            triggers: [{
+              trigger_id: 'trg-rate1',
+              trigger_name: 'rate-test',
+              type: 'schedule',
+              cron: '0 2 * * *',
+              enabled: true,
+            }],
+            count: 1,
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ success: true, running: true, croniter_available: true, active_schedule_triggers: 1, upcoming: [], history: [] }),
+      });
+    });
+
+    render(<TriggerPanel workflowName="test-wf" />);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Triggers'));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('rate-test')).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Fire now'));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Rate limited - wait 60s between fires')).toBeInTheDocument();
+    });
+  });
 });
