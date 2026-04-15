@@ -520,7 +520,6 @@ def cmd_specs(args, base_dir, registry):
     categories = [
         ("Profiles", specs_dir / "profiles", "Cluster creation presets"),
         ("Features", specs_dir / "features", "Individual feature actions"),
-        ("Workflows", specs_dir / "workflows", "Multi-step sequences"),
     ]
     print(f"\n{C.BOLD}Available Specs:{C.E}")
     for cat_name, cat_dir, cat_desc in categories:
@@ -549,6 +548,22 @@ def cmd_specs(args, base_dir, registry):
                 detail = " → ".join(a.get("feature", "") for a in actions_list)
             print(f"    {C.BOLD}{spec_file.stem}{C.E}")
             print(f"      {action} | {detail or '(no features)'}")
+
+    # Point to unified workflow command
+    wf_dir = specs_dir / "workflows"
+    wf_json = base_dir / "vars" / "saved_workflows.json"
+    wf_count = len(list(wf_dir.glob("*.yml"))) if wf_dir.exists() else 0
+    saved_count = 0
+    if wf_json.exists():
+        try:
+            with open(wf_json) as f:
+                saved_count = len(json.load(f))
+        except (json.JSONDecodeError, IOError):
+            pass
+    total_wf = wf_count + saved_count
+    if total_wf:
+        print(f"\n  {C.BOLD}{C.CYAN}Workflows{C.E} — {total_wf} workflow(s) available")
+        print(f"    Run {C.CYAN}./capa workflow list{C.E} to see all workflows")
     print()
 
 
