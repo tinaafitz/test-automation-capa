@@ -238,6 +238,32 @@ class TestTriggerHistory:
         assert resp.status_code == 200
         assert resp.json()["history"] == []
 
+    def test_list_pagination(self, client, clean_trigger_state):
+        """List endpoint should support offset and limit."""
+        with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
+            # Create 3 triggers
+            for i in range(3):
+                client.post("/api/triggers", json={
+                    "workflow_name": f"wf-{i}",
+                    "type": "schedule",
+                    "cron": "0 2 * * *",
+                })
+
+            # Full list
+            resp = client.get("/api/triggers")
+            assert resp.json()["total"] == 3
+            assert resp.json()["count"] == 3
+
+            # Page 1
+            resp = client.get("/api/triggers?offset=0&limit=2")
+            assert resp.json()["count"] == 2
+            assert resp.json()["total"] == 3
+
+            # Page 2
+            resp = client.get("/api/triggers?offset=2&limit=2")
+            assert resp.json()["count"] == 1
+            assert resp.json()["total"] == 3
+
     def test_trigger_history_not_found(self, client):
         resp = client.get("/api/triggers/trg-nonexistent/history")
         assert resp.status_code == 404
@@ -290,9 +316,10 @@ class TestWebhookEndpoint:
         resp1 = client.post(f"/api/webhooks/trigger/{tid}", content=b"{}")
         assert resp1.status_code == 200
 
-        # Second request within 60s is rate limited
+        # Second request within 60s is rate limited with Retry-After header
         resp2 = client.post(f"/api/webhooks/trigger/{tid}", content=b"{}")
         assert resp2.status_code == 429
+        assert "Retry-After" in resp2.headers
 
     def test_webhook_invalid_signature(self, client, clean_trigger_state):
         """Webhook with secret configured should reject invalid signatures."""
@@ -355,6 +382,8 @@ class TestFireTrigger:
         assert resp1.status_code == 200
         resp2 = client.post(f"/api/triggers/{tid}/fire")
         assert resp2.status_code == 429
+        assert "Retry-After" in resp2.headers
+        assert int(resp2.headers["Retry-After"]) > 0
 
 
 class TestSchedulerStatus:
