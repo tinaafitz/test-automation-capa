@@ -9296,6 +9296,45 @@ async def create_trigger(trigger: TriggerCreate):
     return {"success": True, "trigger": trigger_data}
 
 
+@app.get("/api/triggers/metrics")
+async def trigger_metrics():
+    """Return aggregate trigger metrics: counts, success rate, avg execution time."""
+    state = _load_trigger_state()
+    triggers = state.get("triggers", [])
+    history = state.get("run_history", [])
+    total_runs = len(history)
+    completed = sum(1 for h in history if h.get("status") == "completed")
+    failed = sum(1 for h in history if h.get("status") == "failed")
+    skipped = sum(1 for h in history if h.get("status") == "skipped")
+    success_rate = round(completed / total_runs * 100, 1) if total_runs > 0 else 0.0
+    durations = []
+    for h in history:
+        started = h.get("started_at")
+        completed_at = h.get("completed_at")
+        if started and completed_at:
+            try:
+                start_dt = datetime.fromisoformat(started)
+                end_dt = datetime.fromisoformat(completed_at)
+                durations.append((end_dt - start_dt).total_seconds())
+            except (ValueError, TypeError):
+                pass
+    avg_duration = round(sum(durations) / len(durations), 1) if durations else 0.0
+    return {
+        "success": True,
+        "total_triggers": len(triggers),
+        "enabled_triggers": sum(1 for t in triggers if t.get("enabled", True)),
+        "disabled_triggers": sum(1 for t in triggers if not t.get("enabled", True)),
+        "schedule_triggers": sum(1 for t in triggers if t.get("type") == "schedule"),
+        "webhook_triggers": sum(1 for t in triggers if t.get("type") == "webhook"),
+        "total_runs": total_runs,
+        "completed_runs": completed,
+        "failed_runs": failed,
+        "skipped_runs": skipped,
+        "success_rate_pct": success_rate,
+        "avg_duration_seconds": avg_duration,
+    }
+
+
 @app.get("/api/triggers/{trigger_id}")
 async def get_trigger(trigger_id: str):
     """Get a single trigger by ID."""
@@ -9357,6 +9396,17 @@ async def disable_trigger(trigger_id: str):
     return {"success": True, "trigger": trigger}
 
 
+async def _fire_and_update(trigger, background_tasks: BackgroundTasks):
+    """Shared helper: enqueue trigger workflow execution as a background task."""
+    trigger_id = trigger["trigger_id"]
+
+    async def _run():
+        success, run_record = await _fire_trigger_workflow(trigger, trigger.get("vars_override", {}))
+        _update_trigger_after_run(trigger_id, success, run_record)
+
+    background_tasks.add_task(_run)
+
+
 @app.post("/api/triggers/{trigger_id}/fire")
 async def fire_trigger(trigger_id: str, background_tasks: BackgroundTasks):
     """Manually fire a trigger from the UI."""
@@ -9374,11 +9424,7 @@ async def fire_trigger(trigger_id: str, background_tasks: BackgroundTasks):
             headers={"Retry-After": str(remaining)},
         )
 
-    async def _run():
-        success, run_record = await _fire_trigger_workflow(trigger, trigger.get("vars_override", {}))
-        _update_trigger_after_run(trigger_id, success, run_record)
-
-    background_tasks.add_task(_run)
+    await _fire_and_update(trigger, background_tasks)
     return {"success": True, "message": f"Trigger {trigger_id} fired", "workflow": trigger["workflow_name"]}
 
 
@@ -9451,12 +9497,7 @@ async def webhook_trigger(trigger_id: str, request: Request, background_tasks: B
         if not _hmac.compare_digest(signature, expected):
             raise HTTPException(403, "Invalid signature")
 
-    async def _run():
-        vars_override = trigger.get("vars_override", {})
-        success, run_record = await _fire_trigger_workflow(trigger, vars_override)
-        _update_trigger_after_run(trigger_id, success, run_record)
-
-    background_tasks.add_task(_run)
+    await _fire_and_update(trigger, background_tasks)
     return {"success": True, "message": "Webhook received", "workflow": trigger["workflow_name"]}
 
 

@@ -94,8 +94,11 @@ def _save_trigger_state(state):
 def _send_trigger_notification(trigger, run_record, success):
     """Send Slack/email notification for a trigger run result."""
     try:
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        config_path = os.path.join(project_root, "vars", "notification_config.yml")
+        default_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        config_path = os.environ.get(
+            "TRIGGER_NOTIFICATION_CONFIG",
+            os.path.join(default_root, "vars", "notification_config.yml"),
+        )
         if not os.path.exists(config_path):
             return
         with open(config_path, "r") as f:

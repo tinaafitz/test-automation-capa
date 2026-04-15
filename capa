@@ -2126,7 +2126,8 @@ def cmd_trigger(args, base_dir, registry):
             t["consecutive_failures"] = 0
         else:
             t["consecutive_failures"] = t.get("consecutive_failures", 0) + 1
-            if t["consecutive_failures"] >= 5:
+            _auto_disable_threshold = 5  # matches trigger_service.AUTO_DISABLE_THRESHOLD
+            if t["consecutive_failures"] >= _auto_disable_threshold:
                 t["enabled"] = False
                 print(f"\n{C.R}Auto-disabled trigger after {t['consecutive_failures']} consecutive failures.{C.E}")
 
