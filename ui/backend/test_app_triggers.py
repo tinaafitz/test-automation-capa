@@ -22,6 +22,7 @@ sys.modules.setdefault("app_extensions", MagicMock())
 from app import (
     app, _load_trigger_state, _save_trigger_state, TRIGGER_STATE_FILE,
     _trigger_last_fire, _trigger_scheduler, TriggerScheduler,
+    _active_trigger_runs, _send_trigger_notification, _fire_trigger_workflow,
 )
 
 
@@ -30,6 +31,7 @@ def clean_trigger_state(tmp_path):
     """Use a temp file for trigger state and clear rate limits."""
     state_file = str(tmp_path / "trigger_state.json")
     _trigger_last_fire.clear()
+    _active_trigger_runs.clear()
     with patch("app.TRIGGER_STATE_FILE", state_file):
         yield state_file
 
@@ -542,3 +544,138 @@ class TestTriggerSchedulerUnit:
         _trigger_scheduler._last_check[tid] = "2026-04-14 02:00"
         client.delete(f"/api/triggers/{tid}")
         assert tid not in _trigger_scheduler._last_check
+
+
+class TestConcurrentRunPrevention:
+    """Tests for concurrent trigger run prevention."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_run_skipped(self):
+        """A trigger already running should return skipped status."""
+        trigger = {
+            "trigger_id": "trg-concurrent",
+            "workflow_name": "test-wf",
+            "type": "schedule",
+            "workflow_source": "yaml",
+        }
+        # Simulate an active run
+        _active_trigger_runs["trg-concurrent"] = "trun-existing"
+        try:
+            success, record = await _fire_trigger_workflow(trigger)
+            assert success is False
+            assert record["status"] == "skipped"
+            assert "Already running" in record.get("error", "")
+        finally:
+            _active_trigger_runs.pop("trg-concurrent", None)
+
+    @pytest.mark.asyncio
+    async def test_active_run_cleared_after_completion(self):
+        """Active run should be cleaned up even if workflow not found."""
+        trigger = {
+            "trigger_id": "trg-cleanup",
+            "workflow_name": "nonexistent-workflow",
+            "type": "schedule",
+            "workflow_source": "yaml",
+        }
+        assert "trg-cleanup" not in _active_trigger_runs
+        with patch("app._send_trigger_notification"):
+            success, record = await _fire_trigger_workflow(trigger)
+        assert success is False
+        assert record["status"] == "failed"
+        assert "trg-cleanup" not in _active_trigger_runs
+
+    def test_scheduler_status_shows_active_runs(self, client):
+        """Scheduler status should include active_runs."""
+        resp = client.get("/api/triggers/scheduler/status")
+        data = resp.json()
+        assert "active_runs" in data
+
+
+class TestCronValidation:
+    """Tests for improved cron validation using croniter."""
+
+    def test_valid_cron_accepted(self, client):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test-wf",
+            "type": "schedule",
+            "cron": "*/5 * * * *",
+        })
+        assert resp.status_code == 200
+
+    def test_invalid_cron_rejected(self, client):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test-wf",
+            "type": "schedule",
+            "cron": "invalid cron expression here",
+        })
+        assert resp.status_code == 400
+
+    def test_cron_with_ranges(self, client):
+        resp = client.post("/api/triggers", json={
+            "workflow_name": "test-wf",
+            "type": "schedule",
+            "cron": "0 9 * * 1-5",
+        })
+        assert resp.status_code == 200
+        trigger = resp.json()["trigger"]
+        assert trigger["cron"] == "0 9 * * 1-5"
+
+
+class TestTriggerNotifications:
+    """Tests for trigger notification integration."""
+
+    def test_notification_called_on_failure(self):
+        """Notification should be sent when notify_trigger_failure is True."""
+        trigger = {"trigger_id": "trg-n1", "trigger_name": "test", "workflow_name": "wf"}
+        run_record = {"run_id": "r1", "steps_completed": 1, "steps_total": 3}
+        config = {
+            "slack_enabled": True,
+            "notify_trigger_failure": True,
+        }
+        with patch("builtins.open", MagicMock()):
+            with patch("os.path.exists", return_value=True):
+                with patch("yaml.safe_load", return_value=config):
+                    with patch("app.slack_service") as mock_slack:
+                        _send_trigger_notification(trigger, run_record, False)
+                        mock_slack.reload_config.assert_called_once()
+                        mock_slack.send_provisioning_notification.assert_called_once()
+
+    def test_notification_skipped_on_success_by_default(self):
+        """By default, success notifications are not sent."""
+        trigger = {"trigger_id": "trg-n2", "trigger_name": "test", "workflow_name": "wf"}
+        run_record = {"run_id": "r2", "steps_completed": 3, "steps_total": 3}
+        config = {
+            "slack_enabled": True,
+            "notify_trigger_success": False,  # default
+            "notify_trigger_failure": True,
+        }
+        with patch("builtins.open", MagicMock()):
+            with patch("os.path.exists", return_value=True):
+                with patch("yaml.safe_load", return_value=config):
+                    with patch("app.slack_service") as mock_slack:
+                        _send_trigger_notification(trigger, run_record, True)
+                        mock_slack.send_provisioning_notification.assert_not_called()
+
+    def test_notification_sent_on_success_when_enabled(self):
+        """Success notification sent when notify_trigger_success is True."""
+        trigger = {"trigger_id": "trg-n3", "trigger_name": "test", "workflow_name": "wf"}
+        run_record = {"run_id": "r3", "steps_completed": 3, "steps_total": 3}
+        config = {
+            "slack_enabled": True,
+            "notify_trigger_success": True,
+        }
+        with patch("builtins.open", MagicMock()):
+            with patch("os.path.exists", return_value=True):
+                with patch("yaml.safe_load", return_value=config):
+                    with patch("app.slack_service") as mock_slack:
+                        _send_trigger_notification(trigger, run_record, True)
+                        mock_slack.reload_config.assert_called_once()
+                        mock_slack.send_provisioning_notification.assert_called_once()
+
+    def test_notification_no_config_file(self):
+        """No crash when notification config doesn't exist."""
+        trigger = {"trigger_id": "trg-n4", "trigger_name": "test", "workflow_name": "wf"}
+        run_record = {"run_id": "r4", "steps_completed": 0, "steps_total": 1}
+        with patch("os.path.exists", return_value=False):
+            # Should not raise
+            _send_trigger_notification(trigger, run_record, False)

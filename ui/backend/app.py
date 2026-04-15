@@ -9202,118 +9202,192 @@ def _save_trigger_state(state):
         json.dump(state, f, indent=2, default=str)
 
 
+# Concurrent run prevention: tracks which triggers are currently executing
+_active_trigger_runs: Dict[str, str] = {}  # trigger_id -> run_id
+
+
+def _send_trigger_notification(trigger, run_record, success):
+    """Send Slack/email notification for a trigger run result."""
+    try:
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        config_path = os.path.join(project_root, "vars", "notification_config.yml")
+        if not os.path.exists(config_path):
+            return
+        with open(config_path, "r") as f:
+            settings = yaml.safe_load(f) or {}
+
+        status = "completed" if success else "failed"
+
+        # Only notify on failure by default, or on completion if configured
+        notify_trigger_success = settings.get("notify_trigger_success", False)
+        notify_trigger_failure = settings.get("notify_trigger_failure", True)
+        if success and not notify_trigger_success:
+            return
+        if not success and not notify_trigger_failure:
+            return
+
+        job_data = {
+            "cluster_name": f"[Trigger] {trigger.get('trigger_name', trigger['trigger_id'])}",
+            "region": f"Workflow: {trigger.get('workflow_name', 'unknown')}",
+            "version": f"{run_record.get('steps_completed', 0)}/{run_record.get('steps_total', 0)} steps",
+            "job_id": run_record.get("run_id", ""),
+        }
+        if not success:
+            job_data["error"] = f"Trigger workflow failed ({run_record.get('steps_completed', 0)}/{run_record.get('steps_total', 0)} steps completed)"
+
+        if settings.get("slack_enabled", False):
+            try:
+                slack_service.reload_config()
+                slack_service.send_provisioning_notification(job_data, status)
+                print(f"[Trigger] Slack notification sent for {trigger['trigger_id']} ({status})")
+            except Exception as e:
+                print(f"[Trigger] Slack notification failed: {e}")
+
+        if settings.get("email_enabled", False):
+            try:
+                email_service.reload_config()
+                email_service.send_provisioning_notification(job_data, status)
+                print(f"[Trigger] Email notification sent for {trigger['trigger_id']} ({status})")
+            except Exception as e:
+                print(f"[Trigger] Email notification failed: {e}")
+    except Exception as e:
+        print(f"[Trigger] Notification error: {e}")
+
+
 async def _fire_trigger_workflow(trigger, vars_override=None):
     """Execute a trigger's workflow via the playbook runner. Returns (success, run_record)."""
     import hashlib
     workflow_name = trigger["workflow_name"]
+    trigger_id = trigger["trigger_id"]
     run_id = f"trun-{hashlib.sha256(os.urandom(16)).hexdigest()[:8]}"
-    started_at = datetime.now().isoformat()
 
-    # Find the workflow
-    wf = None
-    wf_type = trigger.get("workflow_source", "yaml")
-
-    if wf_type == "saved":
-        workflows = _load_workflows()
-        wf = next((w for w in workflows if w.get("name") == workflow_name), None)
-    if not wf:
-        # Try YAML workflows
-        import yaml as _yaml
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        wf_dir = os.path.join(repo_root, "specs", "workflows")
-        if os.path.isdir(wf_dir):
-            for fname in os.listdir(wf_dir):
-                if not fname.endswith(".yml"):
-                    continue
-                fpath = os.path.join(wf_dir, fname)
-                try:
-                    with open(fpath) as f:
-                        data = _yaml.safe_load(f)
-                    if data and data.get("kind") == "Workflow":
-                        name = data.get("metadata", {}).get("name", fname.replace(".yml", ""))
-                        if name == workflow_name:
-                            wf = data
-                            wf_type = "yaml"
-                            break
-                except (_yaml.YAMLError, IOError):
-                    continue
-
-    if not wf:
+    # Concurrent run prevention
+    if trigger_id in _active_trigger_runs:
+        active_run = _active_trigger_runs[trigger_id]
+        print(f"[Trigger] Skipping {trigger_id} — already running ({active_run})")
         return False, {
-            "trigger_id": trigger["trigger_id"], "run_id": run_id,
-            "workflow_name": workflow_name, "started_at": started_at,
+            "trigger_id": trigger_id, "run_id": run_id,
+            "workflow_name": workflow_name, "started_at": datetime.now().isoformat(),
             "completed_at": datetime.now().isoformat(),
-            "status": "failed", "steps_completed": 0, "steps_total": 0,
-            "triggered_by": trigger["type"], "error": "Workflow not found",
+            "status": "skipped", "steps_completed": 0, "steps_total": 0,
+            "triggered_by": trigger["type"], "error": f"Already running ({active_run})",
         }
 
-    # Extract steps
-    if wf_type == "yaml":
-        global_vars = wf.get("spec", {}).get("vars", {})
-        raw_steps = wf.get("spec", {}).get("steps", [])
-    else:
-        global_vars = wf.get("vars", wf.get("globalVars", {}))
-        raw_steps = wf.get("steps", [])
+    _active_trigger_runs[trigger_id] = run_id
+    started_at = datetime.now().isoformat()
 
-    # Execute steps sequentially
-    steps_completed = 0
-    steps_total = len(raw_steps)
-    step_results = []
+    try:
+        # Find the workflow
+        wf = None
+        wf_type = trigger.get("workflow_source", "yaml")
 
-    for i, step in enumerate(raw_steps):
-        step_vars = step.get("vars", step.get("extra_vars", {}))
-        merged_vars = {**global_vars, **step_vars}
-        if vars_override:
-            merged_vars.update(vars_override)
+        if wf_type == "saved":
+            workflows = _load_workflows()
+            wf = next((w for w in workflows if w.get("name") == workflow_name), None)
+        if not wf:
+            # Try YAML workflows
+            import yaml as _yaml
+            repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            wf_dir = os.path.join(repo_root, "specs", "workflows")
+            if os.path.isdir(wf_dir):
+                for fname in os.listdir(wf_dir):
+                    if not fname.endswith(".yml"):
+                        continue
+                    fpath = os.path.join(wf_dir, fname)
+                    try:
+                        with open(fpath) as f:
+                            data = _yaml.safe_load(f)
+                        if data and data.get("kind") == "Workflow":
+                            name = data.get("metadata", {}).get("name", fname.replace(".yml", ""))
+                            if name == workflow_name:
+                                wf = data
+                                wf_type = "yaml"
+                                break
+                    except (_yaml.YAMLError, IOError):
+                        continue
 
-        playbook = step.get("playbook", step.get("file", ""))
-        step_name = step.get("name", f"Step {i+1}")
+        if not wf:
+            run_record = {
+                "trigger_id": trigger_id, "run_id": run_id,
+                "workflow_name": workflow_name, "started_at": started_at,
+                "completed_at": datetime.now().isoformat(),
+                "status": "failed", "steps_completed": 0, "steps_total": 0,
+                "triggered_by": trigger["type"], "error": "Workflow not found",
+            }
+            _send_trigger_notification(trigger, run_record, False)
+            return False, run_record
 
-        # Check condition
-        step_if = step.get("if")
-        if step_if:
-            if step_if == "always":
-                pass  # always run
-            elif step_if == "failure":
-                if not any(r.get("status") == "failed" for r in step_results):
-                    step_results.append({"step": i, "status": "skipped"})
-                    continue
-            elif step_if == "success":
-                if not all(r.get("status") == "completed" for r in step_results):
-                    step_results.append({"step": i, "status": "skipped"})
-                    continue
+        # Extract steps
+        if wf_type == "yaml":
+            global_vars = wf.get("spec", {}).get("vars", {})
+            raw_steps = wf.get("spec", {}).get("steps", [])
+        else:
+            global_vars = wf.get("vars", wf.get("globalVars", {}))
+            raw_steps = wf.get("steps", [])
 
-        # Run the playbook
-        job_id = f"trigger-{run_id}-step-{i}"
-        try:
-            _run_playbook_in_thread(playbook, merged_vars, job_id, f"[Trigger: {trigger['trigger_id']}] {step_name}")
-            # Check result
-            job_info = jobs.get(job_id, {})
-            if job_info.get("status") == "completed":
-                steps_completed += 1
-                step_results.append({"step": i, "status": "completed"})
-            else:
-                step_results.append({"step": i, "status": "failed"})
+        # Execute steps sequentially
+        steps_completed = 0
+        steps_total = len(raw_steps)
+        step_results = []
+
+        for i, step in enumerate(raw_steps):
+            step_vars = step.get("vars", step.get("extra_vars", {}))
+            merged_vars = {**global_vars, **step_vars}
+            if vars_override:
+                merged_vars.update(vars_override)
+
+            playbook = step.get("playbook", step.get("file", ""))
+            step_name = step.get("name", f"Step {i+1}")
+
+            # Check condition
+            step_if = step.get("if")
+            if step_if:
+                if step_if == "always":
+                    pass  # always run
+                elif step_if == "failure":
+                    if not any(r.get("status") == "failed" for r in step_results):
+                        step_results.append({"step": i, "status": "skipped"})
+                        continue
+                elif step_if == "success":
+                    if not all(r.get("status") == "completed" for r in step_results):
+                        step_results.append({"step": i, "status": "skipped"})
+                        continue
+
+            # Run the playbook
+            job_id = f"trigger-{run_id}-step-{i}"
+            try:
+                _run_playbook_in_thread(playbook, merged_vars, job_id, f"[Trigger: {trigger_id}] {step_name}")
+                # Check result
+                job_info = jobs.get(job_id, {})
+                if job_info.get("status") == "completed":
+                    steps_completed += 1
+                    step_results.append({"step": i, "status": "completed"})
+                else:
+                    step_results.append({"step": i, "status": "failed"})
+                    on_failure = step.get("on_failure", step.get("onFailure", "stop"))
+                    if on_failure == "stop":
+                        break
+            except Exception as e:
+                step_results.append({"step": i, "status": "failed", "error": str(e)})
                 on_failure = step.get("on_failure", step.get("onFailure", "stop"))
                 if on_failure == "stop":
                     break
-        except Exception as e:
-            step_results.append({"step": i, "status": "failed", "error": str(e)})
-            on_failure = step.get("on_failure", step.get("onFailure", "stop"))
-            if on_failure == "stop":
-                break
 
-    completed_at = datetime.now().isoformat()
-    success = steps_completed == steps_total
+        completed_at = datetime.now().isoformat()
+        success = steps_completed == steps_total
 
-    return success, {
-        "trigger_id": trigger["trigger_id"], "run_id": run_id,
-        "workflow_name": workflow_name, "started_at": started_at,
-        "completed_at": completed_at,
-        "status": "completed" if success else "failed",
-        "steps_completed": steps_completed, "steps_total": steps_total,
-        "triggered_by": trigger["type"],
-    }
+        run_record = {
+            "trigger_id": trigger_id, "run_id": run_id,
+            "workflow_name": workflow_name, "started_at": started_at,
+            "completed_at": completed_at,
+            "status": "completed" if success else "failed",
+            "steps_completed": steps_completed, "steps_total": steps_total,
+            "triggered_by": trigger["type"],
+        }
+        _send_trigger_notification(trigger, run_record, success)
+        return success, run_record
+    finally:
+        _active_trigger_runs.pop(trigger_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -9483,9 +9557,16 @@ async def create_trigger(trigger: TriggerCreate):
     if trigger.type == "schedule":
         if not trigger.cron:
             raise HTTPException(400, "cron is required for schedule triggers")
-        parts = trigger.cron.strip().split()
-        if len(parts) != 5:
-            raise HTTPException(400, f"Invalid cron expression: {trigger.cron}")
+        try:
+            from croniter import croniter
+            croniter(trigger.cron)  # validates the expression
+        except (ValueError, KeyError) as e:
+            raise HTTPException(400, f"Invalid cron expression: {trigger.cron} ({e})")
+        except ImportError:
+            # Fallback: basic 5-part check if croniter not available
+            parts = trigger.cron.strip().split()
+            if len(parts) != 5:
+                raise HTTPException(400, f"Invalid cron expression: {trigger.cron}")
 
     trigger_id = f"trg-{hashlib.sha256(os.urandom(16)).hexdigest()[:8]}"
     trigger_data = {
@@ -9761,6 +9842,7 @@ async def scheduler_status():
         "croniter_available": croniter_available,
         "check_interval": _trigger_scheduler._check_interval,
         "active_schedule_triggers": len(schedule_triggers),
+        "active_runs": dict(_active_trigger_runs),
         "upcoming": upcoming,
     }
 
