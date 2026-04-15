@@ -408,6 +408,70 @@ class TestAtomicRateLimit:
         assert result is None  # different trigger, allowed
 
 
+class TestTriggerMetrics:
+    """Tests for the /api/triggers/metrics endpoint."""
+
+    def test_metrics_empty(self, client):
+        resp = client.get("/api/triggers/metrics")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["total_triggers"] == 0
+        assert data["total_runs"] == 0
+        assert data["success_rate_pct"] == 0.0
+
+    def test_metrics_with_data(self, client, clean_trigger_state):
+        with patch("trigger_service.TRIGGER_STATE_FILE", clean_trigger_state):
+            # Create triggers
+            client.post("/api/triggers", json={
+                "workflow_name": "wf-1", "type": "schedule", "cron": "0 2 * * *",
+            })
+            client.post("/api/triggers", json={
+                "workflow_name": "wf-2", "type": "webhook",
+            })
+
+            # Seed run history
+            state = _load_trigger_state()
+            state["run_history"] = [
+                {"trigger_id": "trg-1", "status": "completed",
+                 "started_at": "2026-04-15T00:00:00", "completed_at": "2026-04-15T00:05:00"},
+                {"trigger_id": "trg-1", "status": "completed",
+                 "started_at": "2026-04-15T01:00:00", "completed_at": "2026-04-15T01:03:00"},
+                {"trigger_id": "trg-2", "status": "failed",
+                 "started_at": "2026-04-15T02:00:00", "completed_at": "2026-04-15T02:01:00"},
+            ]
+            _save_trigger_state(state)
+
+            resp = client.get("/api/triggers/metrics")
+            data = resp.json()
+            assert data["total_triggers"] == 2
+            assert data["schedule_triggers"] == 1
+            assert data["webhook_triggers"] == 1
+            assert data["total_runs"] == 3
+            assert data["completed_runs"] == 2
+            assert data["failed_runs"] == 1
+            assert data["success_rate_pct"] == 66.7
+            assert data["avg_duration_seconds"] > 0
+
+
+class TestNotificationConfigPath:
+    """Tests for configurable notification config path."""
+
+    def test_uses_env_var_for_config_path(self):
+        """TRIGGER_NOTIFICATION_CONFIG env var overrides default path."""
+        trigger = {"trigger_id": "trg-cfg1", "trigger_name": "test", "workflow_name": "wf"}
+        run_record = {"run_id": "r1", "steps_completed": 0, "steps_total": 1}
+        config = {"slack_enabled": True, "notify_trigger_failure": True}
+
+        with patch.dict(os.environ, {"TRIGGER_NOTIFICATION_CONFIG": "/tmp/custom_notify.yml"}):
+            with patch("os.path.exists", return_value=True):
+                with patch("builtins.open", MagicMock()):
+                    with patch("yaml.safe_load", return_value=config):
+                        with patch("app.slack_service") as mock_slack:
+                            _send_trigger_notification(trigger, run_record, False)
+                            mock_slack.send_provisioning_notification.assert_called_once()
+
+
 class TestSchedulerStatus:
     """Tests for the scheduler status endpoint."""
 
