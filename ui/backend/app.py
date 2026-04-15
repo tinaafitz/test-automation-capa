@@ -9172,6 +9172,9 @@ async def list_yaml_workflows():
 # ============================================================================
 # Trigger Management API
 # ============================================================================
+import logging as _trigger_logging
+_trigger_logger = _trigger_logging.getLogger("trigger_routes")
+
 # Core trigger logic (state I/O, notifications, scheduler, workflow execution)
 # lives in trigger_service.py. We import and re-export for backward compat.
 
@@ -9179,6 +9182,7 @@ from trigger_service import (
     TRIGGER_STATE_FILE,
     TRIGGER_MIN_INTERVAL,
     AUTO_DISABLE_THRESHOLD,
+    MAX_PAGINATION_LIMIT,
     _trigger_last_fire,
     _active_trigger_runs,
     _load_trigger_state,
@@ -9190,6 +9194,14 @@ from trigger_service import (
     TriggerScheduler,
     _trigger_scheduler,
 )
+
+
+def _get_trigger_or_404(state: dict, trigger_id: str) -> dict:
+    """Look up a trigger by ID or raise 404. Eliminates repeated lookup pattern."""
+    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
+    if not trigger:
+        raise HTTPException(404, "Trigger not found")
+    return trigger
 
 
 
@@ -9207,6 +9219,7 @@ class TriggerCreate(BaseModel):
 @app.get("/api/triggers")
 async def list_triggers(offset: int = 0, limit: int = 100):
     """List all configured triggers with pagination."""
+    limit = min(limit, MAX_PAGINATION_LIMIT)
     state = _load_trigger_state()
     all_triggers = state.get("triggers", [])
     total = len(all_triggers)
@@ -9251,7 +9264,32 @@ async def create_trigger(trigger: TriggerCreate):
             if len(parts) != 5:
                 raise HTTPException(400, f"Invalid cron expression: {trigger.cron}")
 
-    trigger_id = f"trg-{hashlib.sha256(os.urandom(16)).hexdigest()[:8]}"
+    # Validate workflow exists
+    wf_found = False
+    workflows = _load_workflows()
+    if any(w.get("name") == trigger.workflow_name for w in workflows):
+        wf_found = True
+    if not wf_found:
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        wf_dir = os.path.join(repo_root, "specs", "workflows")
+        if os.path.isdir(wf_dir):
+            for fname in os.listdir(wf_dir):
+                if not fname.endswith(".yml"):
+                    continue
+                try:
+                    with open(os.path.join(wf_dir, fname)) as f:
+                        data = yaml.safe_load(f)
+                    if data and data.get("kind") == "Workflow":
+                        name = data.get("metadata", {}).get("name", fname.replace(".yml", ""))
+                        if name == trigger.workflow_name:
+                            wf_found = True
+                            break
+                except (yaml.YAMLError, IOError):
+                    continue
+    if not wf_found:
+        raise HTTPException(400, f"Workflow not found: {trigger.workflow_name}")
+
+    trigger_id = f"trg-{hashlib.sha256(os.urandom(16)).hexdigest()[:16]}"
     trigger_data = {
         "trigger_id": trigger_id,
         "workflow_name": trigger.workflow_name,
@@ -9339,9 +9377,7 @@ async def trigger_metrics():
 async def get_trigger(trigger_id: str):
     """Get a single trigger by ID."""
     state = _load_trigger_state()
-    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
-    if not trigger:
-        raise HTTPException(404, "Trigger not found")
+    trigger = _get_trigger_or_404(state, trigger_id)
 
     # Include recent history
     history = [h for h in state.get("run_history", []) if h.get("trigger_id") == trigger_id][-10:]
@@ -9352,11 +9388,8 @@ async def get_trigger(trigger_id: str):
 async def delete_trigger(trigger_id: str):
     """Delete a trigger."""
     state = _load_trigger_state()
-    triggers = state.get("triggers", [])
-    trigger = next((t for t in triggers if t.get("trigger_id") == trigger_id), None)
-    if not trigger:
-        raise HTTPException(404, "Trigger not found")
-    state["triggers"] = [t for t in triggers if t.get("trigger_id") != trigger_id]
+    _get_trigger_or_404(state, trigger_id)
+    state["triggers"] = [t for t in state.get("triggers", []) if t.get("trigger_id") != trigger_id]
     _save_trigger_state(state)
     _trigger_scheduler._last_check.pop(trigger_id, None)
     return {"success": True, "deleted": trigger_id}
@@ -9366,9 +9399,7 @@ async def delete_trigger(trigger_id: str):
 async def enable_trigger(trigger_id: str):
     """Enable a trigger."""
     state = _load_trigger_state()
-    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
-    if not trigger:
-        raise HTTPException(404, "Trigger not found")
+    trigger = _get_trigger_or_404(state, trigger_id)
     trigger["enabled"] = True
     trigger["consecutive_failures"] = 0
     # Recompute next_run_at for schedule triggers
@@ -9388,9 +9419,7 @@ async def enable_trigger(trigger_id: str):
 async def disable_trigger(trigger_id: str):
     """Disable a trigger."""
     state = _load_trigger_state()
-    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
-    if not trigger:
-        raise HTTPException(404, "Trigger not found")
+    trigger = _get_trigger_or_404(state, trigger_id)
     trigger["enabled"] = False
     _save_trigger_state(state)
     return {"success": True, "trigger": trigger}
@@ -9411,13 +9440,12 @@ async def _fire_and_update(trigger, background_tasks: BackgroundTasks):
 async def fire_trigger(trigger_id: str, background_tasks: BackgroundTasks):
     """Manually fire a trigger from the UI."""
     state = _load_trigger_state()
-    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
-    if not trigger:
-        raise HTTPException(404, "Trigger not found")
+    trigger = _get_trigger_or_404(state, trigger_id)
 
     # Atomic rate limit check
     remaining = check_rate_limit(trigger_id)
     if remaining is not None:
+        _trigger_logger.warning("Trigger rate limited", extra={"trigger_id": trigger_id, "retry_after": remaining})
         return JSONResponse(
             status_code=429,
             content={"detail": f"Rate limited. Try again in {remaining}s"},
@@ -9429,19 +9457,21 @@ async def fire_trigger(trigger_id: str, background_tasks: BackgroundTasks):
 
 
 @app.get("/api/triggers/{trigger_id}/history")
-async def get_trigger_history(trigger_id: str, limit: int = 20):
-    """Get run history for a specific trigger."""
+async def get_trigger_history(trigger_id: str, limit: int = 20, offset: int = 0):
+    """Get run history for a specific trigger with pagination."""
+    limit = min(limit, MAX_PAGINATION_LIMIT)
     state = _load_trigger_state()
-    trigger = next((t for t in state.get("triggers", []) if t.get("trigger_id") == trigger_id), None)
-    if not trigger:
-        raise HTTPException(404, "Trigger not found")
-    history = [h for h in state.get("run_history", []) if h.get("trigger_id") == trigger_id][-limit:]
-    return {"success": True, "history": history, "count": len(history)}
+    _get_trigger_or_404(state, trigger_id)
+    all_history = [h for h in state.get("run_history", []) if h.get("trigger_id") == trigger_id]
+    total = len(all_history)
+    page = all_history[offset:offset + limit]
+    return {"success": True, "history": page, "count": len(page), "total": total}
 
 
 @app.get("/api/triggers/history/all")
 async def get_all_trigger_history(limit: int = 50, offset: int = 0):
     """Get all trigger run history with pagination."""
+    limit = min(limit, MAX_PAGINATION_LIMIT)
     state = _load_trigger_state()
     all_history = state.get("run_history", [])
     total = len(all_history)
@@ -9478,6 +9508,7 @@ async def webhook_trigger(trigger_id: str, request: Request, background_tasks: B
     # Atomic rate limit check
     remaining = check_rate_limit(trigger_id)
     if remaining is not None:
+        _trigger_logger.warning("Webhook rate limited", extra={"trigger_id": trigger_id, "retry_after": remaining})
         return JSONResponse(
             status_code=429,
             content={"detail": "Rate limited"},
