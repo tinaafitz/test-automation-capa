@@ -8,12 +8,15 @@ import asyncio
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import threading
 from datetime import datetime
 from typing import Dict, Optional
 
 import yaml
+
+logger = logging.getLogger("trigger_service")
 
 # ---------------------------------------------------------------------------
 # State file configuration
@@ -27,6 +30,7 @@ TRIGGER_STATE_FILE = os.path.join(
 # Rate limiting: track last fire time per trigger to prevent abuse
 _trigger_last_fire: Dict[str, float] = {}
 TRIGGER_MIN_INTERVAL = 60  # seconds
+MAX_RUN_HISTORY = 200  # max entries kept in run_history
 
 _trigger_state_lock = threading.Lock()
 
@@ -57,8 +61,8 @@ def _load_trigger_state():
 def _save_trigger_state(state):
     """Persist trigger state (thread-safe with file locking)."""
     os.makedirs(os.path.dirname(TRIGGER_STATE_FILE), exist_ok=True)
-    if len(state.get("run_history", [])) > 200:
-        state["run_history"] = state["run_history"][-200:]
+    if len(state.get("run_history", [])) > MAX_RUN_HISTORY:
+        state["run_history"] = state["run_history"][-MAX_RUN_HISTORY:]
     with _trigger_state_lock:
         with open(TRIGGER_STATE_FILE, "w") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
@@ -106,20 +110,20 @@ def _send_trigger_notification(trigger, run_record, success):
                 from app import slack_service
                 slack_service.reload_config()
                 slack_service.send_provisioning_notification(job_data, status)
-                print(f"[Trigger] Slack notification sent for {trigger['trigger_id']} ({status})")
+                logger.info("Slack notification sent", extra={"trigger_id": trigger['trigger_id'], "status": status})
             except Exception as e:
-                print(f"[Trigger] Slack notification failed: {e}")
+                logger.warning("Slack notification failed", extra={"error": str(e)})
 
         if settings.get("email_enabled", False):
             try:
                 from app import email_service
                 email_service.reload_config()
                 email_service.send_provisioning_notification(job_data, status)
-                print(f"[Trigger] Email notification sent for {trigger['trigger_id']} ({status})")
+                logger.info("Email notification sent", extra={"trigger_id": trigger['trigger_id'], "status": status})
             except Exception as e:
-                print(f"[Trigger] Email notification failed: {e}")
+                logger.warning("Email notification failed", extra={"error": str(e)})
     except Exception as e:
-        print(f"[Trigger] Notification error: {e}")
+        logger.error("Notification error", extra={"error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +144,7 @@ def _update_trigger_after_run(trigger_id, success, run_record):
             t["consecutive_failures"] = t.get("consecutive_failures", 0) + 1
             if t["consecutive_failures"] >= 5:
                 t["enabled"] = False
-                print(f"[Trigger] {trigger_id} auto-disabled after 5 consecutive failures")
+                logger.warning("Trigger auto-disabled after 5 consecutive failures", extra={"trigger_id": trigger_id})
         # Update next_run_at for schedule triggers
         if t.get("type") == "schedule" and t.get("cron"):
             try:
@@ -168,7 +172,7 @@ async def _fire_trigger_workflow(trigger, vars_override=None):
     # Concurrent run prevention
     if trigger_id in _active_trigger_runs:
         active_run = _active_trigger_runs[trigger_id]
-        print(f"[Trigger] Skipping {trigger_id} — already running ({active_run})")
+        logger.info("Skipping trigger — already running", extra={"trigger_id": trigger_id, "active_run": active_run})
         return False, {
             "trigger_id": trigger_id, "run_id": run_id,
             "workflow_name": workflow_name, "started_at": datetime.now().isoformat(),
@@ -324,7 +328,7 @@ class TriggerScheduler:
             return
         self._running = True
         self._task = asyncio.create_task(self._loop())
-        print("[TriggerScheduler] Started")
+        logger.info("Scheduler started")
 
     async def stop(self):
         """Stop the scheduler loop."""
@@ -336,21 +340,21 @@ class TriggerScheduler:
             except asyncio.CancelledError:
                 pass
             self._task = None
-        print("[TriggerScheduler] Stopped")
+        logger.info("Scheduler stopped")
 
     async def _loop(self):
         """Main scheduler loop — checks every _check_interval seconds."""
         try:
             from croniter import croniter
         except ImportError:
-            print("[TriggerScheduler] croniter not installed — scheduler disabled")
+            logger.warning("croniter not installed — scheduler disabled")
             return
 
         while self._running:
             try:
                 await self._tick(croniter)
             except Exception as e:
-                print(f"[TriggerScheduler] Error in tick: {e}")
+                logger.error("Error in scheduler tick", extra={"error": str(e)})
             await asyncio.sleep(self._check_interval)
 
     async def _tick(self, croniter_cls):
@@ -400,11 +404,14 @@ class TriggerScheduler:
                 # If next_fire falls in the current minute window, fire
                 if next_fire.strftime("%Y-%m-%d %H:%M") == minute_key:
                     self._last_check[trigger_id] = minute_key
-                    print(f"[TriggerScheduler] Firing {trigger_id} ({trigger.get('trigger_name', '')}) "
-                          f"for workflow '{trigger.get('workflow_name', '')}'")
+                    logger.info("Firing scheduled trigger", extra={
+                        "trigger_id": trigger_id,
+                        "trigger_name": trigger.get("trigger_name", ""),
+                        "workflow_name": trigger.get("workflow_name", ""),
+                    })
                     asyncio.create_task(self._fire(trigger))
             except (ValueError, KeyError) as e:
-                print(f"[TriggerScheduler] Bad cron for {trigger_id}: {e}")
+                logger.warning("Bad cron expression", extra={"trigger_id": trigger_id, "error": str(e)})
 
     async def _fire(self, trigger):
         """Fire a single trigger and update state."""
@@ -415,11 +422,11 @@ class TriggerScheduler:
             )
             _update_trigger_after_run(trigger_id, success, run_record)
             if success:
-                print(f"[TriggerScheduler] {trigger_id} completed successfully")
+                logger.info("Trigger completed successfully", extra={"trigger_id": trigger_id})
             else:
-                print(f"[TriggerScheduler] {trigger_id} failed")
+                logger.warning("Trigger failed", extra={"trigger_id": trigger_id})
         except Exception as e:
-            print(f"[TriggerScheduler] Error firing {trigger_id}: {e}")
+            logger.error("Error firing trigger", extra={"trigger_id": trigger_id, "error": str(e)})
 
 
 # Global scheduler instance

@@ -1658,26 +1658,36 @@ def cmd_workflow(args, base_dir, registry):
 
 
 def _load_trigger_state(base_dir):
-    """Load trigger state from vars/trigger_state.json."""
+    """Load trigger state from vars/trigger_state.json (file-locked)."""
+    import fcntl
     state_file = base_dir / "vars" / "trigger_state.json"
     if not state_file.exists():
         return {"triggers": [], "run_history": []}
     try:
         with open(state_file) as f:
-            return json.load(f)
+            fcntl.flock(f, fcntl.LOCK_SH)
+            try:
+                return json.load(f)
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
     except (json.JSONDecodeError, IOError):
         return {"triggers": [], "run_history": []}
 
 
 def _save_trigger_state(base_dir, state):
-    """Persist trigger state to vars/trigger_state.json."""
+    """Persist trigger state to vars/trigger_state.json (file-locked)."""
+    import fcntl
     state_file = base_dir / "vars" / "trigger_state.json"
     state_file.parent.mkdir(parents=True, exist_ok=True)
     # Cap run history at 200 entries
     if len(state.get("run_history", [])) > 200:
         state["run_history"] = state["run_history"][-200:]
     with open(state_file, "w") as f:
-        json.dump(state, f, indent=2, default=str)
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            json.dump(state, f, indent=2, default=str)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def _generate_trigger_id():

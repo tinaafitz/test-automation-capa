@@ -5,6 +5,7 @@ FastAPI-based backend for the ROSA cluster automation interface
 """
 
 from fastapi import FastAPI, HTTPException, WebSocket, BackgroundTasks, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Optional
@@ -9202,10 +9203,13 @@ class TriggerCreate(BaseModel):
 
 
 @app.get("/api/triggers")
-async def list_triggers():
-    """List all configured triggers."""
+async def list_triggers(offset: int = 0, limit: int = 100):
+    """List all configured triggers with pagination."""
     state = _load_trigger_state()
-    return {"success": True, "triggers": state.get("triggers", []), "count": len(state.get("triggers", []))}
+    all_triggers = state.get("triggers", [])
+    total = len(all_triggers)
+    page = all_triggers[offset:offset + limit]
+    return {"success": True, "triggers": page, "count": len(page), "total": total}
 
 
 @app.post("/api/triggers")
@@ -9364,7 +9368,11 @@ async def fire_trigger(trigger_id: str, background_tasks: BackgroundTasks):
     last_fire = _trigger_last_fire.get(trigger_id, 0)
     if now - last_fire < TRIGGER_MIN_INTERVAL:
         remaining = int(TRIGGER_MIN_INTERVAL - (now - last_fire))
-        raise HTTPException(429, f"Rate limited. Try again in {remaining}s")
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Rate limited. Try again in {remaining}s"},
+            headers={"Retry-After": str(remaining)},
+        )
     _trigger_last_fire[trigger_id] = now
 
     async def _run():
@@ -9387,11 +9395,13 @@ async def get_trigger_history(trigger_id: str, limit: int = 20):
 
 
 @app.get("/api/triggers/history/all")
-async def get_all_trigger_history(limit: int = 50):
-    """Get all trigger run history."""
+async def get_all_trigger_history(limit: int = 50, offset: int = 0):
+    """Get all trigger run history with pagination."""
     state = _load_trigger_state()
-    history = state.get("run_history", [])[-limit:]
-    return {"success": True, "history": history, "count": len(history)}
+    all_history = state.get("run_history", [])
+    total = len(all_history)
+    page = all_history[offset:offset + limit]
+    return {"success": True, "history": page, "count": len(page), "total": total}
 
 
 @app.get("/api/workflows/{workflow_id}/triggers")
@@ -9424,7 +9434,12 @@ async def webhook_trigger(trigger_id: str, request: Request, background_tasks: B
     now = time.time()
     last_fire = _trigger_last_fire.get(trigger_id, 0)
     if now - last_fire < TRIGGER_MIN_INTERVAL:
-        raise HTTPException(429, "Rate limited")
+        remaining = int(TRIGGER_MIN_INTERVAL - (now - last_fire))
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limited"},
+            headers={"Retry-After": str(remaining)},
+        )
     _trigger_last_fire[trigger_id] = now
 
     body = await request.body()
