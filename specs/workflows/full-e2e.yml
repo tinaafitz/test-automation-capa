@@ -5,6 +5,14 @@ metadata:
   name: full-e2e
   description: Complete end-to-end test - validate, provision, verify, then delete
 spec:
+  triggers:
+    - type: schedule
+      name: nightly-e2e
+      cron: "0 2 * * *"
+      timezone: "America/New_York"
+    - type: webhook
+      name: ci-trigger
+      secret: "${CAPA_WEBHOOK_SECRET}"
   vars: {}
   steps:
     - name: Validate CAPA Environment
