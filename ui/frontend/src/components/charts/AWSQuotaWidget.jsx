@@ -3,9 +3,11 @@ import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import { buildApiUrl } from '../../config/api';
 
 // Persistent cache survives page refresh via sessionStorage
+// Shared key with AWSUsageDashboard so both components use the same data
+const AWS_CACHE_KEY = 'aws-usage-cache';
 const _loadCache = () => {
   try {
-    const c = JSON.parse(sessionStorage.getItem('aws-quota-cache'));
+    const c = JSON.parse(sessionStorage.getItem(AWS_CACHE_KEY));
     return c && c.usage ? c : { usage: null, config: [], lastUpdated: null };
   } catch { return { usage: null, config: [], lastUpdated: null }; }
 };
@@ -41,7 +43,7 @@ const AWSQuotaWidget = () => {
         setConfig(merged);
         _cache.config = merged;
       }
-      try { sessionStorage.setItem('aws-quota-cache', JSON.stringify(_cache)); } catch {}
+      try { sessionStorage.setItem(AWS_CACHE_KEY, JSON.stringify(_cache)); } catch {}
     } catch (err) {
       setError('Failed to load AWS data');
     } finally {

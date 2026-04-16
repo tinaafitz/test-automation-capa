@@ -27,6 +27,7 @@ global.fetch = mockFetch;
 import AWSUsageDashboard from './AWSUsageDashboard';
 
 beforeEach(() => {
+  sessionStorage.clear();
   mockFetch.mockReset();
   mockFetch.mockImplementation((url) => {
     if (url.includes('/api/aws/usage-config')) {

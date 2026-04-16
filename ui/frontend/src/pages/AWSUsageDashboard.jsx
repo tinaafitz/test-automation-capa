@@ -4,15 +4,29 @@ import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import CapaSidebar from '../components/sidebar/CapaSidebar';
 import AWSUsageTrend from '../components/charts/AWSUsageTrend';
 
+// Persistent cache survives navigation via sessionStorage
+// Shared key with AWSQuotaWidget so both components use the same data
+const AWS_CACHE_KEY = 'aws-usage-cache';
+const _loadCache = () => {
+  try {
+    const c = JSON.parse(sessionStorage.getItem(AWS_CACHE_KEY));
+    return c && c.usage ? c : { usage: null, lastUpdated: null, billedResources: [], freeResources: [] };
+  } catch { return { usage: null, lastUpdated: null, billedResources: [], freeResources: [] }; }
+};
+const _saveCache = (cache) => {
+  try { sessionStorage.setItem(AWS_CACHE_KEY, JSON.stringify(cache)); } catch {}
+};
+
 const AWSUsageDashboard = ({ inline = false }) => {
+  const cached = _loadCache();
   const navigate = useNavigate();
-  const [usage, setUsage] = useState(null);
+  const [usage, setUsage] = useState(cached.usage);
   const [loading, setLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(cached.lastUpdated ? new Date(cached.lastUpdated) : null);
   const [error, setError] = useState(null);
-  const [billedResources, setBilledResources] = useState([]);
-  const [freeResources, setFreeResources] = useState([]);
-  const [configLoading, setConfigLoading] = useState(true);
+  const [billedResources, setBilledResources] = useState(cached.billedResources);
+  const [freeResources, setFreeResources] = useState(cached.freeResources);
+  const [configLoading, setConfigLoading] = useState(cached.billedResources.length === 0);
   const [expandedResource, setExpandedResource] = useState(null);
   const [detailsCache, setDetailsCache] = useState({});
   const [detailsLoading, setDetailsLoading] = useState(false);
@@ -23,16 +37,26 @@ const AWSUsageDashboard = ({ inline = false }) => {
   // Combine all resources for rendering
   const resourceConfig = [...billedResources, ...freeResources];
 
-  // Fetch resource configuration on component mount
+  // Fetch resource configuration on component mount (skip if cached)
   useEffect(() => {
+    if (cached.billedResources.length > 0) {
+      setConfigLoading(false);
+      return;
+    }
     const fetchConfig = async () => {
       try {
         const response = await fetch('http://localhost:8000/api/aws/usage-config');
         const data = await response.json();
 
         if (data.success) {
-          setBilledResources(data.billedResources || []);
-          setFreeResources(data.freeResources || []);
+          const billed = data.billedResources || [];
+          const free = data.freeResources || [];
+          setBilledResources(billed);
+          setFreeResources(free);
+          const c = _loadCache();
+          c.billedResources = billed;
+          c.freeResources = free;
+          _saveCache(c);
         } else {
           setError(data.message || 'Failed to load AWS configuration');
         }
@@ -63,8 +87,13 @@ const AWSUsageDashboard = ({ inline = false }) => {
       const data = await response.json();
 
       if (data.success) {
+        const ts = new Date(data.timestamp);
         setUsage(data.usage);
-        setLastUpdated(new Date(data.timestamp));
+        setLastUpdated(ts);
+        const c = _loadCache();
+        c.usage = data.usage;
+        c.lastUpdated = ts;
+        _saveCache(c);
       } else {
         setError(data.message || 'Failed to fetch AWS usage data');
       }
@@ -153,7 +182,13 @@ const AWSUsageDashboard = ({ inline = false }) => {
       const response = await fetch(`http://localhost:8000/api/aws/usage/${resourceKey}`);
       const data = await response.json();
       if (data.success) {
-        setUsage(prev => ({ ...prev, [resourceKey]: data.count }));
+        setUsage(prev => {
+          const updated = { ...prev, [resourceKey]: data.count };
+          const c = _loadCache();
+          c.usage = updated;
+          _saveCache(c);
+          return updated;
+        });
         // Clear cached details for this resource so next expand fetches fresh data
         setDetailsCache(prev => { const next = { ...prev }; delete next[resourceKey]; return next; });
       }
