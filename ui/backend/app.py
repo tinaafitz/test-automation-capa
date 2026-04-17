@@ -1335,7 +1335,7 @@ async def get_agent_confidence():
             streaks[it]["_last"] = "failure"
 
     patterns = []
-    issues_list = known_issues if isinstance(known_issues, list) else known_issues.get("issues", [])
+    issues_list = known_issues if isinstance(known_issues, list) else known_issues.get("patterns", known_issues.get("issues", []))
     for issue in issues_list:
         it = issue.get("type", "")
         streak = streaks.get(it, {})
@@ -1365,7 +1365,7 @@ async def get_agent_knowledge_base():
     known_issues = _load_agent_kb_file("known_issues.json")
     outcomes = _load_agent_kb_file("remediation_outcomes.json")
 
-    issues_list = known_issues if isinstance(known_issues, list) else known_issues.get("issues", [])
+    issues_list = known_issues if isinstance(known_issues, list) else known_issues.get("patterns", known_issues.get("issues", []))
 
     # Count triggers per pattern type from outcomes
     trigger_counts = {}
@@ -1491,7 +1491,7 @@ async def approve_pending_learning(index: int):
 
     # Add to known_issues with auto_fix disabled (safety)
     known_issues = _load_agent_kb_file("known_issues.json")
-    issues_list = known_issues if isinstance(known_issues, list) else known_issues.get("issues", [])
+    issues_list = known_issues if isinstance(known_issues, list) else known_issues.get("patterns", known_issues.get("issues", []))
     new_pattern = entry.get("suggested_pattern", {})
     new_pattern["auto_fix"] = False
     new_pattern["learned_confidence"] = entry.get("diagnosis_details", {}).get("confidence", 0.5)
@@ -1501,7 +1501,8 @@ async def approve_pending_learning(index: int):
     if isinstance(known_issues, list):
         _save_agent_kb_file("known_issues.json", issues_list)
     else:
-        known_issues["issues"] = issues_list
+        key = "patterns" if "patterns" in known_issues else "issues"
+        known_issues[key] = issues_list
         _save_agent_kb_file("known_issues.json", known_issues)
 
     return {"success": True, "message": f"Pattern '{new_pattern.get('type', '')}' approved and added to knowledge base"}

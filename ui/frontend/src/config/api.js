@@ -53,6 +53,13 @@ export const API_ENDPOINTS = {
   // Version endpoints
   VERSIONS: '/api/versions',
 
+  // Agent Dashboard endpoints
+  AGENTS_DASHBOARD: '/api/agents/dashboard',
+  AGENTS_REMEDIATION_METRICS: '/api/agents/remediation-metrics',
+  AGENTS_CONFIDENCE: '/api/agents/confidence',
+  AGENTS_KNOWLEDGE_BASE: '/api/agents/knowledge-base',
+  AGENTS_ROI: '/api/agents/roi',
+
   // Jenkins endpoints
   JENKINS_TEST_RESULTS_TREND: '/api/jenkins/test-results-trend',
 };

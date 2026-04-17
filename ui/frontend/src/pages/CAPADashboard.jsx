@@ -1050,6 +1050,7 @@ const CAPADashboardContent = () => {
     onNotificationsClick: () => setActiveSection('notifications'),
     onRecentTasksClick: () => setActiveSection('recent-tasks'),
     onAWSUsageClick: () => navigate('/aws-usage'),
+    onAgentDashboardClick: () => navigate('/agents'),
     onWorkflowsClick: () => setActiveSection('workflows'),
     onClusterActionsClick: () => setActiveSection('cluster-actions'),
   };

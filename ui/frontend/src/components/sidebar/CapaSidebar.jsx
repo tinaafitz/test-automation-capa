@@ -40,6 +40,7 @@ const CapaSidebar = ({
   onNotificationsClick,
   onRecentTasksClick,
   onAWSUsageClick,
+  onAgentDashboardClick,
   onWorkflowsClick,
   onClusterActionsClick,
   activeSection = 'environments',
@@ -174,6 +175,12 @@ const CapaSidebar = ({
       label: 'AI Assistant',
       icon: <span className="text-lg">🤖</span>,
       onClick: onAIAssistantClick
+    },
+    {
+      id: 'agent-dashboard',
+      label: 'Agent Dashboard',
+      icon: <span className="text-lg">🧠</span>,
+      onClick: onAgentDashboardClick
     },
     {
       id: 'aws-usage',
