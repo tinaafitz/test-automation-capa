@@ -178,7 +178,7 @@ const CapaSidebar = ({
     },
     {
       id: 'agent-dashboard',
-      label: 'Agent Dashboard',
+      label: 'AI Agent Pipeline',
       icon: <span className="text-lg">🧠</span>,
       onClick: onAgentDashboardClick
     },
