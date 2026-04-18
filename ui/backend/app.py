@@ -47,6 +47,7 @@ from capa_core import (
     resolve_spec_to_plan as _core_resolve_spec_to_plan,
 )
 import minikube_ops
+from playbook_executor import build_playbook_command, SENSITIVE_KEYS
 from pathlib import Path as _Path
 
 # Shared registry instance (auto-refreshes on file change via mtime cache)
@@ -4475,8 +4476,6 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
                     os.remove(job_kubeconfig)
                 return
 
-        cmd = ["ansible-playbook", playbook_path, "-v"]
-
         def camel_to_snake(name):
             special_cases = {'openShift': 'openshift', 'OpenShift': 'openshift'}
             for camel, snake in special_cases.items():
@@ -4485,23 +4484,15 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
             return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
-        # Credential keys go in env (not CLI args) to avoid ps exposure
-        _sensitive_keys = {
-            "aws_access_key_id", "aws_secret_access_key",
-            "ocm_client_id", "ocm_client_secret",
-        }
+        snake_vars = {camel_to_snake(k): v for k, v in extra_vars.items()}
 
         env = os.environ.copy()
         env["KUBECONFIG"] = job_kubeconfig if job_kubeconfig else os.environ.get("KUBECONFIG", os.path.expanduser("~/.kube/config"))
         env["PYTHONUNBUFFERED"] = "1"
 
-        for key, value in extra_vars.items():
-            snake_key = camel_to_snake(key)
-            str_value = str(value).strip() if value is not None else ""
-            if snake_key.lower() in _sensitive_keys:
-                env[snake_key.upper()] = str_value
-            else:
-                cmd.extend(["-e", f"{snake_key}={str_value}"])
+        cmd, env = build_playbook_command(
+            playbook_path, extra_vars=snake_vars, verbosity=1, env=env,
+        )
 
         print(f"[Playbook] Running: {' '.join(cmd)}")
         jobs[job_id]["progress"] = 30

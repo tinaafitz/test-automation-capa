@@ -46,6 +46,8 @@ try:
 except ImportError:
     AI_AGENTS_AVAILABLE = False
 
+from playbook_executor import StreamingPlaybookRunner
+
 # Terminal colors for output
 class Colors:
     HEADER = '\033[95m'
@@ -194,12 +196,12 @@ class TestSuiteRunner:
         return suites
 
     def run_playbook(self, playbook: Dict, suite_name: str) -> Dict:
-        """Execute a single Ansible playbook."""
+        """Execute a single Ansible playbook via shared executor."""
         playbook_name = playbook.get("name")
-        playbook_file = playbook.get("file", playbook_name)  # Use 'file' field, fallback to 'name'
-        playbook_path = self.base_dir / playbook_file
+        playbook_file = playbook.get("file", playbook_name)
+        playbook_path = str(self.base_dir / playbook_file)
 
-        if not playbook_path.exists():
+        if not os.path.exists(playbook_path):
             return {
                 "name": playbook_name,
                 "success": False,
@@ -207,175 +209,75 @@ class TestSuiteRunner:
                 "duration": 0
             }
 
-        # Show dry-run indicator
         if self.dry_run:
             print(f"\n{Colors.YELLOW}🔍 DRY RUN: {playbook.get('description', playbook_name)}{Colors.ENDC}")
         else:
             print(f"\n{Colors.CYAN}⏳ Running: {playbook.get('description', playbook_name)}{Colors.ENDC}")
 
-        start_time = time.time()
+        # Merge playbook vars with extra vars (extra vars take precedence)
+        all_vars = {}
+        if "extra_vars" in playbook:
+            all_vars.update(playbook["extra_vars"])
+        all_vars.update(self.extra_vars)
+        if self.dry_run:
+            all_vars["dry_run"] = "true"
 
-        try:
-            # Build ansible-playbook command
-            cmd = ["ansible-playbook", str(playbook_path)]
+        # Determine sidecar logfile for deletion playbooks with agent enabled
+        sidecar_logfile = None
+        if self.ai_agent_enabled and self.monitor_agent and "delete" in playbook_name.lower():
+            cluster_name = self.extra_vars.get("cluster_name", "")
+            if not cluster_name:
+                name_prefix = self.extra_vars.get("name_prefix", "")
+                if name_prefix:
+                    cluster_name = f"{name_prefix}-rosa-hcp"
+            if cluster_name:
+                sidecar_logfile = f"/tmp/deletion-agent-{cluster_name}.log"
+                if self.verbosity > 0:
+                    print(f"{Colors.CYAN}AI Agent sidecar monitoring: {sidecar_logfile}{Colors.ENDC}")
 
-            # Add verbosity flags
-            if self.verbosity > 0:
-                cmd.append("-" + "v" * min(self.verbosity, 4))  # Max -vvvv
-
-            # Merge playbook vars with extra vars (extra vars take precedence)
-            all_vars = {}
-            if "extra_vars" in playbook:
-                all_vars.update(playbook["extra_vars"])
-            all_vars.update(self.extra_vars)  # Command-line overrides JSON
-
-            # Add dry_run variable for playbooks to use
-            if self.dry_run:
-                all_vars["dry_run"] = "true"
-
-            # Add merged variables to command
-            for key, value in all_vars.items():
-                cmd.extend(["-e", f"{key}={value}"])
-
-            # Set timeout if specified
-            timeout = playbook.get("timeout", None)
-
-            # Execute playbook with real-time output streaming
-            # This prevents Jenkins timeout issues on long-running operations
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr into stdout
-                text=True,
-                bufsize=1,  # Line buffered
-                cwd=self.base_dir
-            )
-
-            # Start sidecar log file tailer for real-time agent monitoring.
-            # Ansible shell wait loops buffer stdout, but they also write to a
-            # sidecar log file via tee. This thread tails that file and feeds
-            # lines to the agent immediately (same pattern as ui/backend/app.py).
-            sidecar_stop = threading.Event()
-            sidecar_thread = None
-
-            if self.ai_agent_enabled and self.monitor_agent and "delete" in playbook_name.lower():
-                cluster_name = self.extra_vars.get("cluster_name", "")
-                if not cluster_name:
-                    # Derive from name_prefix (same as Ansible: name_prefix + "-rosa-hcp")
-                    name_prefix = self.extra_vars.get("name_prefix", "")
-                    if name_prefix:
-                        cluster_name = f"{name_prefix}-rosa-hcp"
-                if cluster_name:
-                    sidecar_logfile = f"/tmp/deletion-agent-{cluster_name}.log"
-
-                    def _tail_sidecar():
-                        """Tail the sidecar log file and feed lines to the AI agent in real-time."""
-                        last_pos = 0
-                        while not sidecar_stop.is_set():
-                            try:
-                                if os.path.exists(sidecar_logfile):
-                                    with open(sidecar_logfile, 'r') as f:
-                                        f.seek(last_pos)
-                                        new_lines = f.readlines()
-                                        if new_lines:
-                                            for line in new_lines:
-                                                line = line.strip()
-                                                if line:
-                                                    try:
-                                                        with self._agent_lock:
-                                                            self.monitor_agent.process_line(line)
-                                                    except Exception:
-                                                        pass
-                                        last_pos = f.tell()
-                            except Exception:
-                                pass
-                            sidecar_stop.wait(2)  # Poll every 2 seconds
-                    sidecar_thread = threading.Thread(target=_tail_sidecar, daemon=True)
-                    sidecar_thread.start()
+        def _on_line(line):
+            print(line)
+            sys.stdout.flush()
+            if self.ai_agent_enabled and self.monitor_agent:
+                try:
+                    self.monitor_agent.process_line(line)
+                except Exception as e:
                     if self.verbosity > 0:
-                        print(f"{Colors.CYAN}AI Agent sidecar monitoring: {sidecar_logfile}{Colors.ENDC}")
+                        print(f"{Colors.YELLOW}AI Agent Warning: {str(e)}{Colors.ENDC}")
 
-            # Capture output while streaming it in real-time
-            output_lines = []
-            try:
-                for line in process.stdout:
-                    # Print immediately (prevents timeout detection in CI/CD)
-                    print(line, end='')
-                    sys.stdout.flush()
-                    # Also store for later use
-                    output_lines.append(line)
+        def _on_sidecar_line(line):
+            if self.monitor_agent:
+                self.monitor_agent.process_line(line)
 
-                    # AI Agent Hook: Process line in real-time for issue detection
-                    if self.ai_agent_enabled and self.monitor_agent:
-                        try:
-                            with self._agent_lock:
-                                self.monitor_agent.process_line(line)
-                        except Exception as e:
-                            if self.verbosity > 0:
-                                print(f"{Colors.YELLOW}AI Agent Warning: {str(e)}{Colors.ENDC}")
+        runner = StreamingPlaybookRunner(
+            playbook_path=playbook_path,
+            extra_vars=all_vars,
+            cwd=str(self.base_dir),
+            timeout=playbook.get("timeout"),
+            verbosity=self.verbosity,
+            on_line=_on_line,
+            sidecar_logfile=sidecar_logfile,
+            on_sidecar_line=_on_sidecar_line if sidecar_logfile else None,
+        )
+        result = runner.run()
 
-                # Wait for process to complete
-                returncode = process.wait(timeout=timeout)
+        duration = result["elapsed"]
+        output = '\n'.join(result.get("output_lines", []))
+        base_result = {
+            "name": playbook_name,
+            "description": playbook.get("description", ""),
+            "test_case_id": playbook.get("test_case_id", ""),
+        }
 
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-                raise  # Re-raise to be caught by outer exception handler
-            finally:
-                # Stop the sidecar tailer thread
-                sidecar_stop.set()
-                if sidecar_thread is not None:
-                    sidecar_thread.join(timeout=5)
-
-            duration = time.time() - start_time
-            output = ''.join(output_lines)
-
-            if returncode == 0:
-                print(f"{Colors.GREEN}✓ Completed successfully ({self._format_duration(duration)}){Colors.ENDC}")
-
-                return {
-                    "name": playbook_name,
-                    "description": playbook.get("description", ""),
-                    "test_case_id": playbook.get("test_case_id", ""),
-                    "success": True,
-                    "duration": duration,
-                    "output": output
-                }
-            else:
-                print(f"{Colors.RED}✗ Failed with exit code {returncode}{Colors.ENDC}")
-
-                return {
-                    "name": playbook_name,
-                    "description": playbook.get("description", ""),
-                    "test_case_id": playbook.get("test_case_id", ""),
-                    "success": False,
-                    "error": output,
-                    "duration": duration,
-                    "output": output
-                }
-
-        except subprocess.TimeoutExpired:
-            duration = time.time() - start_time
+        if result["success"]:
+            print(f"{Colors.GREEN}✓ Completed successfully ({self._format_duration(duration)}){Colors.ENDC}")
+            return {**base_result, "success": True, "duration": duration, "output": output}
+        elif "Timeout" in result.get("error", ""):
             print(f"{Colors.RED}✗ Timeout after {self._format_duration(duration)}{Colors.ENDC}")
-            return {
-                "name": playbook_name,
-                "description": playbook.get("description", ""),
-                "test_case_id": playbook.get("test_case_id", ""),
-                "success": False,
-                "error": f"Timeout after {timeout} seconds",
-                "duration": duration
-            }
-        except Exception as e:
-            duration = time.time() - start_time
-            print(f"{Colors.RED}✗ Error: {str(e)}{Colors.ENDC}")
-            return {
-                "name": playbook_name,
-                "description": playbook.get("description", ""),
-                "test_case_id": playbook.get("test_case_id", ""),
-                "success": False,
-                "error": str(e),
-                "duration": duration
-            }
+            return {**base_result, "success": False, "error": result["error"], "duration": duration}
+        else:
+            print(f"{Colors.RED}✗ Failed with exit code {result.get('returncode', -1)}{Colors.ENDC}")
+            return {**base_result, "success": False, "error": output, "duration": duration, "output": output}
 
     def _extract_suite_label(self, suite_id: str) -> str:
         """Extract a short descriptive label from suite ID for filenames.

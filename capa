@@ -56,6 +56,7 @@ from capa_core import (
     validate_feature_value, build_json_merge_patch, resolve_spec_to_plan,
 )
 import minikube_ops
+from playbook_executor import run_playbook_blocking
 
 
 # ============================================================================
@@ -144,50 +145,35 @@ class ExecutionEngine:
                     "status": "failed", "error": f"Unknown step type: {step_type}"}
 
     def _run_playbook(self, step: Dict) -> Dict:
-        """Run an Ansible playbook."""
-        playbook_path = self.base_dir / step["playbook"]
-        if not playbook_path.exists():
+        """Run an Ansible playbook via shared executor."""
+        playbook_path = str(self.base_dir / step["playbook"])
+        verbosity = 3 if self.verbose else 0
+
+        print(f"  {C.CYAN}$ ansible-playbook {step['playbook']}...{C.E}")
+
+        result = run_playbook_blocking(
+            playbook_path,
+            extra_vars=step.get("extra_vars"),
+            cwd=str(self.base_dir),
+            timeout=step.get("wait_timeout", 7200),
+            verbosity=verbosity,
+            capture_output=not self.verbose,
+        )
+
+        elapsed = result["elapsed"]
+        if result["success"]:
+            print(f"  {C.G}Done ({elapsed:.0f}s){C.E}")
             return {"step": step["step"], "name": step["name"],
-                    "status": "failed", "error": f"Playbook not found: {step['playbook']}"}
-
-        cmd = ["ansible-playbook", str(playbook_path)]
-        for key, value in step.get("extra_vars", {}).items():
-            if isinstance(value, (dict, list)):
-                cmd.extend(["-e", f"{key}={json.dumps(value)}"])
-            elif isinstance(value, bool):
-                cmd.extend(["-e", f"{key}={'true' if value else 'false'}"])
-            else:
-                cmd.extend(["-e", f"{key}={value}"])
-
-        if self.verbose:
-            cmd.append("-vvv")
-
-        start = time.time()
-        print(f"  {C.CYAN}$ {' '.join(cmd[:6])}...{C.E}")
-
-        try:
-            result = subprocess.run(
-                cmd, cwd=str(self.base_dir),
-                capture_output=not self.verbose,
-                text=True, timeout=step.get("wait_timeout", 7200)
-            )
-            elapsed = time.time() - start
-
-            if result.returncode == 0:
-                print(f"  {C.G}Done ({elapsed:.0f}s){C.E}")
-                return {"step": step["step"], "name": step["name"],
-                        "status": "completed", "elapsed": elapsed}
-            else:
-                error = (result.stderr or result.stdout or "")[-500:]
-                print(f"  {C.R}Failed ({elapsed:.0f}s){C.E}")
-                return {"step": step["step"], "name": step["name"],
-                        "status": "failed", "elapsed": elapsed, "error": error}
-
-        except subprocess.TimeoutExpired:
-            elapsed = time.time() - start
+                    "status": "completed", "elapsed": elapsed}
+        elif "Timeout" in result.get("error", ""):
             print(f"  {C.R}Timeout ({elapsed:.0f}s){C.E}")
             return {"step": step["step"], "name": step["name"],
                     "status": "failed", "elapsed": elapsed, "error": "Timeout"}
+        else:
+            error = result.get("error", "Unknown error")
+            print(f"  {C.R}Failed ({elapsed:.0f}s){C.E}")
+            return {"step": step["step"], "name": step["name"],
+                    "status": "failed", "elapsed": elapsed, "error": error}
 
     def _run_patch(self, step: Dict) -> Dict:
         """Execute an oc patch command."""

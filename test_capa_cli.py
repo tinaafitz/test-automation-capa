@@ -972,6 +972,7 @@ class TestCLIIntegration:
             shutil.copy(PROJECT_ROOT / "capa", Path(tmpdir) / "capa")
             shutil.copy(PROJECT_ROOT / "capa_core.py", Path(tmpdir) / "capa_core.py")
             shutil.copy(PROJECT_ROOT / "minikube_ops.py", Path(tmpdir) / "minikube_ops.py")
+            shutil.copy(PROJECT_ROOT / "playbook_executor.py", Path(tmpdir) / "playbook_executor.py")
 
             result = subprocess.run(
                 [sys.executable, str(Path(tmpdir) / "capa"), "generate-specs"],
