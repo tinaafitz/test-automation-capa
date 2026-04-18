@@ -19,12 +19,140 @@ const STATE_COLORS = {
   resolved: '#22c55e', failed: '#ef4444', remediating: '#f97316', diagnosing: '#3b82f6', detected: '#eab308',
 };
 
+const STAGE_COLORS = {
+  monitor: '#3b82f6', diagnose: '#a855f7', remediate: '#FF9900', learn: '#10b981',
+};
+
+const dashboardStyles = `
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 4px 2px rgba(34, 197, 94, 0.3); }
+    50% { box-shadow: 0 0 10px 4px rgba(34, 197, 94, 0.6); }
+  }
+  @keyframes gradient-shift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  @keyframes bar-fill {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+  }
+  @keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .aws-card {
+    background: #161c28;
+    border: 1px solid #2a3344;
+    border-radius: 4px;
+    transition: border-color 0.2s ease;
+  }
+  .aws-card:hover {
+    border-color: #3b4a60;
+  }
+  .aws-card-header {
+    padding: 10px 16px;
+    border-bottom: 1px solid #2a3344;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .aws-card-body { padding: 10px 14px; }
+  .squid-ink { background-color: #0f1419; }
+  .gradient-text-gold {
+    background: linear-gradient(135deg, #FF9900, #FFCC66);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .gradient-text-cyan {
+    background: linear-gradient(135deg, #00bcd4, #4dd0e1);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .gradient-text-green {
+    background: linear-gradient(135deg, #10b981, #34d399);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .agent-dot-active { animation: pulse-glow 2s ease-in-out infinite; border-radius: 50%; }
+  .bar-animate { transform-origin: left; animation: bar-fill 0.7s ease-out forwards; }
+  .fade-in { animation: fade-in-up 0.4s ease-out forwards; }
+  .header-accent {
+    height: 2px;
+    background: linear-gradient(90deg, #FF9900, #FFCC66, #FF9900);
+    background-size: 200% auto;
+    animation: gradient-shift 4s ease infinite;
+  }
+  .refresh-btn {
+    background: rgba(255, 153, 0, 0.08);
+    border: 1px solid rgba(255, 153, 0, 0.25);
+    color: #FF9900;
+    transition: all 0.2s ease;
+  }
+  .refresh-btn:hover {
+    background: rgba(255, 153, 0, 0.15);
+    border-color: rgba(255, 153, 0, 0.5);
+    box-shadow: 0 0 16px rgba(255, 153, 0, 0.15);
+  }
+  .donut-glow { filter: drop-shadow(0 0 8px rgba(255, 153, 0, 0.25)); }
+  .scrollbar-dark::-webkit-scrollbar { width: 4px; }
+  .scrollbar-dark::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-dark::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+  .scrollbar-dark::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+  .stage-num {
+    width: 20px; height: 20px; border-radius: 4px; display: inline-flex;
+    align-items: center; justify-content: center; font-size: 11px; font-weight: 800;
+  }
+  .stage-title { font-size: 14px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+  .pattern-row {
+    cursor: pointer;
+    padding: 6px 8px;
+    margin: 0 -8px;
+    border-radius: 4px;
+    transition: background 0.15s ease;
+  }
+  .pattern-row:hover { background: rgba(255,255,255,0.03); }
+  .pattern-row.expanded { background: rgba(59,130,246,0.06); }
+  .pattern-detail {
+    overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease;
+  }
+  .activity-row {
+    border-left: 2px solid transparent;
+    padding-left: 8px;
+    transition: background 0.15s ease;
+  }
+  .activity-row:hover { background: rgba(255,255,255,0.03); border-radius: 4px; }
+  .pipeline-arrow {
+    color: #2a3344;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    padding: 0 2px;
+  }
+  .section-toggle {
+    cursor: pointer;
+    padding: 4px 8px;
+    margin: 0 -8px;
+    border-radius: 4px;
+    transition: background 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .section-toggle:hover { background: rgba(255,255,255,0.03); }
+`;
+
 const AgentDashboard = () => {
   const cached = _loadCache();
   const navigate = useNavigate();
   const [data, setData] = useState(cached);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [expandedPattern, setExpandedPattern] = useState(null);
+  const [expandedDiagnose, setExpandedDiagnose] = useState(null);
+  const [expandedRemediate, setExpandedRemediate] = useState(null);
+  const [expandedLearn, setExpandedLearn] = useState(null);
+  const [showAllPatterns, setShowAllPatterns] = useState(true);
+  const [collapsedCards, setCollapsedCards] = useState({});
+  const toggleCard = (key) => setCollapsedCards(prev => ({ ...prev, [key]: !prev[key] }));
 
   const fetchAll = async () => {
     setLoading(true);
@@ -68,22 +196,21 @@ const AgentDashboard = () => {
   const statuses = data?.dashboard?.overview?.agent_statuses || {};
   const totalStates = Object.values(dist).reduce((s, v) => s + v, 0);
 
-  // Donut math
-  const radius = 38, stroke = 12, circ = 2 * Math.PI * radius;
+  // Donut
+  const radius = 52, stroke = 12, circ = 2 * Math.PI * radius;
   let offset = 0;
   const segments = Object.entries(STATE_COLORS).map(([key, color]) => {
     const count = dist[key] || 0;
     if (count === 0 || totalStates === 0) return null;
     const dash = (count / totalStates) * circ;
-    const seg = <circle key={key} cx="50" cy="50" r={radius} fill="none" stroke={color} strokeWidth={stroke} strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={-offset} transform="rotate(-90 50 50)" />;
+    const seg = <circle key={key} cx="60" cy="60" r={radius} fill="none" stroke={color} strokeWidth={stroke}
+      strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={-offset}
+      transform="rotate(-90 60 60)" strokeLinecap="round" />;
     offset += dash;
     return seg;
   });
 
-  // Top patterns by trigger count
   const topPatterns = (kb?.most_triggered || []).filter(p => p.count > 0);
-
-  // Hours/mins saved
   const hrs = Math.floor((roi?.total_manual_minutes_saved || 0) / 60);
   const mins = (roi?.total_manual_minutes_saved || 0) % 60;
 
@@ -97,246 +224,684 @@ const AgentDashboard = () => {
     onAWSUsageClick: () => navigate('/aws-usage'), onAgentDashboardClick: () => {},
   };
 
-  return (
-    <div className="flex h-screen bg-gray-50">
-      <CapaSidebar {...sidebarHandlers} activeSection="agent-dashboard" environment="mce" />
-      <div className="flex-1 overflow-auto" style={{ backgroundColor: '#F5F0FF' }}>
-        {/* Header */}
-        <div className="text-white px-6 py-4 shadow-lg flex items-center justify-between h-[72px]" style={{ background: 'linear-gradient(to right, #7C3AED, #6D28D9)' }}>
-          <div>
-            <h1 className="text-2xl font-bold leading-tight">AI Agent Dashboard</h1>
-            {data?.lastUpdated && <p className="text-purple-200 text-xs mt-0.5">Last updated: {new Date(data.lastUpdated).toLocaleString()}</p>}
-          </div>
-          <button onClick={fetchAll} disabled={loading}
-            className={`flex items-center gap-2 px-5 py-2 rounded-lg font-medium text-sm shadow-md transition-all ${loading ? 'bg-white/20 text-white/50' : 'bg-white text-purple-600 hover:bg-purple-50'}`}>
-            <ArrowPathIcon className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Loading...' : 'Refresh'}
-          </button>
-        </div>
+  const confidenceBarGradient = (pct) => {
+    if (pct >= 80) return 'linear-gradient(90deg, #10b981, #34d399)';
+    if (pct >= 50) return 'linear-gradient(90deg, #eab308, #FF9900)';
+    return 'linear-gradient(90deg, #ef4444, #f97316)';
+  };
 
-        {error && <div className="mx-6 mt-4 bg-red-50 border border-red-300 rounded-lg p-3 text-red-700 text-sm">{error}</div>}
+  const StageHeader = ({ num, label, agentKey, color }) => {
+    const active = statuses[agentKey]?.status === 'active';
+    return (
+      <div className="aws-card-header">
+        <span className="stage-num" style={{ background: `${color}20`, color, border: `1px solid ${color}40` }}>{num}</span>
+        <span className="stage-title" style={{ color }}>{label}</span>
+        <span className={active ? 'agent-dot-active' : ''}
+          style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: active ? '#22c55e' : '#2d3748', display: 'inline-block' }} />
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex h-screen squid-ink">
+      <style>{dashboardStyles}</style>
+      <CapaSidebar {...sidebarHandlers} activeSection="agent-dashboard" environment="mce" />
+      <div className="flex-1 flex flex-col overflow-hidden squid-ink">
+        {/* Header */}
+        <div className="px-5 py-2 flex items-center justify-between shrink-0"
+          style={{ background: '#161c28', borderBottom: '1px solid #2a3344' }}>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2.5">
+              <div style={{ width: 30, height: 30, borderRadius: 6, background: 'linear-gradient(135deg, #FF9900, #FFCC66)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: 13, fontWeight: 900, color: '#0f1419' }}>AI</span>
+              </div>
+              <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#d5dbdb' }}>AI Agent Pipeline</h1>
+            </div>
+          </div>
+          <div className="flex items-center gap-5">
+            <button onClick={fetchAll} disabled={loading}
+              className={`refresh-btn flex items-center gap-1.5 px-4 py-1.5 rounded font-semibold text-xs ${loading ? 'opacity-50' : ''}`}>
+              <ArrowPathIcon className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Loading' : 'Refresh'}
+            </button>
+          </div>
+        </div>
+        <div className="header-accent shrink-0" />
+
+        {data && (
+          <div className="shrink-0 flex items-center justify-center gap-0 px-5 py-2" style={{ background: '#161c28', borderBottom: '1px solid #2a3344' }}>
+            {[
+              { label: 'Monitor', value: kb?.total_patterns || 0, unit: 'patterns', color: STAGE_COLORS.monitor },
+              { label: 'Diagnose', value: totalStates, unit: 'detected', color: STAGE_COLORS.diagnose },
+              { label: 'Remediate', value: m?.total_remediated || 0, unit: 'fixed', color: STAGE_COLORS.remediate },
+              { label: 'Learn', value: kb?.total_outcomes || 0, unit: 'outcomes', color: STAGE_COLORS.learn },
+            ].map((stage, idx) => (
+              <React.Fragment key={stage.label}>
+                {idx > 0 && <span className="text-lg" style={{ color: '#3b4a60', padding: '0 10px', fontWeight: 300 }}>{'\u2192'}</span>}
+                <div className="flex items-center gap-2" style={{ background: `${stage.color}10`, border: `1px solid ${stage.color}20`, borderRadius: 20, padding: '4px 14px' }}>
+                  <span className="text-sm font-extrabold uppercase tracking-wider" style={{ color: stage.color }}>{stage.label}</span>
+                  <span className="text-base font-black" style={{ color: '#d5dbdb' }}>{stage.value}</span>
+                  <span className="text-xs" style={{ color: '#5a6a7a' }}>{stage.unit}</span>
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+
+        {error && (
+          <div className="mx-4 mt-3 rounded p-2.5 text-xs shrink-0"
+            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5' }}>
+            {error}
+          </div>
+        )}
 
         {!data && !loading && !error && (
-          <div className="m-6 bg-purple-50 border border-purple-300 rounded-lg p-8 text-center">
-            <p className="text-purple-700 text-lg font-medium">Click "Refresh" to load agent data</p>
+          <div className="m-5 aws-card p-8 text-center fade-in">
+            <p className="text-base font-semibold gradient-text-gold">Click Refresh to load agent data</p>
           </div>
         )}
 
         {data && (
-          <div className="p-4 space-y-4">
-            {/* Row 1: ROI hero cards + Agent status */}
-            <div className="grid grid-cols-4 gap-3">
-              <div className="bg-white border-2 border-purple-200 rounded-lg p-4 shadow-sm text-center">
-                <p className="text-xs text-purple-600 font-medium">Clusters Saved</p>
-                <p className="text-3xl font-bold text-purple-700">{roi?.clusters_saved || 0}</p>
-                <p className="text-xs text-gray-400">{roi?.total_interventions || 0} interventions</p>
-              </div>
-              <div className="bg-white border-2 border-purple-200 rounded-lg p-4 shadow-sm text-center">
-                <p className="text-xs text-purple-600 font-medium">Time Saved</p>
-                <p className="text-3xl font-bold text-purple-700">{hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`}</p>
-                <p className="text-xs text-gray-400">vs manual remediation</p>
-              </div>
-              <div className="bg-white border-2 border-purple-200 rounded-lg p-4 shadow-sm text-center">
-                <p className="text-xs text-purple-600 font-medium">Cost Avoided</p>
-                <p className="text-3xl font-bold text-green-600">${(roi?.total_cost_avoided_usd || 0).toLocaleString()}</p>
-                <p className="text-xs text-gray-400">orphaned resources cleaned</p>
-              </div>
-              <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                <p className="text-xs text-gray-500 font-medium mb-2">Agents</p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {['monitor', 'diagnostic', 'remediation', 'learning'].map(a => {
-                    const active = statuses[a]?.status === 'active';
-                    return (
-                      <div key={a} className="flex items-center gap-1.5">
-                        <span className={`w-2 h-2 rounded-full ${active ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`} />
-                        <span className="text-xs text-gray-700 capitalize">{a}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
+          <div className="flex-1 overflow-hidden fade-in flex flex-col" style={{ padding: 10, minHeight: 0 }}>
+            <div className="flex flex-col flex-1 overflow-hidden" style={{ gap: 8, minHeight: 0 }}>
 
-            {/* Row 2: Metrics + Donut + Confidence */}
-            <div className="grid grid-cols-12 gap-3">
-              {/* Remediation metrics */}
-              <div className="col-span-3 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                <p className="text-sm font-semibold text-gray-700 mb-3">Remediation</p>
-                <div className="space-y-2">
-                  <div className="flex justify-between"><span className="text-xs text-gray-500">Detected</span><span className="text-sm font-bold">{m?.total_detected || 0}</span></div>
-                  <div className="flex justify-between"><span className="text-xs text-gray-500">Remediated</span><span className="text-sm font-bold text-green-600">{m?.total_remediated || 0}</span></div>
-                  <div className="flex justify-between"><span className="text-xs text-gray-500">Failed</span><span className="text-sm font-bold text-red-600">{m?.total_failed || 0}</span></div>
-                  <div className="border-t border-gray-100 pt-2 flex justify-between">
-                    <span className="text-xs text-gray-500">Success Rate</span>
-                    <span className={`text-sm font-bold ${(m?.success_rate || 0) >= 80 ? 'text-green-600' : 'text-yellow-600'}`}>{m?.success_rate || 0}%</span>
+              {/* ── ROW 1: MONITOR + DIAGNOSE ── */}
+              <div style={{ display: 'flex', gap: 8, flex: '1 1 0', minHeight: 0 }}>
+
+                {/* 1. MONITOR — compact left panel */}
+                <div className="aws-card flex flex-col" style={{ borderTopColor: STAGE_COLORS.monitor, borderTopWidth: 2, width: '38%', flexShrink: 0 }}>
+                  <StageHeader num="1" label="Monitor" agentKey="monitor" color={STAGE_COLORS.monitor} />
+                  <div className="aws-card-body flex flex-col flex-1 overflow-hidden">
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="text-5xl font-black" style={{ color: '#d5dbdb' }}>{kb?.total_patterns || 0}</span>
+                      <div>
+                        <p className="text-xs uppercase tracking-widest" style={{ color: '#5a6a7a' }}>patterns</p>
+                        <p className="text-xs uppercase tracking-widest" style={{ color: '#5a6a7a' }}>watched</p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 ml-auto">
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.2)', color: '#6ee7b7' }}>
+                          {kb?.auto_fix_enabled || 0} auto-fix
+                        </span>
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid #2a3344', color: '#6b7f8e' }}>
+                          {kb?.auto_fix_disabled || 0} manual
+                        </span>
+                      </div>
+                    </div>
+                    {kb?.by_severity && (
+                      <div className="flex flex-wrap gap-1.5 mb-3">
+                        {Object.entries(kb.by_severity).sort(([,a],[,b]) => b - a).map(([sev, count]) => {
+                          const sc = {
+                            critical: { bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.25)', text: '#fca5a5' },
+                            high: { bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.25)', text: '#fdba74' },
+                            medium: { bg: 'rgba(234,179,8,0.12)', border: 'rgba(234,179,8,0.25)', text: '#fde047' },
+                            low: { bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.25)', text: '#93c5fd' },
+                          }[sev] || { bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.25)', text: '#93c5fd' };
+                          return (
+                            <span key={sev} className="text-[11px] font-semibold px-2 py-0.5 rounded"
+                              style={{ background: sc.bg, border: `1px solid ${sc.border}`, color: sc.text }}>
+                              {sev} {count}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="section-toggle items-center justify-between pt-2 mb-2" style={{ borderTop: '1px solid #2a3344' }}
+                      onClick={() => toggleCard('monitor-list')}>
+                      <p className="text-[10px] uppercase tracking-wider flex items-center gap-1" style={{ color: '#5a6a7a' }}>
+                        <span style={{ fontSize: 8 }}>{collapsedCards['monitor-list'] ? '\u25B6' : '\u25BC'}</span>
+                        {showAllPatterns ? 'All Patterns' : 'In Use'}
+                      </p>
+                      <div className="flex rounded overflow-hidden" style={{ border: '1px solid #2a3344' }}>
+                        <button onClick={() => setShowAllPatterns(true)}
+                          className="text-[10px] font-semibold px-2.5 py-0.5"
+                          style={{ background: showAllPatterns ? '#3b82f6' : 'transparent', color: showAllPatterns ? '#fff' : '#5a6a7a', border: 'none', cursor: 'pointer' }}>
+                          All ({patterns.length})
+                        </button>
+                        <button onClick={() => setShowAllPatterns(false)}
+                          className="text-[10px] font-semibold px-2.5 py-0.5"
+                          style={{ background: !showAllPatterns ? '#3b82f6' : 'transparent', color: !showAllPatterns ? '#fff' : '#5a6a7a', border: 'none', borderLeft: '1px solid #2a3344', cursor: 'pointer' }}>
+                          In Use ({topPatterns.length})
+                        </button>
+                      </div>
+                    </div>
+                    {!collapsedCards['monitor-list'] && <div className="space-y-0.5 overflow-y-auto scrollbar-dark flex-1" style={{ minHeight: 0 }}>
+                      {(() => {
+                        const triggerMap = {};
+                        (kb?.most_triggered || []).forEach(p => { triggerMap[p.type] = p.count; });
+                        const allPatterns = patterns.map(p => ({
+                          ...p, count: triggerMap[p.type] || 0,
+                        })).sort((a, b) => b.count - a.count)
+                          .filter(p => showAllPatterns || p.count > 0);
+                        const maxCount = allPatterns[0]?.count || 1;
+                        return allPatterns.length > 0 ? allPatterns.map(p => {
+                          const isExpanded = expandedPattern === p.type;
+                          const pct = Math.round((p.learned_confidence || 0) * 100);
+                          const sevColor = {
+                            critical: '#fca5a5', high: '#fdba74', medium: '#fde047', low: '#93c5fd',
+                          }[p.severity] || '#93c5fd';
+                          return (
+                            <div key={p.type}>
+                              <div className={`pattern-row ${isExpanded ? 'expanded' : ''}`}
+                                onClick={() => setExpandedPattern(isExpanded ? null : p.type)}>
+                                <div className="flex justify-between items-center mb-0.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <span style={{ color: '#3b82f6', fontSize: 10, opacity: 0.5 }}>{isExpanded ? '\u25BC' : '\u25B6'}</span>
+                                    <span className="text-[12px]" style={{ color: '#b0bec5' }}>{p.type.replace(/_/g, ' ')}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] px-1.5 py-0 rounded font-semibold" style={{
+                                      background: p.auto_fix ? 'rgba(16,185,129,0.10)' : 'rgba(255,255,255,0.03)',
+                                      color: p.auto_fix ? '#6ee7b7' : '#4a5568',
+                                      border: p.auto_fix ? '1px solid rgba(16,185,129,0.15)' : '1px solid #222d3d',
+                                    }}>
+                                      {p.auto_fix ? 'auto' : 'manual'}
+                                    </span>
+                                    <span className="text-[13px] font-bold" style={{ color: '#d5dbdb' }}>{p.count}</span>
+                                  </div>
+                                </div>
+                                {p.count > 0 && (
+                                  <div className="rounded-sm h-2 ml-4" style={{ background: '#1a2332' }}>
+                                    <div className="h-full rounded-sm bar-animate" style={{ width: `${(p.count / maxCount) * 100}%`, background: 'linear-gradient(90deg, #3b82f6, #60a5fa)' }} />
+                                  </div>
+                                )}
+                              </div>
+                              {isExpanded && (
+                                <div className="pattern-detail ml-5 mt-1 mb-2 pl-3" style={{ borderLeft: '2px solid #3b82f6' }}>
+                                  {p.description && (
+                                    <p className="text-[11px] mb-2" style={{ color: '#8899aa' }}>{p.description}</p>
+                                  )}
+                                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Severity:</span>
+                                      <span className="text-[11px] font-semibold" style={{ color: sevColor }}>{p.severity || 'unknown'}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Confidence:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: pct >= 80 ? '#22c55e' : pct >= 50 ? '#eab308' : '#ef4444' }}>{pct}%</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Triggered:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: '#d5dbdb' }}>{p.count}x</span>
+                                    </div>
+                                    {p.consecutive_successes > 0 && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Streak:</span>
+                                        <span className="text-[11px] font-bold" style={{ color: '#22c55e' }}>{p.consecutive_successes}W</span>
+                                      </div>
+                                    )}
+                                    {p.consecutive_failures > 0 && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Streak:</span>
+                                        <span className="text-[11px] font-bold" style={{ color: '#ef4444' }}>{p.consecutive_failures}F</span>
+                                      </div>
+                                    )}
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Fix:</span>
+                                      <span className="text-[11px] font-semibold" style={{ color: p.auto_fix ? '#6ee7b7' : '#8899aa' }}>
+                                        {p.auto_fix ? 'Automated remediation' : 'Manual intervention required'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {pct > 0 && (
+                                    <div className="mt-2">
+                                      <div className="flex items-center gap-2 mb-0.5">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Confidence</span>
+                                        <span className="text-[11px] font-bold" style={{ color: '#d5dbdb' }}>{pct}%</span>
+                                      </div>
+                                      <div className="rounded-sm h-1.5" style={{ background: '#1a2332' }}>
+                                        <div className="h-full rounded-sm" style={{ width: `${pct}%`, background: confidenceBarGradient(pct) }} />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }) : <p className="text-xs" style={{ color: '#5a6a7a' }}>No patterns loaded</p>;
+                      })()}
+                    </div>}
                   </div>
-                  {roi?.avg_agent_fix_seconds && (
-                    <div className="flex justify-between"><span className="text-xs text-gray-500">Avg Fix Time</span><span className="text-sm font-bold">{roi.avg_agent_fix_seconds}s</span></div>
+                </div>
+
+                {/* 2. DIAGNOSE — wider right panel */}
+                <div className="aws-card flex flex-col" style={{ borderTopColor: STAGE_COLORS.diagnose, borderTopWidth: 2, flex: 1, minHeight: 0 }}>
+                  <StageHeader num="2" label="Diagnose" agentKey="diagnostic" color={STAGE_COLORS.diagnose} />
+                  <div className="aws-card-body flex flex-col flex-1 overflow-hidden">
+                    <div className="flex items-center gap-4 mb-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-5xl font-black" style={{ color: STAGE_COLORS.diagnose }}>{totalStates}</span>
+                        <div>
+                          <p className="text-xs uppercase tracking-widest" style={{ color: '#5a6a7a' }}>issues</p>
+                          <p className="text-xs uppercase tracking-widest" style={{ color: '#5a6a7a' }}>detected</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 ml-auto">
+                        {Object.entries(STATE_COLORS).map(([key, color]) => (
+                          <div key={key} className="text-center">
+                            <p className="text-lg font-bold" style={{ color }}>{dist[key] || 0}</p>
+                            <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a6a7a' }}>{key}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="section-toggle text-[10px] uppercase tracking-wider mb-2 pt-2 shrink-0"
+                      style={{ borderTop: '1px solid #2a3344', color: '#5a6a7a' }}
+                      onClick={() => toggleCard('diagnose-list')}>
+                      <span style={{ fontSize: 8 }}>{collapsedCards['diagnose-list'] ? '\u25B6' : '\u25BC'}</span>
+                      Pattern Confidence
+                    </p>
+                    {!collapsedCards['diagnose-list'] && <div className="space-y-2.5 overflow-y-auto scrollbar-dark flex-1" style={{ minHeight: 0 }}>
+                      {patterns.length === 0 ? (
+                        <p className="text-xs py-2" style={{ color: '#5a6a7a' }}>No patterns loaded</p>
+                      ) : patterns.sort((a, b) => (b.learned_confidence || 0) - (a.learned_confidence || 0)).map(p => {
+                        const pct = Math.round((p.learned_confidence || 0) * 100);
+                        const isExp = expandedDiagnose === p.type;
+                        const triggerCount = (kb?.most_triggered || []).find(t => t.type === p.type)?.count || 0;
+                        const sevColor = { critical: '#fca5a5', high: '#fdba74', medium: '#fde047', low: '#93c5fd' }[p.severity] || '#93c5fd';
+                        return (
+                          <div key={p.type}>
+                            <div className={`pattern-row ${isExp ? 'expanded' : ''}`}
+                              onClick={() => setExpandedDiagnose(isExp ? null : p.type)}>
+                              <div className="flex items-center justify-between mb-0.5">
+                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                  <span style={{ color: '#a855f7', fontSize: 10, opacity: 0.5 }}>{isExp ? '\u25BC' : '\u25B6'}</span>
+                                  <span className="text-[12px] truncate" style={{ color: '#b0bec5' }} title={p.description}>
+                                    {p.type.replace(/_/g, ' ')}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] px-1.5 py-0 rounded font-semibold" style={{
+                                    background: p.auto_fix ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.04)',
+                                    color: p.auto_fix ? '#6ee7b7' : '#5a6a7a',
+                                    border: p.auto_fix ? '1px solid rgba(16,185,129,0.2)' : '1px solid #2a3344',
+                                  }}>
+                                    {p.auto_fix ? 'auto' : 'manual'}
+                                  </span>
+                                  {p.consecutive_successes > 0 && <span className="text-[10px] font-bold" style={{ color: '#22c55e' }}>{p.consecutive_successes}W</span>}
+                                  {p.consecutive_failures > 0 && <span className="text-[10px] font-bold" style={{ color: '#ef4444' }}>{p.consecutive_failures}F</span>}
+                                  <span className="text-[13px] font-bold w-[36px] text-right" style={{ color: '#d5dbdb' }}>{pct}%</span>
+                                </div>
+                              </div>
+                              <div className="rounded-sm h-2 ml-4" style={{ background: '#1a2332' }}>
+                                <div className="h-full rounded-sm bar-animate" style={{ width: `${Math.max(pct, 1)}%`, background: confidenceBarGradient(pct) }} />
+                              </div>
+                            </div>
+                            {isExp && (
+                              <div className="pattern-detail ml-5 mt-1 mb-2 pl-3" style={{ borderLeft: '2px solid #a855f7' }}>
+                                {p.description && <p className="text-[11px] mb-2" style={{ color: '#8899aa' }}>{p.description}</p>}
+                                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Severity:</span>
+                                    <span className="text-[11px] font-semibold" style={{ color: sevColor }}>{p.severity || 'unknown'}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Confidence:</span>
+                                    <span className="text-[11px] font-bold" style={{ color: pct >= 80 ? '#22c55e' : pct >= 50 ? '#eab308' : '#ef4444' }}>{pct}%</span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Triggered:</span>
+                                    <span className="text-[11px] font-bold" style={{ color: '#d5dbdb' }}>{triggerCount}x</span>
+                                  </div>
+                                  {p.consecutive_successes > 0 && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Win Streak:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: '#22c55e' }}>{p.consecutive_successes}</span>
+                                    </div>
+                                  )}
+                                  {p.consecutive_failures > 0 && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Fail Streak:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: '#ef4444' }}>{p.consecutive_failures}</span>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Remediation:</span>
+                                    <span className="text-[11px] font-semibold" style={{ color: p.auto_fix ? '#6ee7b7' : '#8899aa' }}>
+                                      {p.auto_fix ? 'Automated' : 'Manual'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* ── ROW 2: REMEDIATE + LEARN ── */}
+              <div style={{ display: 'flex', gap: 8, flex: '1 1 0', minHeight: 0 }}>
+
+              {/* 3. REMEDIATE */}
+              <div className="aws-card flex flex-col" style={{ borderTopColor: STAGE_COLORS.remediate, borderTopWidth: 2, flex: '1.4 1 0', minHeight: 0 }}>
+                <StageHeader num="3" label="Remediate" agentKey="remediation" color={STAGE_COLORS.remediate} />
+                <div className="aws-card-body flex-1 flex flex-col overflow-hidden">
+                  <div className="shrink-0">
+                    <div className="flex items-start gap-5 mb-3">
+                      <div className="relative donut-glow shrink-0">
+                        <svg width="160" height="160" viewBox="0 0 120 120">
+                          <circle cx="60" cy="60" r={radius} fill="none" stroke="#1a2332" strokeWidth={stroke} />
+                          {segments}
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="text-center">
+                            <p className="text-5xl font-black gradient-text-gold">{m?.total_remediated || 0}</p>
+                            <p className="text-[8px] uppercase tracking-widest" style={{ color: '#5a6a7a' }}>remediated</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-2 flex-1">
+                        <div className="flex justify-between items-baseline"><span className="text-[13px]" style={{ color: '#8899aa' }}>Detected</span><span className="text-lg font-bold" style={{ color: '#d5dbdb' }}>{m?.total_detected || 0}</span></div>
+                        <div className="flex justify-between items-baseline"><span className="text-[13px]" style={{ color: '#8899aa' }}>Fixed</span><span className="text-lg font-bold" style={{ color: '#22c55e' }}>{m?.total_remediated || 0}</span></div>
+                        <div className="flex justify-between items-baseline"><span className="text-[13px]" style={{ color: '#8899aa' }}>Failed</span><span className="text-lg font-bold" style={{ color: '#ef4444' }}>{m?.total_failed || 0}</span></div>
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-[13px]" style={{ color: '#8899aa' }}>Success Rate</span>
+                          <span className="text-lg font-bold" style={{ color: (m?.success_rate || 0) >= 80 ? '#22c55e' : '#eab308' }}>{m?.success_rate || 0}%</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-sm h-3 mb-3" style={{ background: '#1a2332' }}>
+                      <div className="h-full rounded-sm bar-animate" style={{
+                        width: `${m?.success_rate || 0}%`,
+                        background: (m?.success_rate || 0) >= 80 ? 'linear-gradient(90deg, #10b981, #34d399)' : 'linear-gradient(90deg, #eab308, #FF9900)',
+                      }} />
+                    </div>
+                  </div>
+                  {m?.by_issue_type && Object.keys(m.by_issue_type).length > 0 && (
+                    <div className="pt-3 flex flex-col flex-1 overflow-hidden" style={{ borderTop: '1px solid #2a3344' }}>
+                      <p className="section-toggle text-[10px] uppercase tracking-wider mb-2 shrink-0"
+                        style={{ color: '#5a6a7a' }}
+                        onClick={() => toggleCard('remediate-list')}>
+                        <span style={{ fontSize: 8 }}>{collapsedCards['remediate-list'] ? '\u25B6' : '\u25BC'}</span>
+                        By Issue Type
+                      </p>
+                      {!collapsedCards['remediate-list'] && <div className="space-y-0.5 overflow-y-auto scrollbar-dark flex-1" style={{ minHeight: 0 }}>
+                        {Object.entries(m.by_issue_type).map(([type, info]) => {
+                          const isExp = expandedRemediate === type;
+                          const patternInfo = patterns.find(p => p.type === type);
+                          return (
+                            <div key={type}>
+                              <div className={`pattern-row ${isExp ? 'expanded' : ''}`}
+                                onClick={() => setExpandedRemediate(isExp ? null : type)}>
+                                <div className="flex justify-between items-center mb-0.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <span style={{ color: '#FF9900', fontSize: 10, opacity: 0.5 }}>{isExp ? '\u25BC' : '\u25B6'}</span>
+                                    <span className="text-[12px]" style={{ color: '#b0bec5' }}>{type.replace(/_/g, ' ')}</span>
+                                  </div>
+                                  <span className="text-[12px]" style={{ color: '#8899aa' }}>
+                                    <span style={{ color: '#22c55e' }}>{info.success || 0}</span>
+                                    {(info.failed || 0) > 0 && <span style={{ color: '#ef4444' }}> / {info.failed}</span>}
+                                  </span>
+                                </div>
+                                <div className="rounded-sm h-1.5 ml-4" style={{ background: '#1a2332' }}>
+                                  <div className="h-full rounded-sm bar-animate" style={{
+                                    width: `${info.rate || 0}%`,
+                                    background: 'linear-gradient(90deg, #FF9900, #FFCC66)',
+                                  }} />
+                                </div>
+                              </div>
+                              {isExp && (
+                                <div className="pattern-detail ml-5 mt-1 mb-2 pl-3" style={{ borderLeft: '2px solid #FF9900' }}>
+                                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Success:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: '#22c55e' }}>{info.success || 0}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Failed:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: '#ef4444' }}>{info.failed || 0}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Rate:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: (info.rate || 0) >= 80 ? '#22c55e' : '#eab308' }}>{info.rate || 0}%</span>
+                                    </div>
+                                    {patternInfo && (
+                                      <>
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Fix:</span>
+                                          <span className="text-[11px] font-semibold" style={{ color: patternInfo.auto_fix ? '#6ee7b7' : '#8899aa' }}>
+                                            {patternInfo.auto_fix ? 'Automated' : 'Manual'}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Confidence:</span>
+                                          <span className="text-[11px] font-bold" style={{ color: '#d5dbdb' }}>{Math.round((patternInfo.learned_confidence || 0) * 100)}%</span>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                  {patternInfo?.description && (
+                                    <p className="text-[11px] mt-1.5" style={{ color: '#8899aa' }}>{patternInfo.description}</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>}
+                    </div>
                   )}
                 </div>
               </div>
 
-              {/* Donut chart */}
-              <div className="col-span-2 bg-white border border-gray-200 rounded-lg p-4 shadow-sm flex flex-col items-center justify-center">
-                {totalStates > 0 ? (
-                  <>
-                    <div className="relative">
-                      <svg width="100" height="100" viewBox="0 0 100 100">{segments}</svg>
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="text-center"><p className="text-lg font-bold">{totalStates}</p><p className="text-[10px] text-gray-400">issues</p></div>
-                      </div>
+              {/* 4. LEARN */}
+              <div className="aws-card flex flex-col" style={{ borderTopColor: STAGE_COLORS.learn, borderTopWidth: 2, flex: '1 1 0', minHeight: 0 }}>
+                <StageHeader num="4" label="Learn" agentKey="learning" color={STAGE_COLORS.learn} />
+                <div className="aws-card-body flex-1 flex flex-col overflow-hidden">
+                  {/* Learn Hero */}
+                  <div className="flex items-center gap-3 mb-3 shrink-0">
+                    <span className="text-5xl font-black" style={{ color: '#d5dbdb' }}>{kb?.total_outcomes || 0}</span>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest" style={{ color: '#5a6a7a' }}>outcomes</p>
+                      <p className="text-xs uppercase tracking-widest" style={{ color: '#5a6a7a' }}>learned</p>
                     </div>
-                    <div className="flex flex-wrap justify-center gap-x-2 gap-y-0.5 mt-2">
-                      {Object.entries(STATE_COLORS).map(([key, color]) => {
-                        const c = dist[key] || 0;
-                        if (c === 0) return null;
-                        return <div key={key} className="flex items-center gap-1"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} /><span className="text-[10px] text-gray-600">{key} {c}</span></div>;
-                      })}
+                    <div className="flex flex-wrap gap-1.5 ml-auto">
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.2)', color: '#6ee7b7' }}>
+                        {m?.success_rate || 0}% success
+                      </span>
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid #2a3344', color: '#6b7f8e' }}>
+                        {patterns.filter(p => (p.consecutive_successes || 0) > 0 || (p.consecutive_failures || 0) > 0).length} adjusted
+                      </span>
                     </div>
-                  </>
-                ) : (
-                  <p className="text-xs text-gray-400">No issues tracked</p>
-                )}
-              </div>
-
-              {/* Confidence scores */}
-              <div className="col-span-7 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                <p className="text-sm font-semibold text-gray-700 mb-2">Pattern Confidence</p>
-                <div className="space-y-1.5 max-h-[180px] overflow-y-auto">
-                  {patterns.length === 0 ? (
-                    <p className="text-xs text-gray-400 text-center py-4">No patterns loaded</p>
-                  ) : patterns.sort((a, b) => (b.learned_confidence || 0) - (a.learned_confidence || 0)).map(p => {
-                    const pct = Math.round((p.learned_confidence || 0) * 100);
-                    const barColor = pct >= 80 ? 'bg-green-500' : pct >= 50 ? 'bg-yellow-400' : 'bg-red-400';
-                    return (
-                      <div key={p.type} className="flex items-center gap-2">
-                        <span className="text-[11px] text-gray-700 min-w-[180px] truncate" title={p.description}>{p.type.replace(/_/g, ' ')}</span>
-                        <div className="flex-1 bg-gray-100 rounded-full h-1.5"><div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} /></div>
-                        <span className="text-[11px] font-semibold text-gray-600 w-[30px] text-right">{pct}%</span>
-                        <span className={`text-[10px] px-1 py-0.5 rounded ${p.auto_fix ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                          {p.auto_fix ? 'auto' : 'manual'}
-                        </span>
-                        {p.consecutive_successes > 0 && <span className="text-[10px] text-green-600">{p.consecutive_successes}W</span>}
-                        {p.consecutive_failures > 0 && <span className="text-[10px] text-red-600">{p.consecutive_failures}F</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Row 3: KB health + Trend + Recent activity */}
-            <div className="grid grid-cols-12 gap-3">
-              {/* Knowledge base */}
-              <div className="col-span-3 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                <p className="text-sm font-semibold text-gray-700 mb-2">Knowledge Base</p>
-                <div className="space-y-1.5">
-                  <div className="flex justify-between"><span className="text-xs text-gray-500">Patterns</span><span className="text-sm font-bold">{kb?.total_patterns || 0}</span></div>
-                  <div className="flex justify-between"><span className="text-xs text-gray-500">Auto-fix</span><span className="text-sm font-bold text-green-600">{kb?.auto_fix_enabled || 0}</span></div>
-                  <div className="flex justify-between"><span className="text-xs text-gray-500">Manual</span><span className="text-sm font-bold text-gray-600">{kb?.auto_fix_disabled || 0}</span></div>
-                  <div className="flex justify-between"><span className="text-xs text-gray-500">Outcomes</span><span className="text-sm font-bold text-purple-600">{kb?.total_outcomes || 0}</span></div>
-                </div>
-                {/* Severity badges */}
-                {kb?.by_severity && (
-                  <div className="flex flex-wrap gap-1 mt-3">
-                    {Object.entries(kb.by_severity).map(([sev, count]) => (
-                      <span key={sev} className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                        sev === 'critical' ? 'bg-red-100 text-red-700' : sev === 'high' ? 'bg-orange-100 text-orange-700' : sev === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
-                      }`}>{sev} {count}</span>
-                    ))}
                   </div>
-                )}
-                {/* Coverage gaps */}
-                {kb?.never_triggered?.length > 0 && (
-                  <div className="mt-3 pt-2 border-t border-gray-100">
-                    <p className="text-[10px] text-yellow-600 font-medium">{kb.never_triggered.length} patterns never triggered</p>
-                  </div>
-                )}
-              </div>
 
-              {/* Trend + top triggers */}
-              <div className="col-span-4 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                <p className="text-sm font-semibold text-gray-700 mb-2">Top Triggers & Trend</p>
-                {/* Top triggered patterns */}
-                {topPatterns.length > 0 && (
-                  <div className="space-y-1.5 mb-3">
-                    {topPatterns.slice(0, 5).map(p => {
-                      const maxCount = topPatterns[0]?.count || 1;
-                      return (
-                        <div key={p.type} className="flex items-center gap-2">
-                          <span className="text-[11px] text-gray-700 min-w-[150px] truncate">{p.type.replace(/_/g, ' ')}</span>
-                          <div className="flex-1 bg-gray-100 rounded-full h-1.5"><div className="h-full rounded-full bg-purple-500" style={{ width: `${(p.count / maxCount) * 100}%` }} /></div>
-                          <span className="text-[11px] font-semibold text-gray-600 w-[24px] text-right">{p.count}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                {/* Monthly cost trend */}
-                {roi?.cost_trend?.length > 0 && (
-                  <div className="border-t border-gray-100 pt-2">
-                    <p className="text-[10px] text-gray-400 mb-1">Monthly Cost Avoided</p>
-                    {roi.cost_trend.map(ct => (
-                      <div key={ct.month} className="flex items-center gap-2 mb-1">
-                        <span className="text-[11px] text-gray-600 w-[50px]">{ct.month}</span>
-                        <div className="flex-1 bg-gray-100 rounded-full h-2">
-                          <div className="h-full rounded-full bg-green-500" style={{ width: `${Math.min((ct.cost_avoided / Math.max(...roi.cost_trend.map(c => c.cost_avoided), 1)) * 100, 100)}%` }} />
-                        </div>
-                        <span className="text-[11px] font-bold text-green-600 w-[45px] text-right">${ct.cost_avoided}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Recent activity */}
-              <div className="col-span-5 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                <p className="text-sm font-semibold text-gray-700 mb-2">Recent Activity ({events.length})</p>
-                {events.length === 0 ? (
-                  <p className="text-xs text-gray-400 text-center py-4">No recent agent activity</p>
-                ) : (
-                  <div className="max-h-[180px] overflow-y-auto space-y-1.5">
-                    {events.slice(0, 20).map((e, i) => (
-                      <div key={i} className="flex items-center gap-2 text-[11px]">
-                        <span className="text-gray-400 font-mono w-[110px] shrink-0">
-                          {e.timestamp ? new Date(e.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
-                        </span>
-                        <span className="text-purple-700 bg-purple-50 px-1 py-0.5 rounded truncate max-w-[140px]">
-                          {(e.issue_type || '').replace(/_/g, ' ')}
-                        </span>
-                        {e.state && (
-                          <span className="px-1 py-0.5 rounded text-[10px] font-medium" style={{
-                            backgroundColor: STATE_COLORS[e.state] ? `${STATE_COLORS[e.state]}20` : '#f3f4f6',
-                            color: STATE_COLORS[e.state] || '#6b7280',
-                          }}>{e.state}</span>
+                  {/* Scrollable list content */}
+                  <div className="flex-1 overflow-y-auto scrollbar-dark" style={{ minHeight: 0 }}>
+                  {/* Confidence Learned — what the agent learned */}
+                  {patterns.length > 0 && (
+                    <div className="mb-3 pb-3" style={{ borderBottom: '1px solid #2a3344' }}>
+                      <p className="section-toggle text-xs font-semibold uppercase tracking-wider mb-2"
+                        style={{ color: '#5a6a7a' }}
+                        onClick={() => toggleCard('learn-confidence')}>
+                        <span style={{ fontSize: 8 }}>{collapsedCards['learn-confidence'] ? '\u25B6' : '\u25BC'}</span>
+                        Confidence Learned
+                      </p>
+                      {!collapsedCards['learn-confidence'] && <div className="space-y-1">
+                        {patterns
+                          .filter(p => (p.consecutive_successes || 0) > 0 || (p.consecutive_failures || 0) > 0 || (p.learned_confidence || 0) > 0)
+                          .sort((a, b) => (b.learned_confidence || 0) - (a.learned_confidence || 0))
+                          .map(p => {
+                            const pct = Math.round((p.learned_confidence || 0) * 100);
+                            const learnKey = `learn-${p.type}`;
+                            const isExp = expandedLearn === learnKey;
+                            const streak = (p.consecutive_successes || 0) > 0
+                              ? { count: p.consecutive_successes, label: 'wins', color: '#22c55e', icon: '\u2191' }
+                              : (p.consecutive_failures || 0) > 0
+                                ? { count: p.consecutive_failures, label: 'fails', color: '#ef4444', icon: '\u2193' }
+                                : null;
+                            return (
+                              <div key={p.type}>
+                                <div className={`pattern-row ${isExp ? 'expanded' : ''}`}
+                                  onClick={() => setExpandedLearn(isExp ? null : learnKey)}>
+                                  <div className="flex justify-between items-center mb-0.5">
+                                    <div className="flex items-center gap-1.5" style={{ maxWidth: '55%' }}>
+                                      <span style={{ color: '#10b981', fontSize: 10, opacity: 0.5 }}>{isExp ? '\u25BC' : '\u25B6'}</span>
+                                      <span className="text-sm truncate" style={{ color: '#b0bec5' }}>{p.type.replace(/_/g, ' ')}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      {streak && (
+                                        <span className="text-xs font-bold" style={{ color: streak.color }}>
+                                          {streak.icon}{streak.count} {streak.label}
+                                        </span>
+                                      )}
+                                      <span className="text-sm font-bold" style={{ color: pct >= 80 ? '#22c55e' : pct >= 50 ? '#eab308' : '#ef4444' }}>{pct}%</span>
+                                    </div>
+                                  </div>
+                                  <div className="rounded-sm h-1.5 ml-4" style={{ background: '#1a2332' }}>
+                                    <div className="h-full rounded-sm bar-animate" style={{ width: `${pct}%`, background: confidenceBarGradient(pct) }} />
+                                  </div>
+                                </div>
+                                {isExp && (
+                                  <div className="pattern-detail ml-5 mt-1 mb-2 pl-3" style={{ borderLeft: '2px solid #10b981' }}>
+                                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Confidence:</span>
+                                        <span className="text-[11px] font-bold" style={{ color: '#d5dbdb' }}>{pct}%</span>
+                                      </div>
+                                      {(p.consecutive_successes || 0) > 0 && (
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Win streak:</span>
+                                          <span className="text-[11px] font-bold" style={{ color: '#22c55e' }}>{p.consecutive_successes} (confidence +0.05 per 3)</span>
+                                        </div>
+                                      )}
+                                      {(p.consecutive_failures || 0) > 0 && (
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Fail streak:</span>
+                                          <span className="text-[11px] font-bold" style={{ color: '#ef4444' }}>{p.consecutive_failures} (confidence -0.1 per 2)</span>
+                                        </div>
+                                      )}
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Auto-fix:</span>
+                                        <span className="text-[11px] font-semibold" style={{ color: p.auto_fix ? '#6ee7b7' : '#8899aa' }}>
+                                          {p.auto_fix ? 'Enabled' : 'Requires review'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <p className="text-[11px] mt-1.5" style={{ color: '#6b7f8e' }}>
+                                      {pct >= 80 ? 'High confidence — agent has learned this pattern reliably resolves with current remediation strategy.'
+                                        : pct >= 50 ? 'Moderate confidence — agent is still learning, more outcomes needed to stabilize.'
+                                        : pct > 0 ? 'Low confidence — recent failures have reduced trust. Agent will re-diagnose before remediating.'
+                                        : 'No confidence data yet — awaiting first remediation outcome.'}
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        {patterns.filter(p => (p.consecutive_successes || 0) > 0 || (p.consecutive_failures || 0) > 0 || (p.learned_confidence || 0) > 0).length === 0 && (
+                          <p className="text-xs py-1" style={{ color: '#5a6a7a' }}>No confidence adjustments yet — awaiting remediation outcomes</p>
                         )}
-                        {e.confidence > 0 && <span className="text-gray-400 ml-auto">{Math.round(e.confidence * 100)}%</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+                      </div>}
+                    </div>
+                  )}
 
-            {/* Row 4: Agent vs Manual comparison (compact) */}
-            {roi?.avg_agent_fix_seconds && (
-              <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-                <div className="flex items-center gap-6">
-                  <span className="text-sm font-semibold text-gray-700">Agent vs Manual:</span>
-                  <div className="flex items-center gap-2 flex-1">
-                    <span className="text-xs text-gray-500 w-[50px]">Agent</span>
-                    <div className="flex-1 bg-gray-100 rounded-full h-2.5"><div className="h-full rounded-full bg-green-500" style={{ width: '3%' }} /></div>
-                    <span className="text-xs font-bold text-green-600 w-[40px]">{roi.avg_agent_fix_seconds}s</span>
-                  </div>
-                  <div className="flex items-center gap-2 flex-1">
-                    <span className="text-xs text-gray-500 w-[50px]">Manual</span>
-                    <div className="flex-1 bg-gray-100 rounded-full h-2.5"><div className="h-full rounded-full bg-red-500" style={{ width: '100%' }} /></div>
-                    <span className="text-xs font-bold text-red-600 w-[40px]">~45m</span>
-                  </div>
-                  <span className="text-xs text-purple-600 font-bold">~{Math.round(2700 / roi.avg_agent_fix_seconds)}x faster</span>
+                  {/* Remediation Timeline */}
+                  {events.length > 0 && (
+                    <div className="pt-3" style={{ borderTop: '1px solid #2a3344' }}>
+                      <p className="section-toggle text-xs font-semibold uppercase tracking-wider mb-2"
+                        style={{ color: '#5a6a7a' }}
+                        onClick={() => toggleCard('learn-timeline')}>
+                        <span style={{ fontSize: 8 }}>{collapsedCards['learn-timeline'] ? '\u25B6' : '\u25BC'}</span>
+                        Remediation Timeline
+                      </p>
+                      {!collapsedCards['learn-timeline'] && <div className="space-y-0.5">
+                        {events.slice(0, 8).map((e, i) => {
+                          const actKey = `act-${i}`;
+                          const isExp = expandedLearn === actKey;
+                          const stateColor = STATE_COLORS[e.state] || '#2a3344';
+                          const dotColor = e.state === 'resolved' ? '#22c55e' : e.state === 'failed' ? '#ef4444' : '#f97316';
+                          const patternInfo = patterns.find(p => p.type === e.issue_type);
+                          const duration = e.duration || (e.state === 'resolved' ? '~2m' : e.state === 'failed' ? '~3m' : '\u2014');
+                          const stateFlow = ['detected', 'diagnosing', e.state].filter(Boolean);
+                          return (
+                            <div key={i}>
+                              <div className={`pattern-row ${isExp ? 'expanded' : ''}`}
+                                onClick={() => setExpandedLearn(isExp ? null : actKey)}>
+                                <div className="activity-row flex items-center gap-2 text-[12px] py-0.5"
+                                  style={{ borderLeftColor: stateColor }}>
+                                  <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: dotColor, display: 'inline-block', flexShrink: 0 }} />
+                                  <span className="truncate" style={{ color: '#FFCC66', flex: 1 }}>{(e.issue_type || '').replace(/_/g, ' ')}</span>
+                                  <span className="flex items-center gap-0.5 shrink-0">
+                                    {stateFlow.map((st, si) => (
+                                      <React.Fragment key={si}>
+                                        {si > 0 && <span style={{ color: '#2a3344', fontSize: 10 }}>{'\u2192'}</span>}
+                                        <span className="text-[10px] font-semibold" style={{ color: STATE_COLORS[st] || '#5a6a7a' }}>{st}</span>
+                                      </React.Fragment>
+                                    ))}
+                                  </span>
+                                  <span className="text-[10px] font-mono shrink-0" style={{ color: '#5a6a7a' }}>{duration}</span>
+                                </div>
+                              </div>
+                              {isExp && (
+                                <div className="pattern-detail ml-5 mt-1 mb-2 pl-3" style={{ borderLeft: `2px solid ${stateColor}` }}>
+                                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>State:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: stateColor }}>{e.state || 'unknown'}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Issue:</span>
+                                      <span className="text-[11px] font-semibold" style={{ color: '#d5dbdb' }}>{(e.issue_type || '').replace(/_/g, ' ')}</span>
+                                    </div>
+                                    {e.cluster && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Cluster:</span>
+                                        <span className="text-[11px] font-semibold" style={{ color: '#00bcd4' }}>{e.cluster}</span>
+                                      </div>
+                                    )}
+                                    {e.agent && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Agent:</span>
+                                        <span className="text-[11px] font-semibold" style={{ color: '#a855f7' }}>{e.agent}</span>
+                                      </div>
+                                    )}
+                                    {patternInfo && (
+                                      <>
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Severity:</span>
+                                          <span className="text-[11px] font-bold" style={{ color: { critical: '#fca5a5', high: '#fdba74', medium: '#fde047', low: '#93c5fd' }[patternInfo.severity] || '#93c5fd' }}>{patternInfo.severity}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Confidence:</span>
+                                          <span className="text-[11px] font-bold" style={{ color: '#d5dbdb' }}>{Math.round((patternInfo.learned_confidence || 0) * 100)}%</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Fix:</span>
+                                          <span className="text-[11px] font-semibold" style={{ color: patternInfo.auto_fix ? '#6ee7b7' : '#8899aa' }}>
+                                            {patternInfo.auto_fix ? 'Automated' : 'Manual'}
+                                          </span>
+                                        </div>
+                                      </>
+                                    )}
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Duration:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: '#d5dbdb' }}>{duration}</span>
+                                    </div>
+                                  </div>
+                                  {patternInfo?.description && (
+                                    <p className="text-[11px] mt-1.5" style={{ color: '#6b7f8e' }}>{patternInfo.description}</p>
+                                  )}
+                                  {e.timestamp && (
+                                    <p className="text-[10px] mt-1" style={{ color: '#4a5568' }}>{e.timestamp}</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>}
+                    </div>
+                  )}
+                  </div>{/* end scrollable list content */}
                 </div>
               </div>
-            )}
+
+              </div>{/* end ROW 2 */}
+
+            </div>
           </div>
         )}
       </div>
