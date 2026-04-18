@@ -116,24 +116,28 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
                     )
                 return
             if diagnosis and diagnosis.get("confidence", 0) >= 0.7:
-                success, message = remediation.remediate(diagnosis)
+                try:
+                    success, message = remediation.remediate(diagnosis)
+                except Exception as e:
+                    success, message = False, f"Remediation error: {e}"
                 remediation_msg = message
                 _duration = _time.time() - _start
-                # Record outcome for learning agent
-                learning.record_outcome(
-                    issue_type=issue_type,
-                    diagnosis=diagnosis,
-                    fix_applied=diagnosis.get("recommended_fix", ""),
-                    success=success,
-                    resource_key=resource_key,
-                    details=message,
-                    duration_seconds=_duration,
-                )
+                try:
+                    learning.record_outcome(
+                        issue_type=issue_type,
+                        diagnosis=diagnosis,
+                        fix_applied=diagnosis.get("recommended_fix", ""),
+                        success=success,
+                        resource_key=resource_key,
+                        details=message,
+                        duration_seconds=_duration,
+                    )
+                except Exception:
+                    pass
                 if success:
                     monitor.mark_issue_resolved(issue_type, resource_key)
                 else:
                     monitor.mark_issue_failed(issue_type, resource_key)
-                # Log agent action to job logs so users can see it
                 if job_id in jobs:
                     action_icon = "✅" if success else "⚠️"
                     jobs[job_id].setdefault("logs", []).append(
@@ -4481,19 +4485,27 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
             return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
+        # Credential keys go in env (not CLI args) to avoid ps exposure
+        _sensitive_keys = {
+            "aws_access_key_id", "aws_secret_access_key",
+            "ocm_client_id", "ocm_client_secret",
+        }
+
+        env = os.environ.copy()
+        env["KUBECONFIG"] = job_kubeconfig if job_kubeconfig else os.environ.get("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+        env["PYTHONUNBUFFERED"] = "1"
+
         for key, value in extra_vars.items():
             snake_key = camel_to_snake(key)
             str_value = str(value).strip() if value is not None else ""
-            cmd.extend(["-e", f"{snake_key}={str_value}"])
+            if snake_key.lower() in _sensitive_keys:
+                env[snake_key.upper()] = str_value
+            else:
+                cmd.extend(["-e", f"{snake_key}={str_value}"])
 
         print(f"[Playbook] Running: {' '.join(cmd)}")
         jobs[job_id]["progress"] = 30
         jobs[job_id]["message"] = "Executing ansible playbook"
-
-        env = os.environ.copy()
-        # Use the isolated kubeconfig if we created one, otherwise default
-        env["KUBECONFIG"] = job_kubeconfig if job_kubeconfig else os.environ.get("KUBECONFIG", os.path.expanduser("~/.kube/config"))
-        env["PYTHONUNBUFFERED"] = "1"
 
         process = subprocess.Popen(
             cmd, cwd=project_root,
