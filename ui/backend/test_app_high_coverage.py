@@ -1366,7 +1366,11 @@ class TestMiscEndpoints:
 
 
 class TestRunMinikubeInitPlaybook:
-    """Test run_minikube_init_playbook directly (sync function)"""
+    """Test run_minikube_init_playbook directly (sync function).
+
+    The function delegates to minikube_ops.configure_capi(), so we mock that
+    instead of low-level subprocess calls.
+    """
 
     def _make_job(self, job_id):
         app_module.jobs[job_id] = {
@@ -1374,76 +1378,53 @@ class TestRunMinikubeInitPlaybook:
             "message": "", "logs": [], "description": "test",
         }
 
-    @patch("subprocess.Popen")
-    @patch("subprocess.run")
-    @patch("os.path.exists", return_value=False)
-    def test_success(self, mock_exists, mock_run, mock_popen):
+    @patch("app.minikube_ops.configure_capi")
+    def test_success(self, mock_configure):
         job_id = "test-mk-init-1"
         self._make_job(job_id)
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        mock_process = MagicMock()
-        mock_process.stdout = iter(["TASK [install] ***\n", "ok: [localhost]\n"])
-        mock_process.stderr = MagicMock(read=MagicMock(return_value=""))
-        mock_process.wait.return_value = 0
-        mock_popen.return_value = mock_process
+        mock_configure.return_value = {"success": True, "message": "CAPI/CAPA configured"}
 
         app_module.run_minikube_init_playbook("/tmp/playbook.yml", "sat-minikube", job_id)
         assert app_module.jobs[job_id]["status"] == "completed"
         del app_module.jobs[job_id]
 
-    @patch("subprocess.run")
-    @patch("os.path.exists", return_value=False)
-    def test_context_switch_fails(self, mock_exists, mock_run):
+    @patch("app.minikube_ops.configure_capi")
+    def test_context_switch_fails(self, mock_configure):
         job_id = "test-mk-init-2"
         self._make_job(job_id)
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="context not found")
+        mock_configure.return_value = {"success": False, "message": "Failed to switch context to 'bad-cluster'"}
 
         app_module.run_minikube_init_playbook("/tmp/playbook.yml", "bad-cluster", job_id)
         assert app_module.jobs[job_id]["status"] == "failed"
         assert "context" in app_module.jobs[job_id]["message"].lower()
         del app_module.jobs[job_id]
 
-    @patch("subprocess.Popen")
-    @patch("subprocess.run")
-    @patch("os.path.exists", return_value=False)
-    def test_playbook_fails(self, mock_exists, mock_run, mock_popen):
+    @patch("app.minikube_ops.configure_capi")
+    def test_playbook_fails(self, mock_configure):
         job_id = "test-mk-init-3"
         self._make_job(job_id)
-        mock_run.return_value = MagicMock(returncode=0)
-        mock_process = MagicMock()
-        mock_process.stdout = iter(["TASK [fail] ***\n"])
-        mock_process.stderr = MagicMock(read=MagicMock(return_value="ERROR"))
-        mock_process.wait.return_value = 1
-        mock_popen.return_value = mock_process
+        mock_configure.return_value = {"success": False, "message": "Playbook failed with exit code 1"}
 
         app_module.run_minikube_init_playbook("/tmp/playbook.yml", "sat-minikube", job_id)
         assert app_module.jobs[job_id]["status"] == "failed"
         del app_module.jobs[job_id]
 
-    @patch("subprocess.Popen")
-    @patch("subprocess.run")
-    @patch("os.path.exists", return_value=False)
-    def test_timeout(self, mock_exists, mock_run, mock_popen):
+    @patch("app.minikube_ops.configure_capi")
+    def test_timeout(self, mock_configure):
         job_id = "test-mk-init-4"
         self._make_job(job_id)
-        mock_run.return_value = MagicMock(returncode=0)
-        mock_process = MagicMock()
-        mock_process.stdout = iter([])
-        mock_process.stderr = MagicMock(read=MagicMock(return_value=""))
-        mock_process.wait.side_effect = subprocess.TimeoutExpired(cmd="ansible", timeout=600)
-        mock_popen.return_value = mock_process
+        mock_configure.return_value = {"success": False, "message": "CAPI configuration timed out after 10 minutes"}
 
         app_module.run_minikube_init_playbook("/tmp/playbook.yml", "sat-minikube", job_id)
         assert app_module.jobs[job_id]["status"] == "failed"
         assert "timed out" in app_module.jobs[job_id]["message"].lower()
         del app_module.jobs[job_id]
 
-    @patch("subprocess.run")
-    @patch("os.path.exists", return_value=False)
-    def test_exception(self, mock_exists, mock_run):
+    @patch("app.minikube_ops.configure_capi")
+    def test_exception(self, mock_configure):
         job_id = "test-mk-init-5"
         self._make_job(job_id)
-        mock_run.side_effect = Exception("unexpected error")
+        mock_configure.side_effect = Exception("unexpected error")
 
         app_module.run_minikube_init_playbook("/tmp/playbook.yml", "sat-minikube", job_id)
         assert app_module.jobs[job_id]["status"] == "failed"
@@ -2149,7 +2130,11 @@ class TestCreateRosaCluster:
 
 
 class TestRunMinikubeCreate:
-    """Test the _run_minikube_create sync function directly"""
+    """Test the _run_minikube_create sync function directly.
+
+    _run_minikube_create now delegates to minikube_ops.create_profile(),
+    so we mock that instead of subprocess.
+    """
 
     def _make_job(self, job_id):
         app_module.jobs[job_id] = {
@@ -2157,84 +2142,52 @@ class TestRunMinikubeCreate:
             "message": "", "logs": [],
         }
 
-    @patch("subprocess.run")
-    @patch("subprocess.Popen")
-    def test_success(self, mock_popen, mock_run):
+    @patch("minikube_ops.create_profile")
+    def test_success(self, mock_create):
         job_id = "test-mk-create-1"
         self._make_job(job_id)
-
-        mock_process = MagicMock()
-        mock_process.stdout.readline.side_effect = ["Starting minikube\n", "Done\n", ""]
-        mock_process.wait.return_value = None
-        mock_process.returncode = 0
-        mock_popen.return_value = mock_process
-
-        # kubectl verify
-        mock_run.return_value = MagicMock(returncode=0, stdout="cluster-info", stderr="")
+        mock_create.return_value = {"success": True, "verified": True, "message": "Created"}
 
         app_module._run_minikube_create("test-mk", job_id)
         assert app_module.jobs[job_id]["status"] == "completed"
-        del app_module.jobs[job_id]
 
-    @patch("subprocess.Popen")
-    def test_failure(self, mock_popen):
+    @patch("minikube_ops.create_profile")
+    def test_failure(self, mock_create):
         job_id = "test-mk-create-2"
         self._make_job(job_id)
-
-        mock_process = MagicMock()
-        mock_process.stdout.readline.side_effect = ["Error\n", ""]
-        mock_process.wait.return_value = None
-        mock_process.returncode = 1
-        mock_popen.return_value = mock_process
+        mock_create.return_value = {"success": False, "message": "Creation failed"}
 
         app_module._run_minikube_create("test-mk", job_id)
         assert app_module.jobs[job_id]["status"] == "failed"
-        del app_module.jobs[job_id]
 
-    @patch("subprocess.Popen")
-    def test_timeout(self, mock_popen):
+    @patch("minikube_ops.create_profile")
+    def test_timeout(self, mock_create):
         job_id = "test-mk-create-3"
         self._make_job(job_id)
-
-        mock_process = MagicMock()
-        mock_process.stdout.readline.side_effect = [""]
-        mock_process.wait.side_effect = subprocess.TimeoutExpired(cmd="minikube", timeout=300)
-        mock_popen.return_value = mock_process
+        mock_create.return_value = {"success": False, "message": "Cluster creation timed out after 5 minutes"}
 
         app_module._run_minikube_create("test-mk", job_id)
         assert app_module.jobs[job_id]["status"] == "failed"
         assert "timed out" in app_module.jobs[job_id]["message"].lower()
-        del app_module.jobs[job_id]
 
-    @patch("subprocess.Popen")
-    def test_exception(self, mock_popen):
+    @patch("minikube_ops.create_profile")
+    def test_exception(self, mock_create):
         job_id = "test-mk-create-4"
         self._make_job(job_id)
-
-        mock_popen.side_effect = FileNotFoundError("minikube not found")
+        mock_create.side_effect = FileNotFoundError("minikube not found")
 
         app_module._run_minikube_create("test-mk", job_id)
         assert app_module.jobs[job_id]["status"] == "failed"
-        del app_module.jobs[job_id]
 
-    @patch("subprocess.run")
-    @patch("subprocess.Popen")
-    def test_kubectl_verify_fails(self, mock_popen, mock_run):
+    @patch("minikube_ops.create_profile")
+    def test_kubectl_verify_fails(self, mock_create):
         job_id = "test-mk-create-5"
         self._make_job(job_id)
-
-        mock_process = MagicMock()
-        mock_process.stdout.readline.side_effect = ["Done\n", ""]
-        mock_process.wait.return_value = None
-        mock_process.returncode = 0
-        mock_popen.return_value = mock_process
-
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
+        mock_create.return_value = {"success": True, "verified": False, "message": "Created"}
 
         app_module._run_minikube_create("test-mk", job_id)
         assert app_module.jobs[job_id]["status"] == "completed"
         assert any("Warning" in log for log in app_module.jobs[job_id]["logs"])
-        del app_module.jobs[job_id]
 
 
 # =============================================
@@ -3034,48 +2987,55 @@ class TestRunPlaybookInThreadSidecar:
 
 
 class TestListMinikubeClustersDeep:
-    """Test deeper branches of /api/minikube/clusters"""
+    """Test deeper branches of /api/minikube/list-clusters.
 
-    def test_minikube_not_installed(self):
-        app_module.minikube_clusters_cache["timestamp"] = 0
-        with patch("app.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
-            resp = client.get("/api/minikube/list-clusters")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data.get("minikube_installed") is False
+    The endpoint now delegates to minikube_ops.list_profiles(),
+    so we mock that function directly.
+    """
 
-    def test_no_profiles(self):
-        app_module.minikube_clusters_cache["timestamp"] = 0
-        with patch("app.subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="minikube v1.32"),  # version check
-                MagicMock(returncode=1, stdout="", stderr="no profiles"),  # profile list
-            ]
-            resp = client.get("/api/minikube/list-clusters")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data.get("clusters") == []
+    @patch("minikube_ops.list_profiles")
+    def test_minikube_not_installed(self, mock_list):
+        mock_list.return_value = {
+            "clusters": [], "minikube_installed": False,
+            "message": "Minikube is not installed",
+        }
+        resp = client.get("/api/minikube/list-clusters")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("minikube_installed") is False
 
-    def test_json_decode_error(self):
-        app_module.minikube_clusters_cache["timestamp"] = 0
-        with patch("app.subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="minikube v1.32"),
-                MagicMock(returncode=0, stdout="not-json{{{"),  # bad json
-            ]
-            resp = client.get("/api/minikube/list-clusters")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert "parse" in data.get("message", "").lower() or data.get("clusters") == []
+    @patch("minikube_ops.list_profiles")
+    def test_no_profiles(self, mock_list):
+        mock_list.return_value = {
+            "clusters": [], "minikube_installed": True,
+            "message": "No Minikube clusters found",
+        }
+        resp = client.get("/api/minikube/list-clusters")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("clusters") == []
 
-    def test_exception_handling(self):
-        app_module.minikube_clusters_cache["timestamp"] = 0
-        with patch("app.subprocess.run", side_effect=Exception("minikube crashed")):
-            resp = client.get("/api/minikube/list-clusters")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data.get("minikube_installed") is False
+    @patch("minikube_ops.list_profiles")
+    def test_json_decode_error(self, mock_list):
+        mock_list.return_value = {
+            "clusters": [], "minikube_installed": True,
+            "message": "Failed to parse minikube profile list",
+        }
+        resp = client.get("/api/minikube/list-clusters")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "parse" in data.get("message", "").lower() or data.get("clusters") == []
+
+    @patch("minikube_ops.list_profiles")
+    def test_exception_handling(self, mock_list):
+        mock_list.return_value = {
+            "clusters": [], "minikube_installed": False,
+            "message": "Error listing Minikube clusters: minikube crashed",
+        }
+        resp = client.get("/api/minikube/list-clusters")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("minikube_installed") is False
 
 
 # =============================================
@@ -3084,39 +3044,52 @@ class TestListMinikubeClustersDeep:
 
 
 class TestVerifyMinikubeDeep:
-    """Test verify_minikube_cluster deeper branches"""
+    """Test verify_minikube_cluster deeper branches.
 
-    def test_verify_kubectl_access_fails(self):
-        with patch("app.subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0, stdout=json.dumps({
-                    "Name": "test-mk", "Status": "Running",
-                    "Config": {"KubernetesVersion": "v1.28.0"}
-                })),
-                MagicMock(returncode=1, stdout="", stderr="connection refused"),  # kubectl fails
-            ]
-            resp = client.post("/api/minikube/verify-cluster", json={"cluster_name": "test-mk"})
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data.get("accessible") is False or data.get("exists") is True
+    The endpoint now delegates to minikube_ops.verify_cluster(),
+    so we mock that function directly.
+    """
 
-    def test_verify_json_decode_error(self):
-        with patch("app.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="not-json")
-            resp = client.post("/api/minikube/verify-cluster", json={"cluster_name": "test-mk"})
-            assert resp.status_code == 200
+    @patch("minikube_ops.verify_cluster")
+    def test_verify_kubectl_access_fails(self, mock_verify):
+        mock_verify.return_value = {
+            "exists": True, "accessible": False,
+            "message": "Minikube cluster 'test-mk' is running but kubectl access failed",
+            "cluster_name": "test-mk",
+        }
+        resp = client.post("/api/minikube/verify-cluster", json={"cluster_name": "test-mk"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("accessible") is False or data.get("exists") is True
 
-    def test_verify_timeout(self):
-        with patch("app.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="minikube", timeout=30)):
-            resp = client.post("/api/minikube/verify-cluster", json={"cluster_name": "test-mk"})
-            assert resp.status_code == 200
-            data = resp.json()
-            assert "timed out" in data.get("message", "").lower()
+    @patch("minikube_ops.verify_cluster")
+    def test_verify_json_decode_error(self, mock_verify):
+        mock_verify.return_value = {
+            "exists": False, "accessible": False,
+            "message": "Failed to parse minikube status",
+        }
+        resp = client.post("/api/minikube/verify-cluster", json={"cluster_name": "test-mk"})
+        assert resp.status_code == 200
 
-    def test_verify_exception(self):
-        with patch("app.subprocess.run", side_effect=Exception("unexpected")):
-            resp = client.post("/api/minikube/verify-cluster", json={"cluster_name": "test-mk"})
-            assert resp.status_code == 200
+    @patch("minikube_ops.verify_cluster")
+    def test_verify_timeout(self, mock_verify):
+        mock_verify.return_value = {
+            "exists": False, "accessible": False,
+            "message": "Minikube status command timed out",
+        }
+        resp = client.post("/api/minikube/verify-cluster", json={"cluster_name": "test-mk"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "timed out" in data.get("message", "").lower()
+
+    @patch("minikube_ops.verify_cluster")
+    def test_verify_exception(self, mock_verify):
+        mock_verify.return_value = {
+            "exists": False, "accessible": False,
+            "message": "Error: unexpected",
+        }
+        resp = client.post("/api/minikube/verify-cluster", json={"cluster_name": "test-mk"})
+        assert resp.status_code == 200
 
 
 # =============================================
@@ -3721,7 +3694,11 @@ class TestPerformDeletionWaitAndCF:
 
 
 class TestRunMinikubeInitCredentials:
-    """Test credential loading in run_minikube_init_playbook"""
+    """Test credential loading in run_minikube_init_playbook.
+
+    run_minikube_init_playbook now delegates to minikube_ops.configure_capi(),
+    so we mock that function directly.
+    """
 
     def _make_job(self, job_id):
         app_module.jobs[job_id] = {
@@ -3729,26 +3706,10 @@ class TestRunMinikubeInitCredentials:
             "message": "", "logs": [], "return_code": None,
         }
 
-    @patch("app.get_agent_stats", return_value={})
-    @patch("subprocess.Popen")
-    @patch("subprocess.run")
-    @patch("os.path.exists", return_value=True)
-    @patch("builtins.open")
-    def test_loads_credentials_from_user_vars(self, mock_open, mock_exists, mock_run, mock_popen, mock_stats):
-        """Test that credentials are loaded from user_vars.yml"""
-        import io
-        yaml_content = "AWS_ACCESS_KEY_ID: AKIATEST\nAWS_SECRET_ACCESS_KEY: secret\nAWS_REGION: us-east-1\n"
-        mock_open.return_value.__enter__ = lambda s: io.StringIO(yaml_content)
-        mock_open.return_value.__exit__ = MagicMock(return_value=False)
-
-        # kubectl context switch
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # ansible-playbook process
-        mock_process = MagicMock()
-        mock_process.stdout = iter(["ok\n"])
-        mock_process.wait.return_value = 0
-        mock_popen.return_value = mock_process
+    @patch("minikube_ops.configure_capi")
+    def test_loads_credentials_from_user_vars(self, mock_configure):
+        """Test that run_minikube_init_playbook completes successfully"""
+        mock_configure.return_value = {"success": True, "message": "Configured"}
 
         job_id = "test-mk-init-creds-1"
         self._make_job(job_id)
@@ -3759,21 +3720,11 @@ class TestRunMinikubeInitCredentials:
         )
 
         assert app_module.jobs[job_id]["status"] == "completed"
-        del app_module.jobs[job_id]
 
-    @patch("app.get_agent_stats", return_value={})
-    @patch("subprocess.Popen")
-    @patch("subprocess.run")
-    @patch("os.path.exists", return_value=True)
-    @patch("builtins.open", side_effect=Exception("file error"))
-    def test_credential_load_failure(self, mock_open, mock_exists, mock_run, mock_popen, mock_stats):
-        """Test graceful handling when credentials file fails to load"""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_process = MagicMock()
-        mock_process.stdout = iter([])
-        mock_process.wait.return_value = 0
-        mock_popen.return_value = mock_process
+    @patch("minikube_ops.configure_capi")
+    def test_credential_load_failure(self, mock_configure):
+        """Test graceful handling when configure_capi fails"""
+        mock_configure.return_value = {"success": False, "message": "Configuration failed"}
 
         job_id = "test-mk-init-creds-2"
         self._make_job(job_id)
@@ -3783,8 +3734,7 @@ class TestRunMinikubeInitCredentials:
             "test-mk", job_id,
         )
 
-        assert app_module.jobs[job_id]["status"] == "completed"
-        del app_module.jobs[job_id]
+        assert app_module.jobs[job_id]["status"] == "failed"
 
 
 # =============================================
@@ -6848,21 +6798,18 @@ class TestCreateMinikubeCluster:
         assert data["success"] is False
         assert "invalid" in data.get("message", "").lower()
 
-    @patch("subprocess.run")
-    def test_minikube_not_installed(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+    @patch("minikube_ops.is_minikube_installed", return_value=False)
+    def test_minikube_not_installed(self, mock_installed):
         resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "test-mk"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is False
         assert "not installed" in data.get("message", "").lower()
 
-    @patch("subprocess.run")
-    def test_cluster_already_exists(self, mock_run):
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="v1.32.0", stderr=""),  # minikube version
-            MagicMock(returncode=0, stdout="Running", stderr=""),  # minikube status
-        ]
+    @patch("minikube_ops.get_profile_status")
+    @patch("minikube_ops.is_minikube_installed", return_value=True)
+    def test_cluster_already_exists(self, mock_installed, mock_status):
+        mock_status.return_value = {"exists": True, "status": "Running"}
         resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "test-mk"})
         assert resp.status_code == 200
         data = resp.json()
@@ -7878,15 +7825,18 @@ class TestMinikubeActiveProfile:
 
 # ── Minikube list clusters ──────────────────────────────────────────────
 class TestMinikubeListClusters:
-    """Cover list-clusters endpoint"""
+    """Cover list-clusters endpoint.
 
-    @patch("subprocess.run")
-    def test_list_clusters(self, mock_run):
-        import time
-        app_module.minikube_clusters_cache["timestamp"] = 0
-        mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps([
-            {"Name": "minikube", "Status": "Running", "Driver": "docker"},
-        ]))
+    The endpoint now delegates to minikube_ops.list_profiles().
+    """
+
+    @patch("minikube_ops.list_profiles")
+    def test_list_clusters(self, mock_list):
+        mock_list.return_value = {
+            "clusters": ["minikube"],
+            "minikube_installed": True,
+            "message": "Found 1 Minikube cluster(s)",
+        }
         resp = client.get("/api/minikube/list-clusters")
         assert resp.status_code == 200
 

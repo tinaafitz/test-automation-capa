@@ -48,20 +48,53 @@ from app import (
 )
 
 
+def _app_mod():
+    """Return the *current* app module (survives importlib.reload by other test files)."""
+    return sys.modules["app"]
+
+
+def _rebind_globals():
+    """Re-bind module-level names to the current app module's dicts.
+
+    Other test files may call ``importlib.reload(sys.modules["app"])``
+    which creates *new* dict objects for ``jobs``, ``clusters``, etc.
+    This function updates this module's globals so existing test code
+    that references ``jobs[...]`` still works.
+    """
+    import test_app as _self
+    mod = _app_mod()
+    _self.jobs = mod.jobs
+    _self.clusters = mod.clusters
+    _self.ai_agent_sessions = mod.ai_agent_sessions
+    _self.app = mod.app
+    _self.check_and_timeout_stuck_jobs = mod.check_and_timeout_stuck_jobs
+    _self.init_ai_agents = mod.init_ai_agents
+    _self.get_agent_stats = mod.get_agent_stats
+
+
+@pytest.fixture(autouse=True)
+def _sync_app_refs():
+    """Auto-fixture that ensures module globals point to the current app module."""
+    _rebind_globals()
+    yield
+
+
 @pytest.fixture
 def client():
     """FastAPI test client with clean state."""
-    jobs.clear()
-    clusters.clear()
-    ai_agent_sessions.clear()
-    return TestClient(app)
+    mod = _app_mod()
+    mod.jobs.clear()
+    mod.clusters.clear()
+    mod.ai_agent_sessions.clear()
+    return TestClient(mod.app)
 
 
 @pytest.fixture
 def sample_job():
     """Create and register a sample job."""
+    mod = _app_mod()
     job_id = str(uuid.uuid4())
-    jobs[job_id] = {
+    mod.jobs[job_id] = {
         "id": job_id,
         "status": "running",
         "progress": 50,
@@ -75,16 +108,17 @@ def sample_job():
 @pytest.fixture
 def sample_cluster():
     """Create and register a sample cluster."""
+    mod = _app_mod()
     cluster_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
-    clusters[cluster_id] = {
+    mod.clusters[cluster_id] = {
         "id": cluster_id,
         "config": {"name": "test-cluster", "capi_namespace": "ns-rosa-hcp"},
         "job_id": job_id,
         "created_at": datetime.now(),
         "status": "ready",
     }
-    jobs[job_id] = {
+    mod.jobs[job_id] = {
         "id": job_id,
         "cluster_id": cluster_id,
         "status": "completed",
