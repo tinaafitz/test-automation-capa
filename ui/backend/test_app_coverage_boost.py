@@ -45,8 +45,31 @@ clusters = app_module.clusters
 ai_agent_sessions = app_module.ai_agent_sessions
 
 
+def _app_mod():
+    """Return the *current* app module (survives importlib.reload by other test files)."""
+    return sys.modules["app"]
+
+
+def _rebind_globals():
+    """Re-bind module-level names to the current app module's dicts."""
+    import test_app_coverage_boost as _self
+    mod = _app_mod()
+    _self.jobs = mod.jobs
+    _self.clusters = mod.clusters
+    _self.ai_agent_sessions = mod.ai_agent_sessions
+    _self.client = TestClient(mod.app)
+
+
+@pytest.fixture(autouse=True)
+def _sync_app_refs():
+    """Auto-fixture that ensures module globals point to the current app module."""
+    _rebind_globals()
+    yield
+
+
 def _make_job(job_id=None, **overrides):
     """Helper to create a job entry in the jobs dict."""
+    mod = _app_mod()
     jid = job_id or str(uuid.uuid4())
     job = {
         "id": jid,
@@ -59,7 +82,7 @@ def _make_job(job_id=None, **overrides):
         "stderr": "",
     }
     job.update(overrides)
-    jobs[jid] = job
+    mod.jobs[jid] = job
     return jid
 
 

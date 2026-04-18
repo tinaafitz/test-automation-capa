@@ -31,23 +31,49 @@ from app import (
     get_agent_stats,
     rosa_status_cache,
     ocp_status_cache,
-    minikube_clusters_cache,
 )
+import minikube_ops
+
+
+def _app_mod():
+    """Return the *current* app module (survives importlib.reload by other test files)."""
+    return sys.modules["app"]
+
+
+def _rebind_globals():
+    """Re-bind module-level names to the current app module's dicts."""
+    import test_app_extended as _self
+    mod = _app_mod()
+    _self.jobs = mod.jobs
+    _self.clusters = mod.clusters
+    _self.ai_agent_sessions = mod.ai_agent_sessions
+    _self.app = mod.app
+    _self.get_agent_stats = mod.get_agent_stats
+    _self.rosa_status_cache = mod.rosa_status_cache
+    _self.ocp_status_cache = mod.ocp_status_cache
+    _self.send_cluster_notifications = mod.send_cluster_notifications
+
+
+@pytest.fixture(autouse=True)
+def _sync_app_refs():
+    """Auto-fixture that ensures module globals point to the current app module."""
+    _rebind_globals()
+    yield
 
 
 @pytest.fixture
 def client():
     """FastAPI test client with clean state."""
-    jobs.clear()
-    clusters.clear()
-    ai_agent_sessions.clear()
-    rosa_status_cache["timestamp"] = 0
-    rosa_status_cache["data"] = None
-    ocp_status_cache["timestamp"] = 0
-    ocp_status_cache["data"] = None
-    minikube_clusters_cache["timestamp"] = 0
-    minikube_clusters_cache["data"] = None
-    return TestClient(app)
+    mod = _app_mod()
+    mod.jobs.clear()
+    mod.clusters.clear()
+    mod.ai_agent_sessions.clear()
+    mod.rosa_status_cache["timestamp"] = 0
+    mod.rosa_status_cache["data"] = None
+    mod.ocp_status_cache["timestamp"] = 0
+    mod.ocp_status_cache["data"] = None
+    minikube_ops.invalidate_cache()
+    return TestClient(mod.app)
 
 
 @pytest.fixture
@@ -360,19 +386,21 @@ class TestGetAgentStatsExtended:
 # ---------------------------------------------------------------------------
 
 class TestMinikubeExtended:
-    @patch("app.subprocess.run")
-    def test_minikube_no_clusters(self, mock_run, client):
-        minikube_clusters_cache["timestamp"] = 0
-        minikube_clusters_cache["data"] = None
-        mock_run.return_value = MagicMock(returncode=0, stdout="[]", stderr="")
+    @patch("minikube_ops.list_profiles")
+    def test_minikube_no_clusters(self, mock_list, client):
+        mock_list.return_value = {
+            "clusters": [], "minikube_installed": True,
+            "message": "No Minikube clusters found",
+        }
         resp = client.get("/api/minikube/list-clusters")
         assert resp.status_code == 200
 
-    @patch("app.subprocess.run")
-    def test_minikube_command_failure(self, mock_run, client):
-        minikube_clusters_cache["timestamp"] = 0
-        minikube_clusters_cache["data"] = None
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="minikube not found")
+    @patch("minikube_ops.list_profiles")
+    def test_minikube_command_failure(self, mock_list, client):
+        mock_list.return_value = {
+            "clusters": [], "minikube_installed": False,
+            "message": "Minikube is not installed",
+        }
         resp = client.get("/api/minikube/list-clusters")
         assert resp.status_code == 200
 

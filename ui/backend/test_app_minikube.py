@@ -72,13 +72,10 @@ class TestMinikubeCreateCluster:
         assert "not installed" in data["message"].lower()
 
     @patch("app.asyncio.create_task")
-    @patch("app.subprocess.run")
-    def test_create_cluster_already_exists(self, mock_run, mock_task):
-        # minikube version OK, minikube status OK (cluster exists)
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="minikube v1.33", stderr=""),
-            MagicMock(returncode=0, stdout="Running", stderr=""),
-        ]
+    @patch("minikube_ops.get_profile_status")
+    @patch("minikube_ops.is_minikube_installed", return_value=True)
+    def test_create_cluster_already_exists(self, mock_installed, mock_status, mock_task):
+        mock_status.return_value = {"exists": True, "status": "Running"}
         resp = client.post("/api/minikube/create-cluster", json={"cluster_name": "my-cluster"})
         data = resp.json()
         assert data["success"] is False

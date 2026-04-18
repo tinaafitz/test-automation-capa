@@ -71,6 +71,50 @@ def tmp_aws_config(tmp_path):
     return tmp_path
 
 
+def _get_app_module():
+    """Return the *current* app module from sys.modules.
+
+    Several test files reload the app module via importlib.reload().
+    After a reload, plain ``import app`` in the same process may return
+    a cached reference to the *old* module object.  Going through
+    ``sys.modules`` guarantees we always get the one that the FastAPI
+    ``app`` instance is attached to.
+    """
+    return sys.modules.get("app")
+
+
+@pytest.fixture(autouse=True)
+def _clean_global_state():
+    """Clear global app state before every test to prevent cross-file pollution.
+
+    This runs automatically for *all* test files that use this conftest.
+    """
+    _app = _get_app_module()
+    if _app is not None:
+        _app.jobs.clear()
+        _app.clusters.clear()
+        _app.ai_agent_sessions.clear()
+        _app.rosa_status_cache["data"] = None
+        _app.rosa_status_cache["timestamp"] = 0
+        _app.ocp_status_cache["data"] = None
+        _app.ocp_status_cache["timestamp"] = 0
+
+    try:
+        import minikube_ops as _mk
+        _mk.invalidate_cache()
+    except Exception:
+        pass
+
+    yield
+
+    # Teardown: clear again so no state leaks to the next test
+    _app = _get_app_module()
+    if _app is not None:
+        _app.jobs.clear()
+        _app.clusters.clear()
+        _app.ai_agent_sessions.clear()
+
+
 @pytest.fixture
 def mock_subprocess():
     """Patch subprocess.run globally."""
