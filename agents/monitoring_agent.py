@@ -15,6 +15,7 @@ Created: March 3, 2026
 """
 
 import re
+import threading
 import time
 from enum import Enum
 from pathlib import Path
@@ -107,6 +108,10 @@ class MonitoringAgent(BaseAgent):
         # Structured context from playbook markers
         self._structured_context: Dict[str, str] = {}
 
+        # Thread safety: protects _tracked_issues, line_buffer, and _structured_context.
+        # RLock because issue_callback (invoked under lock) calls mark_issue_resolved/failed.
+        self._lock = threading.RLock()
+
     def set_issue_callback(self, callback: Callable):
         """Set callback function to be called when issues are detected.
 
@@ -124,6 +129,7 @@ class MonitoringAgent(BaseAgent):
     def process_line(self, line: str) -> bool:
         """
         Process a single line of output from test execution.
+        Thread-safe: acquires internal lock to protect all state.
 
         Returns:
             True if line triggered an intervention
@@ -131,23 +137,24 @@ class MonitoringAgent(BaseAgent):
         if not self.enabled:
             return False
 
-        # Add to buffer for context
-        self.line_buffer.append(line)
-        if len(self.line_buffer) > self.buffer_size:
-            self.line_buffer.pop(0)
+        with self._lock:
+            # Add to buffer for context
+            self.line_buffer.append(line)
+            if len(self.line_buffer) > self.buffer_size:
+                self.line_buffer.pop(0)
 
-        # Check for structured context markers from playbooks
-        self._parse_structured_context(line)
+            # Check for structured context markers from playbooks
+            self._parse_structured_context(line)
 
-        # Track current execution context
-        self._update_execution_context(line)
+            # Track current execution context
+            self._update_execution_context(line)
 
-        # Detect issues using knowledge base patterns only
-        issue = self._detect_issue(line)
-        if issue:
-            return self._handle_detected_issue(issue, line)
+            # Detect issues using knowledge base patterns only
+            issue = self._detect_issue(line)
+            if issue:
+                return self._handle_detected_issue(issue, line)
 
-        return False
+            return False
 
     def _handle_detected_issue(self, issue: Dict, line: str) -> bool:
         """Handle a detected issue through the state machine."""
@@ -215,29 +222,50 @@ class MonitoringAgent(BaseAgent):
 
     def mark_issue_resolved(self, issue_type: str, resource_key: str = None):
         """Mark an issue as resolved (called by remediation agent on success)."""
-        if resource_key is None:
-            resource_key = self._build_resource_key()
-        tracking_key = f"{issue_type}:{resource_key}"
-        tracked = self._tracked_issues.get(tracking_key)
-        if tracked:
-            tracked.state = IssueState.RESOLVED
-            tracked.last_updated = time.time()
-            self.log(f"Issue resolved: {issue_type} for {resource_key}", "success")
+        with self._lock:
+            if resource_key is None:
+                resource_key = self._build_resource_key()
+            tracking_key = f"{issue_type}:{resource_key}"
+            tracked = self._tracked_issues.get(tracking_key)
+            if tracked:
+                tracked.state = IssueState.RESOLVED
+                tracked.last_updated = time.time()
+                self.log(f"Issue resolved: {issue_type} for {resource_key}", "success")
 
     def mark_issue_failed(self, issue_type: str, resource_key: str = None):
         """Mark an issue remediation as failed (called by remediation agent on failure)."""
-        if resource_key is None:
-            resource_key = self._build_resource_key()
-        tracking_key = f"{issue_type}:{resource_key}"
-        tracked = self._tracked_issues.get(tracking_key)
-        if tracked:
-            tracked.state = IssueState.FAILED
-            tracked.last_updated = time.time()
-            self.log(
-                f"Issue remediation failed: {issue_type} for {resource_key} "
-                f"(attempt {tracked.attempts}/{tracked.max_attempts})",
-                "warning",
-            )
+        with self._lock:
+            if resource_key is None:
+                resource_key = self._build_resource_key()
+            tracking_key = f"{issue_type}:{resource_key}"
+            tracked = self._tracked_issues.get(tracking_key)
+            if tracked:
+                tracked.state = IssueState.FAILED
+                tracked.last_updated = time.time()
+                self.log(
+                    f"Issue remediation failed: {issue_type} for {resource_key} "
+                    f"(attempt {tracked.attempts}/{tracked.max_attempts})",
+                    "warning",
+                )
+
+    def reset_to_detected(self, issue_type: str, resource_key: str = None):
+        """Reset a tracked issue back to DETECTED for re-evaluation.
+
+        Used when diagnostic confidence is too low — allows the agent to
+        re-check after the throttle window (60s) in case the underlying
+        resource status has changed.
+        """
+        with self._lock:
+            if resource_key is None:
+                resource_key = self._build_resource_key()
+            tracking_key = f"{issue_type}:{resource_key}"
+            tracked = self._tracked_issues.get(tracking_key)
+            if tracked:
+                tracked.state = IssueState.DETECTED
+                if tracked.attempts > 1:
+                    tracked.attempts -= 1
+                return tracked
+            return None
 
     def _build_resource_key(self) -> str:
         """Build a resource key from available context."""
@@ -310,26 +338,28 @@ class MonitoringAgent(BaseAgent):
 
     def get_statistics(self) -> Dict:
         """Get monitoring statistics."""
-        tracked_summary = {}
-        for key, tracked in self._tracked_issues.items():
-            tracked_summary[key] = {
-                "state": tracked.state.value,
-                "attempts": tracked.attempts,
+        with self._lock:
+            tracked_summary = {}
+            for key, tracked in self._tracked_issues.items():
+                tracked_summary[key] = {
+                    "state": tracked.state.value,
+                    "attempts": tracked.attempts,
+                }
+            return {
+                "patterns_detected": len(self.patterns_detected),
+                "interventions_performed": len(self.interventions),
+                "current_task": self.current_task,
+                "waiting_for": self.waiting_for_resource,
+                "tracked_issues": tracked_summary,
             }
-        return {
-            "patterns_detected": len(self.patterns_detected),
-            "interventions_performed": len(self.interventions),
-            "current_task": self.current_task,
-            "waiting_for": self.waiting_for_resource,
-            "tracked_issues": tracked_summary,
-        }
 
     def reset(self):
         """Reset monitoring state for new test run."""
-        self.line_buffer.clear()
-        self.patterns_detected.clear()
-        self.current_task = None
-        self.waiting_for_resource = None
-        self._tracked_issues.clear()
-        self._structured_context.clear()
-        self.log("Monitoring state reset", "debug")
+        with self._lock:
+            self.line_buffer.clear()
+            self.patterns_detected.clear()
+            self.current_task = None
+            self.waiting_for_resource = None
+            self._tracked_issues.clear()
+            self._structured_context.clear()
+            self.log("Monitoring state reset", "debug")

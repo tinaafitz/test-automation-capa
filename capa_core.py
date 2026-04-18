@@ -211,10 +211,24 @@ class ClusterAutomationSpec:
 
         parent_spec = parent_data.get("spec", {})
 
-        # Merge parent features under child features (child wins)
+        # Merge parent features under child features (child wins).
+        # For dict-valued features (e.g. additional_tags), deep-merge so
+        # child keys overlay parent keys instead of replacing the whole dict.
         parent_features = parent_spec.get("features", {})
         child_features = self.spec.get("features", {})
-        merged_features = {**parent_features, **child_features}
+        merged_features = {}
+        for key in set(parent_features) | set(child_features):
+            p_val = parent_features.get(key)
+            c_val = child_features.get(key)
+            if key in child_features and key in parent_features:
+                if isinstance(p_val, dict) and isinstance(c_val, dict):
+                    merged_features[key] = {**p_val, **c_val}
+                else:
+                    merged_features[key] = c_val
+            elif key in child_features:
+                merged_features[key] = c_val
+            else:
+                merged_features[key] = p_val
         if merged_features:
             self.spec["features"] = merged_features
 

@@ -1020,7 +1020,9 @@ class TestProfileInheritance:
         assert "automated" in spec.features["additional_tags"]
 
     def test_inheritance_child_features_win(self, registry):
-        """When both parent and child define the same feature, child wins."""
+        """When both parent and child define the same feature, child wins.
+        For dict-valued features, child keys overlay parent keys (deep merge).
+        """
         data = {
             "apiVersion": "capa-automation/v1",
             "kind": "ClusterAutomationSpec",
@@ -1033,8 +1035,10 @@ class TestProfileInheritance:
             },
         }
         spec = capa_cli.ClusterAutomationSpec(data, base_dir=PROJECT_ROOT)
-        # Child's tags replace parent's tags entirely (dict override)
-        assert spec.features["additional_tags"] == {"custom": "value"}
+        tags = spec.features["additional_tags"]
+        assert tags["custom"] == "value"
+        assert tags["automated"] == "true"
+        assert tags["env"] == "test"
 
     def test_inheritance_inherits_top_level_fields(self, registry):
         """Child inherits parent's version, region, channel if not set."""
