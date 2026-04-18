@@ -1,0 +1,12 @@
+# Feature: No CNI Plugin (BYO CNI)
+# Applies to: create (immutable after creation)
+apiVersion: capa-automation/v1
+kind: ClusterAutomationSpec
+metadata:
+  name: no-cni
+spec:
+  action: create
+  cluster: ''
+  namespace: ns-rosa-hcp
+  features:
+    no_cni: false

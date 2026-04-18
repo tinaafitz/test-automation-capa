@@ -1,0 +1,12 @@
+# Feature: External OIDC
+# Applies to: create (immutable after creation)
+apiVersion: capa-automation/v1
+kind: ClusterAutomationSpec
+metadata:
+  name: external-oidc
+spec:
+  action: create
+  cluster: ''
+  namespace: ns-rosa-hcp
+  features:
+    external_oidc: false

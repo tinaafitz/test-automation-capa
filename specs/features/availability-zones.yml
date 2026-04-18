@@ -1,0 +1,12 @@
+# Feature: Availability Zones
+# Applies to: create (immutable after creation)
+apiVersion: capa-automation/v1
+kind: ClusterAutomationSpec
+metadata:
+  name: availability-zones
+spec:
+  action: create
+  cluster: ''
+  namespace: ns-rosa-hcp
+  features:
+    availability_zones: '1'

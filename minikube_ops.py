@@ -7,18 +7,23 @@ them with asyncio.to_thread() for async use.
 """
 
 import json
+import logging
 import os
 import re
 import subprocess
+import threading
 import time
 import yaml
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Profile list cache (shared across callers within the same process)
 # ---------------------------------------------------------------------------
+_cache_lock = threading.Lock()
 _profile_cache: Dict[str, Any] = {
     "data": None,
     "timestamp": 0.0,
@@ -28,7 +33,8 @@ _profile_cache: Dict[str, Any] = {
 
 def invalidate_cache():
     """Force the next list_profiles() call to fetch fresh data."""
-    _profile_cache["timestamp"] = 0.0
+    with _cache_lock:
+        _profile_cache["timestamp"] = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -49,25 +55,29 @@ def is_minikube_installed() -> bool:
 # ---------------------------------------------------------------------------
 # Profile lifecycle
 # ---------------------------------------------------------------------------
+def _update_cache(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Thread-safe cache update. Returns the result for convenience."""
+    with _cache_lock:
+        _profile_cache["data"] = result
+        _profile_cache["timestamp"] = time.time()
+    return result
+
+
 def list_profiles(*, use_cache: bool = True) -> Dict[str, Any]:
     """List minikube profiles. Returns dict with clusters, minikube_installed, message."""
-    now = time.time()
-    cache_age = now - _profile_cache["timestamp"]
-
-    if use_cache and _profile_cache["data"] is not None and cache_age < _profile_cache["ttl"]:
-        return _profile_cache["data"]
+    with _cache_lock:
+        cache_age = time.time() - _profile_cache["timestamp"]
+        if use_cache and _profile_cache["data"] is not None and cache_age < _profile_cache["ttl"]:
+            return _profile_cache["data"]
 
     try:
         if not is_minikube_installed():
-            result = {
+            return _update_cache({
                 "clusters": [],
                 "minikube_installed": False,
                 "message": "Minikube is not installed",
                 "suggestion": "Install Minikube first: brew install minikube",
-            }
-            _profile_cache["data"] = result
-            _profile_cache["timestamp"] = now
-            return result
+            })
 
         list_result = subprocess.run(
             ["minikube", "profile", "list", "-o", "json"],
@@ -75,15 +85,12 @@ def list_profiles(*, use_cache: bool = True) -> Dict[str, Any]:
         )
 
         if list_result.returncode != 0:
-            result = {
+            return _update_cache({
                 "clusters": [],
                 "minikube_installed": True,
                 "message": "No Minikube clusters found",
                 "suggestion": "Create a cluster with: minikube start --profile <cluster-name>",
-            }
-            _profile_cache["data"] = result
-            _profile_cache["timestamp"] = now
-            return result
+            })
 
         try:
             profiles_data = json.loads(list_result.stdout)
@@ -92,7 +99,7 @@ def list_profiles(*, use_cache: bool = True) -> Dict[str, Any]:
                 for profile in profiles_data["valid"]:
                     clusters.append(profile["Name"])
 
-            result = {
+            return _update_cache({
                 "clusters": clusters,
                 "minikube_installed": True,
                 "message": (
@@ -105,32 +112,23 @@ def list_profiles(*, use_cache: bool = True) -> Dict[str, Any]:
                     if not clusters
                     else None
                 ),
-            }
-            _profile_cache["data"] = result
-            _profile_cache["timestamp"] = now
-            return result
+            })
 
         except json.JSONDecodeError:
-            result = {
+            return _update_cache({
                 "clusters": [],
                 "minikube_installed": True,
                 "message": "Failed to parse minikube profile list",
                 "suggestion": "Check minikube installation",
-            }
-            _profile_cache["data"] = result
-            _profile_cache["timestamp"] = now
-            return result
+            })
 
     except Exception as e:
-        result = {
+        return _update_cache({
             "clusters": [],
             "minikube_installed": False,
             "message": f"Error listing Minikube clusters: {str(e)}",
             "suggestion": "Check Minikube installation and permissions",
-        }
-        _profile_cache["data"] = result
-        _profile_cache["timestamp"] = now
-        return result
+        })
 
 
 def get_profile_status(profile_name: str) -> Dict[str, Any]:
@@ -357,7 +355,7 @@ def _get_api_url(profile_name: str) -> str:
                         url = re.sub(r'\x1b\[[0-9;]*m', '', parts[1].strip())
                         return url
     except Exception:
-        pass
+        logger.debug("Failed to get API URL for %s", profile_name, exc_info=True)
     return ""
 
 
@@ -465,7 +463,7 @@ def _get_k8s_version(context: str) -> str:
             data = json.loads(result.stdout)
             return data.get("serverVersion", {}).get("gitVersion", "v1.32.0")
     except Exception:
-        pass
+        logger.debug("Failed to get K8s version for %s", context, exc_info=True)
     return "v1.32.0"
 
 
@@ -489,7 +487,7 @@ def _get_component_timestamps(context: str) -> Dict[str, str]:
                 if ts:
                     timestamps[label] = ts
         except Exception:
-            pass
+            logger.debug("Failed to get timestamp for %s", label, exc_info=True)
 
     return timestamps
 
@@ -536,6 +534,7 @@ def _check_components(context: str) -> Dict[str, Any]:
                     {"name": check["name"], "status": status, "message": check["fail_msg"]}
                 )
         except Exception:
+            logger.debug("Error checking %s", check["name"], exc_info=True)
             components["failed"] += 1
             components["details"].append(
                 {"name": check["name"], "status": "error", "message": f"Error checking {check['name']}"}
@@ -547,73 +546,50 @@ def _check_components(context: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Tool versions
 # ---------------------------------------------------------------------------
+def _get_tool_version(cmd: List[str], parse_json: Optional[str] = None,
+                      regex: Optional[str] = None,
+                      fallback_cmd: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Probe a CLI tool for its version. Returns {"installed": bool, "version": str|None}."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            if parse_json:
+                data = json.loads(result.stdout)
+                for key in parse_json.split("."):
+                    data = data.get(key, {})
+                return {"installed": True, "version": data or result.stdout.strip()}
+            return {"installed": True, "version": result.stdout.strip()}
+        if fallback_cmd:
+            result2 = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=10)
+            if result2.returncode == 0:
+                if regex:
+                    match = re.search(regex, result2.stdout)
+                    version = match.group(1) if match else result2.stdout.strip()
+                else:
+                    version = result2.stdout.strip()
+                return {"installed": True, "version": version}
+        return {"installed": False, "version": None}
+    except (FileNotFoundError, Exception):
+        return {"installed": False, "version": None}
+
+
 def get_tool_versions() -> Dict[str, Any]:
     """Get versions of CAPI-related CLI tools (clusterctl, minikube, kubectl, podman)."""
-    tools = {}
-
-    # clusterctl
-    try:
-        result = subprocess.run(
+    tools = {
+        "clusterctl": _get_tool_version(
             ["clusterctl", "version", "-o", "short"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            tools["clusterctl"] = {"installed": True, "version": result.stdout.strip()}
-        else:
-            result2 = subprocess.run(
-                ["clusterctl", "version"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result2.returncode == 0:
-                match = re.search(r'GitVersion:"([^"]+)"', result2.stdout)
-                version = match.group(1) if match else result2.stdout.strip()
-                tools["clusterctl"] = {"installed": True, "version": version}
-            else:
-                tools["clusterctl"] = {"installed": False, "version": None}
-    except (FileNotFoundError, Exception):
-        tools["clusterctl"] = {"installed": False, "version": None}
-
-    # minikube
-    try:
-        result = subprocess.run(
-            ["minikube", "version", "--short"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            tools["minikube"] = {"installed": True, "version": result.stdout.strip()}
-        else:
-            tools["minikube"] = {"installed": False, "version": None}
-    except (FileNotFoundError, Exception):
-        tools["minikube"] = {"installed": False, "version": None}
-
-    # kubectl
-    try:
-        result = subprocess.run(
+            fallback_cmd=["clusterctl", "version"],
+            regex=r'GitVersion:"([^"]+)"',
+        ),
+        "minikube": _get_tool_version(["minikube", "version", "--short"]),
+        "kubectl": _get_tool_version(
             ["kubectl", "version", "--client", "-o", "json"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            version = data.get("clientVersion", {}).get("gitVersion", "unknown")
-            tools["kubectl"] = {"installed": True, "version": version}
-        else:
-            tools["kubectl"] = {"installed": False, "version": None}
-    except (FileNotFoundError, Exception):
-        tools["kubectl"] = {"installed": False, "version": None}
-
-    # podman
-    try:
-        result = subprocess.run(
+            parse_json="clientVersion.gitVersion",
+        ),
+        "podman": _get_tool_version(
             ["podman", "version", "--format", "{{.Client.Version}}"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            tools["podman"] = {"installed": True, "version": result.stdout.strip()}
-        else:
-            tools["podman"] = {"installed": False, "version": None}
-    except (FileNotFoundError, Exception):
-        tools["podman"] = {"installed": False, "version": None}
-
+        ),
+    }
     return {"tools": tools, "timestamp": datetime.now().isoformat()}
 
 
@@ -638,6 +614,7 @@ def _calculate_age(creation_timestamp: str) -> str:
         else:
             return f"{seconds}s"
     except Exception:
+        logger.debug("Failed to calculate age from timestamp", exc_info=True)
         return "unknown"
 
 
@@ -703,9 +680,9 @@ def get_capi_resources(context: str, namespace: str = "ns-rosa-hcp") -> Dict[str
                     "age": _calculate_age(metadata.get("creationTimestamp", "")),
                 })
     except subprocess.TimeoutExpired:
-        pass
+        logger.debug("Timed out fetching CAPI resources from %s", context)
     except Exception:
-        pass
+        logger.debug("Failed to fetch CAPI resources from %s", context, exc_info=True)
 
     # Namespace resource
     try:
@@ -726,7 +703,7 @@ def get_capi_resources(context: str, namespace: str = "ns-rosa-hcp") -> Dict[str
                 "age": _calculate_age(metadata.get("creationTimestamp", "")),
             })
     except Exception:
-        pass
+        logger.debug("Failed to fetch namespace %s from %s", namespace, context, exc_info=True)
 
     # AWSClusterControllerIdentity (cluster-scoped)
     try:
@@ -748,7 +725,7 @@ def get_capi_resources(context: str, namespace: str = "ns-rosa-hcp") -> Dict[str
                     "age": _calculate_age(metadata.get("creationTimestamp", "")),
                 })
     except Exception:
-        pass
+        logger.debug("Failed to fetch AWSClusterControllerIdentity from %s", context, exc_info=True)
 
     return {"success": True, "resources": resources, "count": len(resources)}
 
@@ -797,11 +774,8 @@ def configure_capi(profile_name: str, project_root: str,
         env["CUSTOM_CAPA_IMAGE_TAG"] = custom_capa_image.get("tag", "")
         env["CUSTOM_CAPA_SOURCE_PATH"] = custom_capa_image.get("sourcePath", "")
 
-    # Build command
+    # Build command — credentials are already in env, no need to expose on CLI
     cmd = ["ansible-playbook", playbook_path, "-vv"]
-    if credentials:
-        for key, value in credentials.items():
-            cmd.extend(["-e", f"{key}={value}"])
 
     try:
         process = subprocess.Popen(
@@ -843,4 +817,5 @@ def _load_credentials(project_root: str) -> Dict[str, str]:
             "OCM_CLIENT_SECRET": config.get("OCM_CLIENT_SECRET", ""),
         }
     except Exception:
+        logger.debug("Failed to load credentials from %s", config_path, exc_info=True)
         return {}

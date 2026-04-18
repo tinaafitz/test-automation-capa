@@ -357,7 +357,11 @@ def _plan_upgrade(registry: FeatureRegistry, spec: ClusterAutomationSpec) -> Lis
         raise ValueError("upgrade requires --version")
 
     cp_feature = registry.get_feature("control_plane_upgrade")
+    if not cp_feature:
+        raise ValueError("Feature 'control_plane_upgrade' not found in registry")
     mp_feature = registry.get_feature("machine_pool_upgrade")
+    if not mp_feature:
+        raise ValueError("Feature 'machine_pool_upgrade' not found in registry")
 
     return [
         {
@@ -409,6 +413,8 @@ def _plan_apply(registry: FeatureRegistry, spec: ClusterAutomationSpec) -> List[
 
     steps = []
     for i, action in enumerate(raw_actions):
+        if "feature" not in action:
+            raise ValueError(f"Action {i + 1} missing required 'feature' key")
         feat_id = action["feature"]
         value = action.get("value")
         wait = action.get("wait", True)

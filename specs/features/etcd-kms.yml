@@ -1,0 +1,12 @@
+# Feature: ETCD KMS Encryption
+# Applies to: create (immutable after creation)
+apiVersion: capa-automation/v1
+kind: ClusterAutomationSpec
+metadata:
+  name: etcd-kms
+spec:
+  action: create
+  cluster: ''
+  namespace: ns-rosa-hcp
+  features:
+    etcd_kms: ''
