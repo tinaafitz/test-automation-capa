@@ -10,9 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 import asyncio
+import fcntl
 import json
 import re
 import subprocess
+import threading
 import uuid
 from datetime import datetime
 import os
@@ -78,9 +80,11 @@ app.add_middleware(
 
 # In-memory storage for demo (use Redis/DB in production)
 jobs: Dict[str, dict] = {}
+_jobs_lock = threading.Lock()
 
 # AI Agent instances per job (keyed by job_id)
 ai_agent_sessions: Dict[str, dict] = {}
+_sessions_lock = threading.Lock()
 
 
 def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
@@ -142,15 +146,8 @@ def init_ai_agents(job_id: str, dry_run: bool = False) -> Optional[dict]:
                 # Low confidence — reset tracked issue to DETECTED so agent
                 # can re-evaluate on next retry (e.g., CloudFormation stack
                 # transitions from DELETE_IN_PROGRESS to DELETE_FAILED)
-                tracking_key = f"{issue_type}:{resource_key}"
-                tracked = monitor._tracked_issues.get(tracking_key)
+                tracked = monitor.reset_to_detected(issue_type, resource_key)
                 if tracked:
-                    tracked.state = IssueState.DETECTED
-                    # Don't count low-confidence checks as real attempts,
-                    # but keep attempts >= 1 so the 60s throttle stays active
-                    if tracked.attempts > 1:
-                        tracked.attempts -= 1
-                    # Only log every 5th low-confidence check to reduce noise
                     low_conf_count = getattr(tracked, '_low_conf_count', 0) + 1
                     tracked._low_conf_count = low_conf_count
                     should_log = (low_conf_count == 1 or low_conf_count % 5 == 0)
@@ -1178,15 +1175,24 @@ def _load_agent_kb_file(filename: str):
     kb_path = os.path.join(_project_root, "agents", "knowledge_base", filename)
     if os.path.exists(kb_path):
         with open(kb_path, "r") as f:
-            return json.load(f)
+            fcntl.flock(f, fcntl.LOCK_SH)
+            try:
+                return json.load(f)
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
     return []
 
 
 def _save_agent_kb_file(filename: str, data):
     """Save a JSON file to the agent knowledge base directory."""
     kb_path = os.path.join(_project_root, "agents", "knowledge_base", filename)
+    os.makedirs(os.path.dirname(kb_path), exist_ok=True)
     with open(kb_path, "w") as f:
-        json.dump(data, f, indent=2)
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            json.dump(data, f, indent=2)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 @app.get("/api/agents/dashboard")
