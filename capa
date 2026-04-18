@@ -47,15 +47,25 @@ import subprocess
 import sys
 import time
 import yaml
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List
 
 from capa_core import (
     FeatureRegistry, ClusterAutomationSpec,
     validate_feature_value, build_json_merge_patch, resolve_spec_to_plan,
 )
 import minikube_ops
+
+
+# ============================================================================
+# Constants
+# ============================================================================
+DEFAULT_NAMESPACE = "ns-rosa-hcp"
+SIDECAR_LOG_TEMPLATE = "/tmp/deletion-agent-{cluster}.log"
+HISTORY_FILE = "vars/cluster_action_history.json"
+SAVED_WORKFLOWS_FILE = "vars/saved_workflows.json"
+TRIGGER_STATE_FILE = "vars/trigger_state.json"
 
 
 # ============================================================================
@@ -416,7 +426,7 @@ def cmd_status(args, base_dir, registry):
         return _status_minikube(args)
 
     cluster = args.cluster
-    namespace = args.namespace or "ns-rosa-hcp"
+    namespace = args.namespace or DEFAULT_NAMESPACE
     if not cluster:
         print(f"{C.R}--cluster required{C.E}")
         sys.exit(1)
@@ -551,7 +561,7 @@ def cmd_specs(args, base_dir, registry):
 
     # Point to unified workflow command
     wf_dir = specs_dir / "workflows"
-    wf_json = base_dir / "vars" / "saved_workflows.json"
+    wf_json = base_dir / SAVED_WORKFLOWS_FILE
     wf_count = len(list(wf_dir.glob("*.yml"))) if wf_dir.exists() else 0
     saved_count = 0
     if wf_json.exists():
@@ -593,7 +603,7 @@ def cmd_set(args, base_dir, registry):
     feature_id = args.feature
     value = args.value
     cluster = args.cluster
-    namespace = args.namespace or "ns-rosa-hcp"
+    namespace = args.namespace or DEFAULT_NAMESPACE
 
     feat = registry.get_feature(feature_id)
     if not feat:
@@ -639,7 +649,7 @@ def cmd_set(args, base_dir, registry):
         },
     }
     spec = ClusterAutomationSpec(data)
-    dry_run = args.dry_run or getattr(args, "set_dry_run", False)
+    dry_run = args.dry_run
     engine = ExecutionEngine(registry, base_dir, dry_run=dry_run, verbose=args.verbose)
     plan = engine.plan(spec)
     engine.execute(plan)
@@ -795,7 +805,7 @@ def cmd_test(args, base_dir, registry):
         cmd.append("--ai-agent")
     if args.ai_agent_dry_run:
         cmd.append("--ai-agent-dry-run")
-    if args.dry_run or getattr(args, "test_dry_run", False):
+    if args.dry_run:
         cmd.append("--dry-run")
     if args.no_save:
         cmd.append("--no-save")
@@ -916,7 +926,7 @@ def cmd_logs(args, base_dir, registry):
     lines = args.lines
 
     # Try sidecar log first (active deletion operations)
-    sidecar_path = Path(f"/tmp/deletion-agent-{cluster}.log")
+    sidecar_path = Path(SIDECAR_LOG_TEMPLATE.format(cluster=cluster))
     if sidecar_path.exists():
         print(f"{C.BOLD}Sidecar log: {sidecar_path}{C.E}\n")
         if args.follow:
@@ -938,7 +948,7 @@ def cmd_logs(args, base_dir, registry):
             return
 
     # Fall back to cluster action history
-    history_path = base_dir / "vars" / "cluster_action_history.json"
+    history_path = base_dir / HISTORY_FILE
     if history_path.exists():
         try:
             with open(history_path) as f:
@@ -970,17 +980,17 @@ def cmd_logs(args, base_dir, registry):
             return
 
     print(f"{C.Y}No logs found for cluster '{cluster}'.{C.E}")
-    print(f"  Sidecar log would be at: /tmp/deletion-agent-{cluster}.log")
-    print(f"  History file: vars/cluster_action_history.json")
+    print(f"  Sidecar log would be at: {SIDECAR_LOG_TEMPLATE.format(cluster=cluster)}")
+    print(f"  History file: {HISTORY_FILE}")
     print()
 
 
 def cmd_history(args, base_dir, registry):
-    """Show operation history for a cluster from cluster_action_history.json."""
-    history_path = base_dir / "vars" / "cluster_action_history.json"
+    """Show operation history for a cluster."""
+    history_path = base_dir / HISTORY_FILE
 
     if not history_path.exists():
-        print(f"{C.Y}No history file found at vars/cluster_action_history.json{C.E}")
+        print(f"{C.Y}No history file found at {HISTORY_FILE}{C.E}")
         return
 
     try:
@@ -1033,7 +1043,7 @@ def cmd_watch(args, base_dir, registry):
         return _watch_minikube(args)
 
     cluster = args.cluster
-    namespace = args.namespace or "ns-rosa-hcp"
+    namespace = args.namespace or DEFAULT_NAMESPACE
     interval = args.interval
     timeout = args.timeout
 
@@ -1137,12 +1147,11 @@ def cmd_completion(args, base_dir, registry):
 
     # Gather workflow names for completion
     workflow_names = []
-    wf_json = base_dir / "vars" / "saved_workflows.json"
+    wf_json = base_dir / SAVED_WORKFLOWS_FILE
     if wf_json.exists():
         try:
-            import json as _json
             with open(wf_json) as f:
-                for wf in _json.load(f):
+                for wf in json.load(f):
                     if wf.get("name"):
                         workflow_names.append(wf["name"])
         except (json.JSONDecodeError, IOError):
@@ -1329,7 +1338,7 @@ def cmd_generate_specs(args, base_dir, registry):
             "spec": {
                 "action": action,
                 "cluster": "",
-                "namespace": "ns-rosa-hcp",
+                "namespace": DEFAULT_NAMESPACE,
             },
         }
 
@@ -1383,8 +1392,8 @@ def _evaluate_condition(condition, results):
         return all(r.get("status") == "completed" for r in results)
 
     # Parse: steps.N.status == 'value' or steps.N.status != 'value'
-    import re as _re
-    m = _re.match(r"steps\.(\d+)\.status\s*(==|!=)\s*['\"](\w+)['\"]", cond)
+    import re
+    m = re.match(r"steps\.(\d+)\.status\s*(==|!=)\s*['\"](\w+)['\"]", cond)
     if m:
         step_num = int(m.group(1))
         op = m.group(2)
@@ -1410,7 +1419,7 @@ def cmd_workflow(args, base_dir, registry):
     workflows_file = base_dir / "vars" / "saved_workflows.json"
 
     def _load_saved():
-        """Load workflows from vars/saved_workflows.json."""
+        """Load saved workflows."""
         if not workflows_file.exists():
             return []
         try:
@@ -1697,9 +1706,9 @@ def cmd_workflow(args, base_dir, registry):
 
 
 def _load_trigger_state(base_dir):
-    """Load trigger state from vars/trigger_state.json (file-locked)."""
+    """Load trigger state (file-locked)."""
     import fcntl
-    state_file = base_dir / "vars" / "trigger_state.json"
+    state_file = base_dir / TRIGGER_STATE_FILE
     if not state_file.exists():
         return {"triggers": [], "run_history": []}
     try:
@@ -1714,9 +1723,9 @@ def _load_trigger_state(base_dir):
 
 
 def _save_trigger_state(base_dir, state):
-    """Persist trigger state to vars/trigger_state.json (file-locked)."""
+    """Persist trigger state (file-locked)."""
     import fcntl
-    state_file = base_dir / "vars" / "trigger_state.json"
+    state_file = base_dir / TRIGGER_STATE_FILE
     state_file.parent.mkdir(parents=True, exist_ok=True)
     # Cap run history at 200 entries
     if len(state.get("run_history", [])) > 200:
@@ -1739,7 +1748,6 @@ def _next_cron_time(cron_expr, tz_name="UTC"):
     """Calculate next run time from a cron expression. Returns ISO string or None."""
     try:
         from croniter import croniter
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         cron = croniter(cron_expr, now)
         next_dt = cron.get_next(datetime)
@@ -1774,7 +1782,7 @@ def _cron_to_human(cron_expr):
 def _find_workflow_for_trigger(name, base_dir):
     """Find a workflow by name (for trigger create). Returns (wf, wf_type) or (None, None)."""
     # Check saved workflows
-    wf_json = base_dir / "vars" / "saved_workflows.json"
+    wf_json = base_dir / SAVED_WORKFLOWS_FILE
     if wf_json.exists():
         try:
             with open(wf_json) as f:
@@ -1910,7 +1918,7 @@ def cmd_trigger(args, base_dir, registry):
             return
 
         if triggers:
-            print(f"\n{C.BOLD}Active Triggers{C.E} (vars/trigger_state.json):\n")
+            print(f"\n{C.BOLD}Active Triggers{C.E} ({TRIGGER_STATE_FILE}):\n")
             for t in triggers:
                 status_icon = f"{C.G}●{C.E}" if t.get("enabled", True) else f"{C.Y}○{C.E}"
                 ttype = t.get("type", "?")
@@ -1973,7 +1981,7 @@ def cmd_trigger(args, base_dir, registry):
             "workflow_source": wf_type,
             "type": ttype,
             "enabled": True,
-            "created_at": __import__("datetime").datetime.now().isoformat(),
+            "created_at": datetime.now().isoformat(),
             "last_run_at": None,
             "last_run_status": None,
             "next_run_at": None,
@@ -2077,9 +2085,8 @@ def cmd_trigger(args, base_dir, registry):
                 elapsed = ""
                 if h.get("started_at") and h.get("completed_at"):
                     try:
-                        from datetime import datetime as _dt
-                        s = _dt.fromisoformat(h["started_at"].replace("Z", "+00:00"))
-                        e = _dt.fromisoformat(h["completed_at"].replace("Z", "+00:00"))
+                        s = datetime.fromisoformat(h["started_at"].replace("Z", "+00:00"))
+                        e = datetime.fromisoformat(h["completed_at"].replace("Z", "+00:00"))
                         elapsed = f" ({(e - s).total_seconds():.0f}s)"
                     except (ValueError, TypeError):
                         pass
@@ -2142,19 +2149,19 @@ def cmd_trigger(args, base_dir, registry):
             if not getattr(args, "force", False):
                 sys.exit(1)
 
-        from datetime import datetime as _dt
         wf_name = t["workflow_name"]
         print(f"{C.BOLD}Firing trigger {target} → workflow: {wf_name}{C.E}")
 
         vars_override = t.get("vars_override", {})
-        run_id = "trun-" + __import__("hashlib").sha256(os.urandom(16)).hexdigest()[:8]
-        started_at = _dt.now().isoformat()
+        import hashlib
+        run_id = "trun-" + hashlib.sha256(os.urandom(16)).hexdigest()[:8]
+        started_at = datetime.now().isoformat()
 
         success, results, elapsed = _run_workflow_by_name(
             wf_name, base_dir, registry, vars_override=vars_override, verbose=args.verbose
         )
 
-        completed_at = _dt.now().isoformat()
+        completed_at = datetime.now().isoformat()
         status = "completed" if success else "failed"
 
         # Update trigger state
@@ -2248,7 +2255,7 @@ def _status_minikube(args):
     print(f"  K8s version: {info.get('kubernetesVersion', 'N/A')}")
 
     # CAPI resources
-    namespace = getattr(args, "namespace", "ns-rosa-hcp") or "ns-rosa-hcp"
+    namespace = getattr(args, "namespace", DEFAULT_NAMESPACE) or DEFAULT_NAMESPACE
     res = minikube_ops.get_capi_resources(cluster, namespace)
     if res.get("resources"):
         print(f"\n  {C.BOLD}CAPI Resources ({namespace}){C.E}")
@@ -2286,7 +2293,7 @@ def _list_clusters_minikube(args):
         print(f"{C.Y}No minikube profiles found.{C.E}")
         return
 
-    namespace = getattr(args, "namespace", None) or "ns-rosa-hcp"
+    namespace = getattr(args, "namespace", None) or DEFAULT_NAMESPACE
     print(f"\n{C.BOLD}{'PROFILE':<25s} {'STATUS':<12s} {'DRIVER':<12s} {'CAPI RESOURCES'}{C.E}")
     print(f"{'-' * 70}")
 
@@ -2320,7 +2327,7 @@ def _watch_minikube(args):
 
     interval = getattr(args, "interval", 30)
     timeout = getattr(args, "timeout", 7200)
-    namespace = getattr(args, "namespace", "ns-rosa-hcp") or "ns-rosa-hcp"
+    namespace = getattr(args, "namespace", DEFAULT_NAMESPACE) or DEFAULT_NAMESPACE
 
     print(f"\n{C.BOLD}Watching minikube profile: {cluster}{C.E}", flush=True)
     print(f"  Namespace: {namespace}", flush=True)
@@ -2567,7 +2574,7 @@ def _mk_configure(name, base_dir):
         sys.exit(1)
 
 
-def _mk_resources(name, namespace="ns-rosa-hcp"):
+def _mk_resources(name, namespace=DEFAULT_NAMESPACE):
     """List CAPI/ROSA resources on a minikube cluster."""
     if not name:
         print(f"{C.R}Profile name required.{C.E}")
@@ -2674,7 +2681,7 @@ def main():
         p.add_argument("--profile", "-p", help="Profile name from specs/")
         p.add_argument("-e", "--extra-vars", action="append", metavar="KEY=VAL", help="Override variables")
         p.add_argument("--cluster", "-c", help="Cluster name")
-        p.add_argument("--namespace", "-n", help="Namespace", default="ns-rosa-hcp")
+        p.add_argument("--namespace", "-n", help="Namespace", default=DEFAULT_NAMESPACE)
         p.add_argument("--version", help="OpenShift version")
 
     # create
@@ -2702,7 +2709,7 @@ def main():
     # status
     p_status = subparsers.add_parser("status", help="Show cluster status")
     p_status.add_argument("--cluster", "-c", required=True, help="Cluster name")
-    p_status.add_argument("--namespace", "-n", default="ns-rosa-hcp")
+    p_status.add_argument("--namespace", "-n", default=DEFAULT_NAMESPACE)
     p_status.add_argument("--target", choices=["minikube"], help="Target platform (default: hub)")
 
     # specs
@@ -2716,8 +2723,8 @@ def main():
     p_set.add_argument("feature", help="Feature ID (e.g., channel_group)")
     p_set.add_argument("value", help="Target value (e.g., fast)")
     p_set.add_argument("--cluster", "-c", required=True, help="Cluster name")
-    p_set.add_argument("--namespace", "-n", default="ns-rosa-hcp", help="Namespace")
-    p_set.add_argument("--dry-run", action="store_true", dest="set_dry_run", help="Show plan without executing")
+    p_set.add_argument("--namespace", "-n", default=DEFAULT_NAMESPACE, help="Namespace")
+    p_set.add_argument("--dry-run", action="store_true", help="Show plan without executing")
 
     # validate
     p_validate = subparsers.add_parser("validate", help="Validate a spec file against the registry")
@@ -2734,7 +2741,7 @@ def main():
     p_test.add_argument("-e", "--extra-vars", action="append", metavar="KEY=VAL", help="Extra variables (can repeat)")
     p_test.add_argument("--ai-agent", action="store_true", help="Enable AI agent framework")
     p_test.add_argument("--ai-agent-dry-run", action="store_true", help="AI agents detect but don't fix")
-    p_test.add_argument("--dry-run", action="store_true", dest="test_dry_run", help="Run in dry-run mode (no changes)")
+    p_test.add_argument("--dry-run", action="store_true", help="Run in dry-run mode (no changes)")
     p_test.add_argument("-V", "--test-verbosity", action="count", default=0, help="Test verbosity (-V, -VV, -VVV)")
 
     # version
@@ -2759,7 +2766,7 @@ def main():
     # watch
     p_watch = subparsers.add_parser("watch", help="Poll cluster status until ready")
     p_watch.add_argument("--cluster", "-c", required=True, help="Cluster name")
-    p_watch.add_argument("--namespace", "-n", default="ns-rosa-hcp", help="Namespace")
+    p_watch.add_argument("--namespace", "-n", default=DEFAULT_NAMESPACE, help="Namespace")
     p_watch.add_argument("--interval", "-i", type=int, default=30, help="Poll interval seconds (default: 30)")
     p_watch.add_argument("--timeout", "-t", type=int, default=7200, help="Timeout seconds (default: 7200)")
     p_watch.add_argument("--target", choices=["minikube"], help="Target platform (default: hub)")
@@ -2773,20 +2780,38 @@ def main():
     p_gen.add_argument("--force", action="store_true", help="Overwrite existing spec files")
 
     # workflow
-    p_wf = subparsers.add_parser("workflow", help="List, show, run, or export workflows")
+    p_wf = subparsers.add_parser("workflow", help="Manage workflows",
+                                  epilog="Actions:\n"
+                                         "  list     List all saved and YAML workflows\n"
+                                         "  show     Show workflow steps and details\n"
+                                         "  run      Execute a workflow (use --dry-run for preview)\n"
+                                         "  export   Export a saved workflow to YAML file",
+                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     p_wf.add_argument("workflow_action", nargs="?", default="list",
                        choices=["list", "show", "run", "export"],
-                       help="Action: list, show, run, or export")
+                       metavar="action",
+                       help="{list,show,run,export} (default: list)")
     p_wf.add_argument("name", nargs="?", help="Workflow name or ID")
     p_wf.add_argument("-e", "--extra-vars", action="append", metavar="KEY=VAL",
                        help="Override variables (for run)")
     p_wf.add_argument("-o", "--output", help="Output file path (for export)")
 
     # trigger
-    p_trig = subparsers.add_parser("trigger", help="Manage workflow triggers (schedule, webhook)")
+    p_trig = subparsers.add_parser("trigger", help="Manage workflow triggers",
+                                    epilog="Actions:\n"
+                                           "  list      List all triggers\n"
+                                           "  show      Show trigger details and run history\n"
+                                           "  create    Create a schedule or webhook trigger\n"
+                                           "  delete    Delete a trigger\n"
+                                           "  enable    Enable a disabled trigger\n"
+                                           "  disable   Disable a trigger\n"
+                                           "  fire      Manually fire a trigger now\n"
+                                           "  history   Show trigger run history",
+                                    formatter_class=argparse.RawDescriptionHelpFormatter)
     p_trig.add_argument("trigger_action", nargs="?", default="list",
                          choices=["list", "show", "create", "delete", "enable", "disable", "fire", "history"],
-                         help="Action: list, show, create, delete, enable, disable, fire, history")
+                         metavar="action",
+                         help="{list,show,create,delete,enable,disable,fire,history} (default: list)")
     p_trig.add_argument("target", nargs="?", help="Trigger ID or workflow name (for create)")
     p_trig.add_argument("--type", choices=["schedule", "webhook"], help="Trigger type (for create)")
     p_trig.add_argument("--cron", help="Cron expression (for schedule triggers)")
@@ -2797,13 +2822,24 @@ def main():
     p_trig.add_argument("--force", action="store_true", help="Force fire even if disabled")
 
     # minikube
-    p_mk = subparsers.add_parser("minikube", help="Manage minikube management-plane clusters")
+    p_mk = subparsers.add_parser("minikube", help="Manage minikube clusters",
+                                  epilog="Actions:\n"
+                                         "  list        List minikube profiles\n"
+                                         "  create      Create a new minikube profile\n"
+                                         "  delete      Delete a minikube profile\n"
+                                         "  status      Show profile status and CAPI readiness\n"
+                                         "  configure   Install CAPI/CAPA via clusterctl\n"
+                                         "  resources   List CAPI/ROSA resources in cluster\n"
+                                         "  tools       Show clusterctl/minikube/kubectl versions\n"
+                                         "  context     Show or switch kubectl context",
+                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     p_mk.add_argument("minikube_action", nargs="?", default="list",
                        choices=["list", "create", "delete", "status", "configure",
                                 "resources", "tools", "context"],
-                       help="Action: list, create, delete, status, configure, resources, tools, context")
+                       metavar="action",
+                       help="{list,create,delete,status,configure,resources,tools,context} (default: list)")
     p_mk.add_argument("name", nargs="?", help="Minikube profile name")
-    p_mk.add_argument("--namespace", "-n", default="ns-rosa-hcp", help="Namespace for resources")
+    p_mk.add_argument("--namespace", "-n", default=DEFAULT_NAMESPACE, help="Namespace for resources")
     p_mk.add_argument("--cpus", type=int, default=2, help="CPUs for create (default: 2)")
     p_mk.add_argument("--memory", type=int, default=4096, help="Memory MB for create (default: 4096)")
     p_mk.add_argument("--yes", "-y", action="store_true", help="Skip confirmation for delete")
@@ -2839,7 +2875,17 @@ def main():
     }
 
     cmd_fn = commands.get(args.command)
-    cmd_fn(args, base_dir, registry)
+    try:
+        cmd_fn(args, base_dir, registry)
+    except KeyboardInterrupt:
+        print(f"\n{C.Y}Interrupted.{C.E}")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\n{C.R}Error: {e}{C.E}", file=sys.stderr)
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,12 @@
+# Feature: Root Disk Size (GiB)
+# Applies to: create (immutable after creation)
+apiVersion: capa-automation/v1
+kind: ClusterAutomationSpec
+metadata:
+  name: disk-size
+spec:
+  action: create
+  cluster: ''
+  namespace: ns-rosa-hcp
+  features:
+    disk_size: 300

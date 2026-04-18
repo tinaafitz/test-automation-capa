@@ -1725,15 +1725,15 @@ class TestCmdTestDryRun:
 
     @patch("subprocess.run")
     def test_dry_run_via_test_subparser(self, mock_run, tmp_path):
-        """Test --dry-run on test subparser (test_dry_run dest)."""
+        """Test --dry-run on test subparser."""
         (tmp_path / "run-test-suite.py").write_text("# fake")
         mock_run.return_value = MagicMock(returncode=0)
 
         args = argparse.Namespace(
             suite_id="20-provision", all=False, list=False, tag=None,
             format=None, no_save=False, extra_vars=None, ai_agent=False,
-            ai_agent_dry_run=False, test_verbosity=0, dry_run=False,
-            test_dry_run=True, verbose=False
+            ai_agent_dry_run=False, test_verbosity=0, dry_run=True,
+            verbose=False
         )
         with pytest.raises(SystemExit) as exc_info:
             capa_cli.cmd_test(args, tmp_path, None)
@@ -1749,29 +1749,28 @@ class TestCmdSetDryRun:
     @patch.object(ExecutionEngine, "execute")
     @patch.object(ExecutionEngine, "plan")
     def test_dry_run_via_parent_parser(self, mock_plan, mock_execute, minimal_registry):
-        """./capa --dry-run set channel_group fast -c moo — parent dry_run propagates."""
+        """./capa --dry-run set channel_group fast -c moo — dry_run propagates."""
         mock_plan.return_value = [{"step": 1, "name": "test", "status": "dry_run"}]
         mock_execute.return_value = [{"step": 1, "name": "test", "status": "dry_run"}]
 
         args = argparse.Namespace(
             feature="channel_group", value="fast", cluster="moo-rosa-hcp",
-            namespace="ns-rosa-hcp", dry_run=True, set_dry_run=False, verbose=False
+            namespace="ns-rosa-hcp", dry_run=True, verbose=False
         )
         capa_cli.cmd_set(args, minimal_registry._registry_path.parent.parent, minimal_registry)
 
-        # ExecutionEngine should have been constructed with dry_run=True
         mock_execute.assert_called_once()
 
     @patch.object(ExecutionEngine, "execute")
     @patch.object(ExecutionEngine, "plan")
     def test_dry_run_via_set_subparser(self, mock_plan, mock_execute, minimal_registry):
-        """./capa set --dry-run channel_group fast -c moo — subparser dry_run works."""
+        """./capa set --dry-run channel_group fast -c moo — unified dry_run works."""
         mock_plan.return_value = [{"step": 1, "name": "test", "status": "dry_run"}]
         mock_execute.return_value = [{"step": 1, "name": "test", "status": "dry_run"}]
 
         args = argparse.Namespace(
             feature="channel_group", value="fast", cluster="moo-rosa-hcp",
-            namespace="ns-rosa-hcp", dry_run=False, set_dry_run=True, verbose=False
+            namespace="ns-rosa-hcp", dry_run=True, verbose=False
         )
         capa_cli.cmd_set(args, minimal_registry._registry_path.parent.parent, minimal_registry)
 
