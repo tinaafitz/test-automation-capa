@@ -8,8 +8,10 @@ modules (jobs_service, etc.) operate on the *same* objects.
 import threading
 from typing import Dict
 
-# ── Job tracking ─────────────────────────────────────────────────────────
-jobs: Dict[str, dict] = {}
+from job_store import JobStore
+
+# ── Job tracking (SQLite-backed, dict-like interface) ────────────────────
+jobs = JobStore()
 _jobs_lock = threading.Lock()
 
 # ── AI Agent sessions (keyed by job_id) ──────────────────────────────────
