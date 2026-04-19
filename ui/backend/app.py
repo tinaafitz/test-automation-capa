@@ -472,6 +472,7 @@ def _get_supported_versions_sync():
         if result.returncode != 0:
             # Fallback to hardcoded versions if rosa command fails
             return {
+                "success": True,
                 "versions": [
                     "4.21.0",
                     "4.20.12",
@@ -502,6 +503,7 @@ def _get_supported_versions_sync():
         if not versions:
             # Fallback if parsing failed
             return {
+                "success": True,
                 "versions": [
                     "4.21.0",
                     "4.20.12",
@@ -517,6 +519,7 @@ def _get_supported_versions_sync():
 
         # Return the versions with the latest as default
         return {
+            "success": True,
             "versions": versions,
             "default_version": (
                 versions[1] if len(versions) > 1 else versions[0]
@@ -528,6 +531,7 @@ def _get_supported_versions_sync():
         print(f"Error fetching ROSA versions: {e}")
         # Fallback to hardcoded versions
         return {
+            "success": True,
             "versions": ["4.21.0", "4.20.12", "4.20.11", "4.20.10", "4.20.8", "4.19.22", "4.19.21"],
             "default_version": "4.20.12",
             "latest_version": "4.21.0",
@@ -538,6 +542,7 @@ def _get_supported_versions_sync():
 async def get_templates():
     """Get available cluster templates"""
     return {
+        "success": True,
         "templates": [
             {
                 "id": "rosa-network-basic",
@@ -669,6 +674,7 @@ async def analyze_yaml(request: Request):
             config_values["kms_provider_arn"] = roles_ref.get("kmsProviderARN")
 
         return {
+            "success": True,
             "network_intent": network_intent,
             "role_intent": role_intent,
             "messages": messages,
@@ -733,6 +739,7 @@ async def create_cluster(config: ClusterConfig, background_tasks: BackgroundTask
     )
 
     return {
+        "success": True,
         "cluster_id": cluster_id,
         "job_id": job_id,
         "message": "Cluster creation started",
@@ -752,7 +759,7 @@ async def get_cluster(cluster_id: str):
     # Get job status
     job_status = jobs.get(job_id, {})
 
-    return {"cluster": cluster, "job": job_status}
+    return {"success": True, "cluster": cluster, "job": job_status}
 
 
 @app.delete("/api/clusters/{cluster_id}")
@@ -785,7 +792,7 @@ async def delete_cluster(cluster_id: str, background_tasks: BackgroundTasks):
         run_playbook_background("playbooks/delete_rosa_hcp_cluster.yml", delete_vars, job_id, "Delete ROSA HCP Cluster")
     )
 
-    return {"job_id": job_id, "message": "Cluster deletion started"}
+    return {"success": True, "job_id": job_id, "message": "Cluster deletion started"}
 
 
 
@@ -997,6 +1004,7 @@ async def test_notification_settings(request: Request):
 async def get_onboarding_tour():
     """Get guided onboarding tour steps"""
     return {
+        "success": True,
         "steps": [
             {
                 "id": 1,
@@ -1038,6 +1046,7 @@ async def get_onboarding_tour():
 async def get_available_diagnostic_checks():
     """Get list of available diagnostic checks"""
     return {
+        "success": True,
         "checks": [
             {
                 "id": "aws_credentials",
@@ -1130,13 +1139,14 @@ async def run_diagnostics(request: dict):
                 }
             )
 
-    return {"results": results}
+    return {"success": True, "results": results}
 
 
 @app.get("/api/environment/overview")
 async def get_environment_overview():
     """Get comprehensive environment overview"""
     return {
+        "success": True,
         "aws": {
             "account_id": "123456789012",
             "region": "us-west-2",
@@ -1226,6 +1236,7 @@ def _get_rosa_status_sync():
                     user_info[key.strip().lower().replace(" ", "_")] = value.strip()
 
             response_data = {
+                "success": True,
                 "authenticated": True,
                 "status": "success",
                 "message": "ROSA CLI is authenticated and ready",
@@ -1257,6 +1268,7 @@ def _get_rosa_status_sync():
                 suggestion = "Check your ROSA CLI installation and network connectivity"
 
             return {
+                "success": False,
                 "authenticated": False,
                 "status": "error",
                 "message": f"ROSA CLI authentication failed: {error_msg}",
@@ -1268,6 +1280,7 @@ def _get_rosa_status_sync():
 
     except subprocess.TimeoutExpired:
         return {
+            "success": False,
             "authenticated": False,
             "status": "timeout",
             "message": "ROSA CLI command timed out after 5 seconds",
@@ -1278,6 +1291,7 @@ def _get_rosa_status_sync():
         }
     except FileNotFoundError:
         return {
+            "success": False,
             "authenticated": False,
             "status": "not_installed",
             "message": "ROSA CLI is not installed",
@@ -1288,6 +1302,7 @@ def _get_rosa_status_sync():
         }
     except Exception as e:
         return {
+            "success": False,
             "authenticated": False,
             "status": "error",
             "message": f"Unexpected error checking ROSA status: {str(e)}",
@@ -1309,6 +1324,7 @@ async def get_config_status():
 
         if not os.path.exists(config_path):
             return {
+                "success": True,
                 "configured": False,
                 "status": "missing",
                 "message": "vars/user_vars.yml file not found",
@@ -1362,6 +1378,7 @@ async def get_config_status():
             message = "No credentials have been configured"
 
         return {
+            "success": True,
             "configured": total_configured == total_required,
             "status": status,
             "message": message,
@@ -1377,6 +1394,7 @@ async def get_config_status():
 
     except yaml.YAMLError as e:
         return {
+            "success": False,
             "configured": False,
             "status": "invalid_yaml",
             "message": f"Invalid YAML format in vars/user_vars.yml: {str(e)}",
@@ -1387,6 +1405,7 @@ async def get_config_status():
         }
     except Exception as e:
         return {
+            "success": False,
             "configured": False,
             "status": "error",
             "message": f"Error reading configuration: {str(e)}",
@@ -1500,6 +1519,7 @@ def _get_ocp_connection_status_sync():
 
         if not os.path.exists(config_path):
             return {
+                "success": False,
                 "connected": False,
                 "status": "config_missing",
                 "message": "vars/user_vars.yml file not found",
@@ -1533,6 +1553,7 @@ def _get_ocp_connection_status_sync():
 
         if is_placeholder:
             return {
+                "success": False,
                 "connected": False,
                 "status": "placeholder_credentials",
                 "message": "⚠️ OCP Hub credentials contain placeholder values",
@@ -1557,6 +1578,7 @@ def _get_ocp_connection_status_sync():
 
         if not ocp_api_url:
             return {
+                "success": False,
                 "connected": False,
                 "status": "missing_api_url",
                 "message": "OCP_HUB_API_URL not configured",
@@ -1566,6 +1588,7 @@ def _get_ocp_connection_status_sync():
 
         if not ocp_user or not ocp_password:
             return {
+                "success": False,
                 "connected": False,
                 "status": "missing_credentials",
                 "message": "OCP Hub username or password not configured",
@@ -1616,6 +1639,7 @@ def _get_ocp_connection_status_sync():
                     cluster_info["cluster_info"] = cluster_result.stdout.strip()
 
                 response_data = {
+                    "success": True,
                     "connected": True,
                     "status": "connected",
                     "message": "Successfully connected to OpenShift Hub cluster",
@@ -1634,6 +1658,7 @@ def _get_ocp_connection_status_sync():
 
             except subprocess.TimeoutExpired:
                 return {
+                    "success": True,
                     "connected": True,
                     "status": "connected_limited",
                     "message": "Connected to OpenShift, but cluster info retrieval timed out",
@@ -1701,6 +1726,7 @@ def _get_ocp_connection_status_sync():
                 suggestion = "Check your OCP Hub configuration and network connectivity"
 
             response_data = {
+                "success": False,
                 "connected": False,
                 "status": status,
                 "message": message,
@@ -1734,6 +1760,7 @@ def _get_ocp_connection_status_sync():
             ocp_api_url = None
 
         return {
+            "success": False,
             "connected": False,
             "status": "timeout",
             "message": "Connection test timed out after 30 seconds",
@@ -1743,6 +1770,7 @@ def _get_ocp_connection_status_sync():
         }
     except FileNotFoundError:
         return {
+            "success": False,
             "connected": False,
             "status": "oc_not_found",
             "message": "OpenShift CLI (oc) not found",
@@ -1751,6 +1779,7 @@ def _get_ocp_connection_status_sync():
         }
     except yaml.YAMLError as e:
         return {
+            "success": False,
             "connected": False,
             "status": "invalid_yaml",
             "message": f"Invalid YAML format in vars/user_vars.yml: {str(e)}",
@@ -1759,6 +1788,7 @@ def _get_ocp_connection_status_sync():
         }
     except Exception as e:
         return {
+            "success": False,
             "connected": False,
             "status": "error",
             "message": f"Error testing OCP connection: {str(e)}",
@@ -1777,6 +1807,7 @@ async def get_aws_credentials_status():
 
         if not os.path.exists(config_path):
             return {
+                "success": False,
                 "valid": False,
                 "status": "config_missing",
                 "message": "Configuration file not found",
@@ -1797,6 +1828,7 @@ async def get_aws_credentials_status():
         # Check if credentials are configured
         if not aws_access_key or not aws_secret_key:
             return {
+                "success": False,
                 "valid": False,
                 "status": "empty_credentials",
                 "message": "AWS credentials not configured",
@@ -1826,6 +1858,7 @@ async def get_aws_credentials_status():
                 try:
                     identity = json.loads(result.stdout)
                     return {
+                        "success": True,
                         "valid": True,
                         "status": "valid",
                         "message": "AWS credentials are valid and working",
@@ -1840,6 +1873,7 @@ async def get_aws_credentials_status():
                     }
                 except json.JSONDecodeError:
                     return {
+                        "success": True,
                         "valid": True,
                         "status": "valid_no_details",
                         "message": "AWS credentials are valid",
@@ -1869,6 +1903,7 @@ async def get_aws_credentials_status():
                     suggestion = "Check your AWS credentials and network connectivity"
 
                 return {
+                    "success": False,
                     "valid": False,
                     "status": status,
                     "message": message,
@@ -1882,6 +1917,7 @@ async def get_aws_credentials_status():
 
         except subprocess.TimeoutExpired:
             return {
+                "success": False,
                 "valid": False,
                 "status": "timeout",
                 "message": "AWS credential validation timed out",
@@ -1892,6 +1928,7 @@ async def get_aws_credentials_status():
             }
         except FileNotFoundError:
             return {
+                "success": False,
                 "valid": False,
                 "status": "aws_cli_missing",
                 "message": "AWS CLI not found",
@@ -1903,6 +1940,7 @@ async def get_aws_credentials_status():
 
     except yaml.YAMLError as e:
         return {
+            "success": False,
             "valid": False,
             "status": "invalid_yaml",
             "message": f"Invalid YAML in configuration file: {str(e)}",
@@ -1912,6 +1950,7 @@ async def get_aws_credentials_status():
         }
     except Exception as e:
         return {
+            "success": False,
             "valid": False,
             "status": "error",
             "message": f"Error checking AWS credentials: {str(e)}",
@@ -1960,6 +1999,7 @@ async def get_guided_setup_status():
             next_action = "ready"
 
         return {
+            "success": True,
             "current_step": current_step,
             "next_action": next_action,
             "all_prerequisites_met": all_prerequisites_met,
@@ -2021,6 +2061,7 @@ async def get_guided_setup_status():
 
     except Exception as e:
         return {
+            "success": False,
             "current_step": 1,
             "next_action": "error",
             "all_prerequisites_met": False,
@@ -2033,6 +2074,7 @@ async def get_guided_setup_status():
 async def get_user_profile():
     """Get user profile and permissions"""
     return {
+        "success": True,
         "identity": {
             "username": "user@example.com",
             "account_id": "123456789012",
@@ -2063,6 +2105,7 @@ async def get_user_profile():
 async def get_build_templates():
     """Get project templates for building"""
     return {
+        "success": True,
         "templates": [
             {
                 "id": "development",
@@ -2127,7 +2170,7 @@ async def validate_config(config: ClusterConfig):
     if not config.version.startswith("4.20"):
         warnings.append("Only OpenShift 4.20 is fully supported by this automation")
 
-    return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+    return {"success": True, "valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
 def run_ansible_task_background(
@@ -2623,7 +2666,7 @@ def _get_mce_features_sync():
                     }
                 )
 
-        return {"features": features, "count": len(features), "mce_info": mce_info}
+        return {"success": True, "features": features, "count": len(features), "mce_info": mce_info}
 
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Request to OpenShift timed out")
@@ -4132,7 +4175,7 @@ async def get_capi_component_versions(cluster_name: str = None, environment: str
             print(f"Failed to get ROSA CRD version: {e}")
             components.append({"name": "ROSA CRD", "version": "unknown", "enabled": False})
 
-        return {"components": components, "timestamp": datetime.now().isoformat()}
+        return {"success": True, "components": components, "timestamp": datetime.now().isoformat()}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get component versions: {str(e)}")
@@ -6440,6 +6483,7 @@ sed '/creationTimestamp:/d' | \
         asyncio.create_task(apply_yaml_background())
 
         return {
+            "success": True,
             "job_id": job_id,
             "status": "pending",
             "message": "YAML queued for application",
@@ -6740,6 +6784,7 @@ async def ai_assistant_chat(request: Request):
                         logger.info(f"✅ [AI-ASSISTANT] Fixed response: {response_text}")
 
                 return {
+                    "success": True,
                     "response": response_text,
                     "suggestions": ai_response.get("suggestions", []),
                 }
@@ -7313,7 +7358,7 @@ What would you like to know?"""
                     "Troubleshoot failed cluster",
                 ]
 
-        return {"response": response, "suggestions": suggestions}
+        return {"success": True, "response": response, "suggestions": suggestions}
 
     except Exception as e:
         import traceback
@@ -7321,6 +7366,7 @@ What would you like to know?"""
         print(f"❌ [AI-ASSISTANT] Error: {str(e)}")
         print(traceback.format_exc())
         return {
+            "success": False,
             "response": "Sorry, I encountered an error processing your request. Please try again.",
             "suggestions": [],
         }

@@ -233,7 +233,7 @@ async def get_job_logs(job_id: str):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    return {"logs": jobs[job_id].get("logs", [])}
+    return {"success": True, "logs": jobs[job_id].get("logs", [])}
 
 
 @router.post("/api/jobs/{job_id}/cancel")
