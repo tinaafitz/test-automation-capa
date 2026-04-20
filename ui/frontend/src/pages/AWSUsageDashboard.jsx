@@ -10,7 +10,8 @@ const AWS_CACHE_KEY = 'aws-usage-cache';
 const _loadCache = () => {
   try {
     const c = JSON.parse(sessionStorage.getItem(AWS_CACHE_KEY));
-    return c && c.usage ? c : { usage: null, lastUpdated: null, billedResources: [], freeResources: [] };
+    if (!c) return { usage: null, lastUpdated: null, billedResources: [], freeResources: [] };
+    return { usage: c.usage || null, lastUpdated: c.lastUpdated || null, billedResources: c.billedResources || [], freeResources: c.freeResources || [] };
   } catch { return { usage: null, lastUpdated: null, billedResources: [], freeResources: [] }; }
 };
 const _saveCache = (cache) => {
