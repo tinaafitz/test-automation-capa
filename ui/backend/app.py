@@ -4,13 +4,11 @@ ROSA Automation UI Backend
 FastAPI-based backend for the ROSA cluster automation interface
 """
 
-from fastapi import FastAPI, HTTPException, WebSocket, BackgroundTasks, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 import asyncio
-import fcntl
 import json
 import re
 import subprocess
@@ -38,14 +36,10 @@ except ImportError as e:
 
 from capa_core import (
     FeatureRegistry as _CoreFeatureRegistry,
-    ClusterAutomationSpec as _CoreClusterAutomationSpec,
-    validate_feature_value as _core_validate_feature_value,
-    validate_cluster_name as _core_validate_cluster_name,
-    build_json_merge_patch as _core_build_json_merge_patch,
     resolve_spec_to_plan as _core_resolve_spec_to_plan,
 )
 import minikube_ops
-from playbook_executor import build_playbook_command, SENSITIVE_KEYS
+from playbook_executor import build_playbook_command
 from pathlib import Path as _Path
 
 # Shared registry instance (auto-refreshes on file change via mtime cache)
@@ -2632,7 +2626,7 @@ async def generate_provisioning_yaml(request: Request):
             else openshift_version
         )
 
-        from jinja2 import Environment, FileSystemLoader, select_autoescape
+        from jinja2 import Environment, FileSystemLoader
         import re
         from datetime import datetime
 
