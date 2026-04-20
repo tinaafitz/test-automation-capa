@@ -151,14 +151,35 @@ class ExecutionEngine:
 
         print(f"  {C.CYAN}$ ansible-playbook {step['playbook']}...{C.E}")
 
-        result = run_playbook_blocking(
-            playbook_path,
-            extra_vars=step.get("extra_vars"),
-            cwd=str(self.base_dir),
-            timeout=step.get("wait_timeout", 7200),
-            verbosity=verbosity,
-            capture_output=not self.verbose,
-        )
+        if self.ai_agent and self.monitor_agent:
+            cluster_name = step.get("extra_vars", {}).get("cluster_name", "")
+            sidecar_log = f"/tmp/agent-{cluster_name}.log" if cluster_name else None
+
+            def on_line(line):
+                print(line)
+                self._agent_process_line(line)
+
+            runner = StreamingPlaybookRunner(
+                playbook_path,
+                extra_vars=step.get("extra_vars"),
+                cwd=str(self.base_dir),
+                timeout=step.get("wait_timeout", 7200),
+                verbosity=verbosity,
+                capture_output=not self.verbose,
+                on_line=on_line,
+                sidecar_logfile=sidecar_log,
+                on_sidecar_line=on_line,
+            )
+            result = runner.run()
+        else:
+            result = run_playbook_blocking(
+                playbook_path,
+                extra_vars=step.get("extra_vars"),
+                cwd=str(self.base_dir),
+                timeout=step.get("wait_timeout", 7200),
+                verbosity=verbosity,
+                capture_output=not self.verbose,
+            )
 
         elapsed = result["elapsed"]
         if result["success"]:
@@ -361,7 +382,10 @@ def load_spec(args, base_dir: Path) -> ClusterAutomationSpec:
 def cmd_create(args, base_dir, registry):
     spec = load_spec(args, base_dir)
     spec.spec["action"] = "create"
-    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose)
+    ai_agent = getattr(args, 'ai_agent', False)
+    ai_agent_dry_run = getattr(args, 'ai_agent_dry_run', False)
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose,
+                             ai_agent=ai_agent, ai_agent_dry_run=ai_agent_dry_run)
     plan = engine.plan(spec)
     engine.execute(plan)
 
@@ -369,7 +393,10 @@ def cmd_create(args, base_dir, registry):
 def cmd_upgrade(args, base_dir, registry):
     spec = load_spec(args, base_dir)
     spec.spec["action"] = "upgrade"
-    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose)
+    ai_agent = getattr(args, 'ai_agent', False)
+    ai_agent_dry_run = getattr(args, 'ai_agent_dry_run', False)
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose,
+                             ai_agent=ai_agent, ai_agent_dry_run=ai_agent_dry_run)
     plan = engine.plan(spec)
     engine.execute(plan)
 
@@ -377,7 +404,10 @@ def cmd_upgrade(args, base_dir, registry):
 def cmd_apply(args, base_dir, registry):
     spec = load_spec(args, base_dir)
     spec.spec["action"] = "apply"
-    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose)
+    ai_agent = getattr(args, 'ai_agent', False)
+    ai_agent_dry_run = getattr(args, 'ai_agent_dry_run', False)
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose,
+                             ai_agent=ai_agent, ai_agent_dry_run=ai_agent_dry_run)
     plan = engine.plan(spec)
     engine.execute(plan)
 
@@ -391,7 +421,10 @@ def cmd_delete(args, base_dir, registry):
         if confirm.lower() != "y":
             print("Cancelled.")
             return
-    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose)
+    ai_agent = getattr(args, 'ai_agent', False)
+    ai_agent_dry_run = getattr(args, 'ai_agent_dry_run', False)
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose,
+                             ai_agent=ai_agent, ai_agent_dry_run=ai_agent_dry_run)
     plan = engine.plan(spec)
     engine.execute(plan)
 
@@ -402,6 +435,30 @@ def cmd_plan(args, base_dir, registry):
     spec = load_spec(args, base_dir)
     engine = ExecutionEngine(registry, base_dir, dry_run=True, verbose=args.verbose)
     plan = engine.plan(spec)
+    engine.execute(plan)
+
+
+def cmd_enable(args, base_dir, registry):
+    pause = getattr(args, "pause_duration", 30)
+    ai_agent = getattr(args, 'ai_agent', False)
+    ai_agent_dry_run = getattr(args, 'ai_agent_dry_run', False)
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose,
+                             ai_agent=ai_agent, ai_agent_dry_run=ai_agent_dry_run)
+    plan = [{"step": 1, "name": "Enable CAPI/CAPA, disable Hypershift", "type": "playbook",
+             "playbook": "playbooks/enable_capi_disable_hypershift.yml",
+             "extra_vars": {"pause_duration": pause}}]
+    engine.execute(plan)
+
+
+def cmd_disable(args, base_dir, registry):
+    pause = getattr(args, "pause_duration", 30)
+    ai_agent = getattr(args, 'ai_agent', False)
+    ai_agent_dry_run = getattr(args, 'ai_agent_dry_run', False)
+    engine = ExecutionEngine(registry, base_dir, dry_run=args.dry_run, verbose=args.verbose,
+                             ai_agent=ai_agent, ai_agent_dry_run=ai_agent_dry_run)
+    plan = [{"step": 1, "name": "Disable CAPI/CAPA, enable Hypershift", "type": "playbook",
+             "playbook": "playbooks/disable_capi_enable_hypershift.yml",
+             "extra_vars": {"pause_duration": pause}}]
     engine.execute(plan)
 
 
@@ -2669,6 +2726,8 @@ def main():
         p.add_argument("--cluster", "-c", help="Cluster name")
         p.add_argument("--namespace", "-n", help="Namespace", default=DEFAULT_NAMESPACE)
         p.add_argument("--version", help="OpenShift version")
+        p.add_argument("--ai-agent", action="store_true", help="Enable AI agent framework")
+        p.add_argument("--ai-agent-dry-run", action="store_true", help="AI agents detect but don't fix")
 
     # create
     p_create = subparsers.add_parser("create", help="Create a new cluster")
@@ -2687,6 +2746,18 @@ def main():
     p_delete = subparsers.add_parser("delete", help="Delete a cluster")
     add_common_args(p_delete)
     p_delete.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+
+    # enable
+    p_enable = subparsers.add_parser("enable", help="Enable CAPI/CAPA and disable Hypershift")
+    p_enable.add_argument("--pause-duration", type=int, default=30)
+    p_enable.add_argument("--ai-agent", action="store_true", help="Enable AI agent framework")
+    p_enable.add_argument("--ai-agent-dry-run", action="store_true", help="AI agents detect but don't fix")
+
+    # disable
+    p_disable = subparsers.add_parser("disable", help="Disable CAPI/CAPA and enable Hypershift")
+    p_disable.add_argument("--pause-duration", type=int, default=30)
+    p_disable.add_argument("--ai-agent", action="store_true", help="Enable AI agent framework")
+    p_disable.add_argument("--ai-agent-dry-run", action="store_true", help="AI agents detect but don't fix")
 
     # plan
     p_plan = subparsers.add_parser("plan", help="Show execution plan (dry run)")
@@ -2841,6 +2912,8 @@ def main():
         "upgrade": cmd_upgrade,
         "apply": cmd_apply,
         "delete": cmd_delete,
+        "enable": cmd_enable,
+        "disable": cmd_disable,
         "plan": cmd_plan,
         "status": cmd_status,
         "specs": cmd_specs,
