@@ -83,6 +83,7 @@ jobs:
             // Check if this is a feature PR with new UI components, infra, or schema files
             const infraFiles = changedFiles.filter(f =>
               f.match(/^deploy\//) || f.match(/^specs\//) || f.match(/^schemas\//) ||
+              f.match(/^agents\//) || f.match(/^playbooks\//) ||
               f.match(/Dockerfile/) || f.match(/Containerfile/) || f.match(/\.dockerignore/) ||
               f.match(/container-run\.sh/) || f.match(/docker-entrypoint\.sh/)
             );
