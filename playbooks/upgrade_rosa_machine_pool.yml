@@ -236,7 +236,7 @@
 
           Check upgrade status:
             oc describe rosamachinepool {{ pool_name }} -n {{ capi_namespace }}
-      when: final_state != "upgraded" or final_ready != "true"
+      when: final_state != "upgraded" or final_ready | lower != "true"
 
     - name: Calculate total upgrade time
       set_fact:

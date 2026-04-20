@@ -185,7 +185,7 @@
 
           Check upgrade status:
             oc describe rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }}
-      when: final_version != requested_version or final_ready != "true"
+      when: final_version != requested_version or final_ready | lower != "true"
 
     - name: Calculate total upgrade time
       set_fact:
