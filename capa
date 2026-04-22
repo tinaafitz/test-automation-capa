@@ -84,11 +84,14 @@ class ExecutionEngine:
     """Wraps shared plan resolution with CLI-specific execution (subprocess, terminal output)."""
 
     def __init__(self, registry: FeatureRegistry, base_dir: Path,
-                 dry_run: bool = False, verbose: bool = False):
+                 dry_run: bool = False, verbose: bool = False,
+                 ai_agent: bool = False, ai_agent_dry_run: bool = False):
         self.registry = registry
         self.base_dir = base_dir
         self.dry_run = dry_run
         self.verbose = verbose
+        self.ai_agent = ai_agent
+        self.ai_agent_dry_run = ai_agent_dry_run
 
     def plan(self, spec: ClusterAutomationSpec) -> List[Dict]:
         """Generate an ordered execution plan from a spec (delegates to capa_core)."""

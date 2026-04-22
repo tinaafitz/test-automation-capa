@@ -91,8 +91,18 @@
     - delete_all.rc == 0
 
 - name: No resources to delete
-  debug:
-    msg: "ℹ️  No matching resources found to delete"
+  fail:
+    msg: |
+      ❌ No K8s resources found for cluster '{{ cluster_name }}' in namespace '{{ capi_namespace }}'.
+
+      This does NOT mean the cluster has been deleted — it may still be running in AWS
+      if it was provisioned from a different hub cluster.
+
+      Check ROSA directly:
+        rosa list clusters | grep {{ cluster_name }}
+
+      If the cluster still exists in ROSA, delete it with:
+        rosa delete cluster --cluster={{ cluster_name }} --yes
   when: resources_to_delete | length == 0
 
 - name: Emit agent context for ROSAControlPlane deletion wait

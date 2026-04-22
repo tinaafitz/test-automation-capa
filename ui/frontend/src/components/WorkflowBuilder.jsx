@@ -1469,7 +1469,7 @@ const WorkflowBuilder = () => {
                             <div className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                               <button
                                 onClick={() => setContextMenuId(contextMenuId === wf.id ? null : wf.id)}
-                                className="p-1 text-gray-300 hover:text-gray-500 rounded transition-colors opacity-0 group-hover:opacity-100"
+                                className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
                               >
                                 <EllipsisVerticalIcon className="h-4 w-4" />
                               </button>
