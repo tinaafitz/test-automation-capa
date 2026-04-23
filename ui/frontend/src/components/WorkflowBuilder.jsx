@@ -51,7 +51,7 @@ import TriggerPanel from './TriggerPanel';
 // Draggable Playbook Card (in the palette)
 // ============================================================================
 const categoryColors = {
-  Validation: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-400' },
+  Validation: { bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-700', dot: 'bg-teal-400' },
   Configuration: { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', dot: 'bg-violet-400' },
   Provisioning: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', dot: 'bg-blue-400' },
   Cleanup: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', dot: 'bg-orange-400' },
@@ -68,11 +68,12 @@ const PlaybookPaletteItem = ({ suite, onAdd, category }) => {
         e.dataTransfer.setData('application/json', JSON.stringify(suite));
         e.dataTransfer.effectAllowed = 'copy';
       }}
+      title={`${suite.name}\n${suite.description || ''}`}
     >
       <div className={`w-1.5 h-8 rounded-full ${colors.dot} flex-shrink-0`} />
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-gray-900 truncate">{suite.name}</div>
-        <div className="text-xs text-gray-500 truncate">{suite.description}</div>
+        <div className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">{suite.name}</div>
+        <div className="text-xs text-gray-500 line-clamp-2">{suite.description}</div>
       </div>
       <button
         onClick={(e) => {
@@ -91,6 +92,14 @@ const PlaybookPaletteItem = ({ suite, onAdd, category }) => {
 // ============================================================================
 // Sortable Workflow Step
 // ============================================================================
+const stepCategoryColors = {
+  Validation: { accent: 'bg-teal-400', badge: 'bg-teal-100 text-teal-700' },
+  Configuration: { accent: 'bg-violet-400', badge: 'bg-violet-100 text-violet-700' },
+  Provisioning: { accent: 'bg-blue-400', badge: 'bg-blue-100 text-blue-700' },
+  Cleanup: { accent: 'bg-orange-400', badge: 'bg-orange-100 text-orange-700' },
+  Other: { accent: 'bg-gray-400', badge: 'bg-gray-100 text-gray-700' },
+};
+
 const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpdateStep, isOutputActive, onToggleOutput }) => {
   const {
     attributes,
@@ -119,28 +128,28 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
 
   const statusIcons = {
     pending: (
-      <div className={`w-8 h-8 rounded-xl ${st.iconBg} flex items-center justify-center text-sm font-bold ${st.iconText}`}>
+      <div className={`w-6 h-6 rounded-lg ${st.iconBg} flex items-center justify-center text-xs font-bold ${st.iconText} flex-shrink-0`}>
         {index + 1}
       </div>
     ),
     running: (
-      <div className={`w-8 h-8 rounded-xl ${st.iconBg} flex items-center justify-center`}>
-        <ArrowPathIcon className="h-5 w-5 text-blue-600 animate-spin" />
+      <div className={`w-6 h-6 rounded-lg ${st.iconBg} flex items-center justify-center flex-shrink-0`}>
+        <ArrowPathIcon className="h-4 w-4 text-blue-600 animate-spin" />
       </div>
     ),
     completed: (
-      <div className={`w-8 h-8 rounded-xl ${st.iconBg} flex items-center justify-center`}>
-        <CheckCircleIcon className="h-5 w-5 text-emerald-600" />
+      <div className={`w-6 h-6 rounded-lg ${st.iconBg} flex items-center justify-center flex-shrink-0`}>
+        <CheckCircleIcon className="h-4 w-4 text-emerald-600" />
       </div>
     ),
     failed: (
-      <div className={`w-8 h-8 rounded-xl ${st.iconBg} flex items-center justify-center`}>
-        <XCircleIcon className="h-5 w-5 text-red-600" />
+      <div className={`w-6 h-6 rounded-lg ${st.iconBg} flex items-center justify-center flex-shrink-0`}>
+        <XCircleIcon className="h-4 w-4 text-red-600" />
       </div>
     ),
     skipped: (
-      <div className={`w-8 h-8 rounded-xl ${st.iconBg} flex items-center justify-center`}>
-        <ClockIcon className="h-5 w-5 text-amber-600" />
+      <div className={`w-6 h-6 rounded-lg ${st.iconBg} flex items-center justify-center flex-shrink-0`}>
+        <ClockIcon className="h-4 w-4 text-amber-600" />
       </div>
     ),
   };
@@ -155,18 +164,18 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
     <div ref={setNodeRef} style={style}>
       {/* Connector */}
       {index > 0 && (
-        <div className="flex flex-col items-center py-1">
-          <div className={`w-0.5 h-3 ${step.status === 'running' ? 'bg-blue-300' : step.status === 'completed' ? 'bg-emerald-300' : 'bg-gray-300'} rounded-full`} />
-          <ArrowDownIcon className={`h-3.5 w-3.5 ${step.status === 'running' ? 'text-blue-400' : step.status === 'completed' ? 'text-emerald-400' : 'text-gray-300'}`} />
+        <div className="flex flex-col items-center py-0.5">
+          <div className={`w-0.5 h-2 ${step.status === 'running' ? 'bg-blue-300' : step.status === 'completed' ? 'bg-emerald-300' : 'bg-gray-300'} rounded-full`} />
+          <ArrowDownIcon className={`h-3 w-3 ${step.status === 'running' ? 'text-blue-400' : step.status === 'completed' ? 'text-emerald-400' : 'text-gray-300'}`} />
         </div>
       )}
 
       {/* Step card */}
-      <div className={`rounded-xl border-2 ${st.card} transition-all duration-300 overflow-hidden`}>
-        {/* Color accent bar */}
-        <div className={`h-1 ${st.accent} transition-all duration-500`} />
+      <div className={`rounded-lg border-2 ${st.card} transition-all duration-300 overflow-hidden`}>
+        {/* Color accent bar — uses category color when pending, status color when running/completed/failed */}
+        <div className={`h-0.5 ${step.status === 'pending' ? (stepCategoryColors[step.category]?.accent || st.accent) : st.accent} transition-all duration-500`} />
 
-        <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex items-center gap-2.5 px-3.5 py-2.5">
           {/* Drag handle */}
           <div
             {...attributes}
@@ -174,7 +183,7 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
             className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 flex-shrink-0 transition-colors"
             title="Drag to reorder"
           >
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path d="M7 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" />
             </svg>
           </div>
@@ -182,27 +191,29 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
           {/* Status icon */}
           {statusIcons[step.status]}
 
-          {/* Step info */}
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-gray-900 truncate">{step.name}</div>
-            <div className="text-xs text-gray-500 truncate flex items-center gap-2">
-              <span className="truncate">{step.description}</span>
-              {step.startedAt && (
-                <span className={`flex-shrink-0 font-mono px-1.5 py-0.5 rounded text-[10px] ${
-                  step.status === 'running' ? 'bg-blue-100 text-blue-700' :
-                  step.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
-                  step.status === 'failed' ? 'bg-red-100 text-red-700' :
-                  'bg-gray-100 text-gray-600'
-                }`}>
-                  {formatDuration(step.startedAt, step.completedAt)}
-                  {step.status === 'running' && '...'}
-                </span>
-              )}
-            </div>
+          {/* Step info — single line, name only */}
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            <span className="text-sm font-semibold text-gray-900 truncate">{step.name}</span>
+            {step.startedAt && (
+              <span className={`flex-shrink-0 font-mono px-1.5 py-0.5 rounded text-[10px] ${
+                step.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                step.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
+                step.status === 'failed' ? 'bg-red-100 text-red-700' :
+                'bg-gray-100 text-gray-600'
+              }`}>
+                {formatDuration(step.startedAt, step.completedAt)}
+                {step.status === 'running' && '...'}
+              </span>
+            )}
           </div>
 
           {/* Step badges */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
+            {step.category && (
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${stepCategoryColors[step.category]?.badge || 'bg-gray-100 text-gray-700'}`}>
+                {step.category}
+              </span>
+            )}
             {step.on_failure === 'skip' && (
               <span className="text-[10px] px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-semibold uppercase tracking-wider">Skip on fail</span>
             )}
@@ -220,10 +231,10 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
           {/* Config toggle */}
           <button
             onClick={() => onToggleConfig(step.id)}
-            className="relative p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all flex-shrink-0"
+            className="relative p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-all flex-shrink-0"
             title="Configure step"
           >
-            <Cog6ToothIcon className="h-4 w-4" />
+            <Cog6ToothIcon className="h-3.5 w-3.5" />
             {Object.keys(step.vars || {}).length > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                 {Object.keys(step.vars).length}
@@ -235,12 +246,12 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
           {(step.logs || []).length > 0 && (
             <button
               onClick={() => onToggleOutput(step.id)}
-              className={`p-1.5 rounded-lg transition-all flex-shrink-0 ${
+              className={`p-1 rounded-md transition-all flex-shrink-0 ${
                 isOutputActive ? 'text-indigo-600 bg-indigo-100 ring-2 ring-indigo-200' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'
               }`}
               title={isOutputActive ? 'Hide output' : 'Show output'}
             >
-              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zm0 10.5a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10z" clipRule="evenodd" />
               </svg>
             </button>
@@ -249,10 +260,10 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
           {/* Remove button */}
           <button
             onClick={() => onRemove(step.id)}
-            className="p-1.5 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all flex-shrink-0"
+            className="p-1 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-md transition-all flex-shrink-0"
             title="Remove step"
           >
-            <TrashIcon className="h-4 w-4" />
+            <TrashIcon className="h-3.5 w-3.5" />
           </button>
         </div>
 
@@ -639,6 +650,7 @@ const WorkflowBuilder = () => {
       description: suite.description || '',
       playbook: playbook.file || playbook.playbook || '',
       suiteName: suite.name,
+      category: categorizePlaybook(suite),
       required: playbook.required !== undefined ? playbook.required : false,
       on_failure: 'stop',
       timeout: playbook.timeout || 600,
@@ -647,7 +659,7 @@ const WorkflowBuilder = () => {
       showConfig: Object.keys(playbook.vars || playbook.extra_vars || {}).length > 0,
     };
     setWorkflowSteps((prev) => [...prev, newStep]);
-  }, []);
+  }, [categorizePlaybook]);
 
   // ---- Remove step ----
   const removeStep = useCallback((stepId) => {
@@ -1240,7 +1252,7 @@ const WorkflowBuilder = () => {
   return (
     <div className="flex gap-5 h-[calc(100vh-180px)] overflow-hidden">
       {/* ---- Left: Tabbed Palette (Playbooks / Workflows) ---- */}
-      <div className="w-72 flex-shrink-0 flex flex-col rounded-2xl border border-gray-200 shadow-sm overflow-hidden bg-white">
+      <div className="w-80 flex-shrink-0 flex flex-col rounded-2xl border border-gray-200 shadow-sm overflow-hidden bg-white">
         {/* Tab header */}
         <div className="bg-gradient-to-br from-slate-800 to-slate-900 px-2 pt-3 pb-0">
           <div className="flex">
@@ -1295,6 +1307,9 @@ const WorkflowBuilder = () => {
             <div className="px-3 py-2 border-b border-gray-100 flex flex-wrap gap-1">
               {['all', 'Validation', 'Configuration', 'Provisioning', 'Cleanup', 'Other'].map((cat) => {
                 const catColor = categoryColors[cat] || {};
+                const count = cat === 'all'
+                  ? filteredPlaybooks.length
+                  : availablePlaybooks.filter(s => categorizePlaybook(s) === cat).length;
                 return (
                   <button
                     key={cat}
@@ -1307,7 +1322,7 @@ const WorkflowBuilder = () => {
                         : 'bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700'
                     }`}
                   >
-                    {cat === 'all' ? 'All' : cat}
+                    {cat === 'all' ? `All (${count})` : `${cat} (${count})`}
                   </button>
                 );
               })}
@@ -1325,6 +1340,32 @@ const WorkflowBuilder = () => {
               ) : sortedPlaybooks.length === 0 ? (
                 <div className="text-center py-8">
                   <p className="text-xs text-gray-400">No playbooks found</p>
+                </div>
+              ) : paletteCategory === 'all' ? (
+                <div className="space-y-3">
+                  {['Validation', 'Configuration', 'Provisioning', 'Cleanup', 'Other'].map((cat) => {
+                    const items = sortedPlaybooks.filter(s => categorizePlaybook(s) === cat);
+                    if (items.length === 0) return null;
+                    const colors = categoryColors[cat];
+                    return (
+                      <div key={cat}>
+                        <div className={`text-[10px] font-bold uppercase tracking-wider ${colors.text} mb-1.5 px-1 flex items-center gap-1.5`}>
+                          <div className={`w-2 h-2 rounded-full ${colors.dot}`} />
+                          {cat} ({items.length})
+                        </div>
+                        <div className="space-y-1.5">
+                          {items.map((suite) => (
+                            <PlaybookPaletteItem
+                              key={suite.name}
+                              suite={suite}
+                              onAdd={addStep}
+                              category={cat}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -1450,18 +1491,22 @@ const WorkflowBuilder = () => {
                                   <span className="text-[10px] text-gray-400">{wf.globalVarKeys?.length} vars</span>
                                 )}
                               </div>
-                              {/* Step name pills */}
+                              {/* Step name pills with category colors */}
                               <div className="flex flex-wrap gap-1 mt-1.5">
-                                {(wf.stepNames || []).slice(0, 3).map((name, i) => (
-                                  <span key={i} className="text-[10px] px-1.5 py-0.5 bg-gray-50 text-gray-500 rounded border border-gray-100 truncate max-w-[120px]">
-                                    {i + 1}. {name}
-                                  </span>
-                                ))}
-                                {(wf.stepNames || []).length > 3 && (
-                                  <span className="text-[10px] px-1.5 py-0.5 text-gray-400">
-                                    +{wf.stepNames.length - 3}
-                                  </span>
-                                )}
+                                {(wf.stepNames || []).map((name, i) => {
+                                  const nameLower = (name || '').toLowerCase();
+                                  let cat = 'Other';
+                                  if (nameLower.includes('verify') || nameLower.includes('validation') || nameLower.includes('test')) cat = 'Validation';
+                                  else if (nameLower.includes('configure') || nameLower.includes('enable') || nameLower.includes('disable')) cat = 'Configuration';
+                                  else if (nameLower.includes('provision') || nameLower.includes('create') || nameLower.includes('add') || nameLower.includes('upgrade')) cat = 'Provisioning';
+                                  else if (nameLower.includes('delete') || nameLower.includes('cleanup')) cat = 'Cleanup';
+                                  const colors = categoryColors[cat] || categoryColors.Other;
+                                  return (
+                                    <span key={i} className={`text-[10px] px-1.5 py-0.5 ${colors.bg} ${colors.text} rounded border ${colors.border} truncate max-w-[140px]`}>
+                                      {i + 1}. {name}
+                                    </span>
+                                  );
+                                })}
                               </div>
                             </div>
 
@@ -1546,6 +1591,23 @@ const WorkflowBuilder = () => {
                                 Template
                               </span>
                             </div>
+                            {/* Step preview pills */}
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {(tpl.steps || []).map((s, i) => {
+                                const nameLower = (s.name || '').toLowerCase();
+                                let cat = 'Other';
+                                if (nameLower.includes('verify') || nameLower.includes('validation') || nameLower.includes('test')) cat = 'Validation';
+                                else if (nameLower.includes('configure') || nameLower.includes('enable') || nameLower.includes('disable')) cat = 'Configuration';
+                                else if (nameLower.includes('provision') || nameLower.includes('create') || nameLower.includes('add') || nameLower.includes('upgrade')) cat = 'Provisioning';
+                                else if (nameLower.includes('delete') || nameLower.includes('cleanup')) cat = 'Cleanup';
+                                const colors = categoryColors[cat] || categoryColors.Other;
+                                return (
+                                  <span key={i} className={`text-[10px] px-1.5 py-0.5 ${colors.bg} ${colors.text} rounded border ${colors.border} truncate max-w-[140px]`}>
+                                    {i + 1}. {s.name}
+                                  </span>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1584,16 +1646,20 @@ const WorkflowBuilder = () => {
                             </span>
                           </div>
                           <div className="flex flex-wrap gap-1 mt-1.5">
-                            {(wf.stepNames || []).slice(0, 3).map((name, i) => (
-                              <span key={i} className="text-[10px] px-1.5 py-0.5 bg-gray-50 text-gray-500 rounded border border-gray-100 truncate max-w-[120px]">
-                                {i + 1}. {name}
-                              </span>
-                            ))}
-                            {(wf.stepNames || []).length > 3 && (
-                              <span className="text-[10px] px-1.5 py-0.5 text-gray-400">
-                                +{wf.stepNames.length - 3}
-                              </span>
-                            )}
+                            {(wf.stepNames || []).map((name, i) => {
+                              const nameLower = (name || '').toLowerCase();
+                              let cat = 'Other';
+                              if (nameLower.includes('verify') || nameLower.includes('validation') || nameLower.includes('test')) cat = 'Validation';
+                              else if (nameLower.includes('configure') || nameLower.includes('enable') || nameLower.includes('disable')) cat = 'Configuration';
+                              else if (nameLower.includes('provision') || nameLower.includes('create') || nameLower.includes('add') || nameLower.includes('upgrade')) cat = 'Provisioning';
+                              else if (nameLower.includes('delete') || nameLower.includes('cleanup')) cat = 'Cleanup';
+                              const colors = categoryColors[cat] || categoryColors.Other;
+                              return (
+                                <span key={i} className={`text-[10px] px-1.5 py-0.5 ${colors.bg} ${colors.text} rounded border ${colors.border} truncate max-w-[140px]`}>
+                                  {i + 1}. {name}
+                                </span>
+                              );
+                            })}
                           </div>
                           <div className="mt-1">
                             <span className="text-[9px] text-gray-300 font-mono">{wf.source}</span>
@@ -1642,6 +1708,19 @@ const WorkflowBuilder = () => {
                 <span className="text-xs text-gray-400">
                   {workflowSteps.length} step{workflowSteps.length !== 1 ? 's' : ''}
                 </span>
+                {workflowSteps.length > 0 && (() => {
+                  const totalSecs = workflowSteps.reduce((sum, s) => sum + (s.timeout || 600), 0);
+                  const mins = Math.round(totalSecs / 60);
+                  return (
+                    <>
+                      <span className="text-xs text-gray-300">|</span>
+                      <span className="text-xs text-gray-400 flex items-center gap-1">
+                        <ClockIcon className="h-3 w-3" />
+                        ~{mins} min est.
+                      </span>
+                    </>
+                  );
+                })()}
                 {activeWorkflowId && (
                   <>
                     <span className="text-xs text-gray-300">|</span>
@@ -1738,73 +1817,6 @@ const WorkflowBuilder = () => {
             </button>
           </div>
         </div>
-
-        {/* Trigger Panel */}
-        <div className="mx-0 border-x border-gray-200 bg-white">
-          <TriggerPanel workflowName={workflowName} />
-        </div>
-
-        {/* Status summary bar (shows when workflow has run results) */}
-        {hasRunResults && (
-          <div className="mx-0 border-x border-gray-200 bg-white px-5 py-2.5">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-3">
-                {completedSteps > 0 && (
-                  <span className="flex items-center gap-1 text-xs font-medium text-emerald-700">
-                    <CheckCircleIcon className="h-3.5 w-3.5" />
-                    {completedSteps} passed
-                  </span>
-                )}
-                {failedSteps > 0 && (
-                  <span className="flex items-center gap-1 text-xs font-medium text-red-600">
-                    <XCircleIcon className="h-3.5 w-3.5" />
-                    {failedSteps} failed
-                  </span>
-                )}
-                {skippedSteps > 0 && (
-                  <span className="flex items-center gap-1 text-xs font-medium text-amber-600">
-                    <ClockIcon className="h-3.5 w-3.5" />
-                    {skippedSteps} skipped
-                  </span>
-                )}
-                {runningSteps > 0 && (
-                  <span className="flex items-center gap-1 text-xs font-medium text-blue-600">
-                    <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" />
-                    {runningSteps} running
-                  </span>
-                )}
-              </div>
-              <span className="text-xs text-gray-400 font-mono">{progressPercent}%</span>
-            </div>
-            {/* Progress bar */}
-            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden flex">
-              {completedSteps > 0 && (
-                <div
-                  className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500"
-                  style={{ width: `${(completedSteps / workflowSteps.length) * 100}%` }}
-                />
-              )}
-              {failedSteps > 0 && (
-                <div
-                  className="h-full bg-gradient-to-r from-red-400 to-red-500 transition-all duration-500"
-                  style={{ width: `${(failedSteps / workflowSteps.length) * 100}%` }}
-                />
-              )}
-              {skippedSteps > 0 && (
-                <div
-                  className="h-full bg-gradient-to-r from-amber-300 to-amber-400 transition-all duration-500"
-                  style={{ width: `${(skippedSteps / workflowSteps.length) * 100}%` }}
-                />
-              )}
-              {runningSteps > 0 && (
-                <div
-                  className="h-full bg-gradient-to-r from-blue-400 to-blue-500 animate-pulse transition-all duration-500"
-                  style={{ width: `${(runningSteps / workflowSteps.length) * 100}%` }}
-                />
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Global Variables Panel */}
         <div className="bg-white border-x border-gray-200">
@@ -1935,6 +1947,73 @@ const WorkflowBuilder = () => {
           )}
         </div>
 
+        {/* Trigger Panel */}
+        <div className="mx-0 border-x border-gray-200 bg-white">
+          <TriggerPanel workflowName={workflowName} />
+        </div>
+
+        {/* Status summary bar (shows when workflow has run results) */}
+        {hasRunResults && (
+          <div className="mx-0 border-x border-gray-200 bg-white px-5 py-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-3">
+                {completedSteps > 0 && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-emerald-700">
+                    <CheckCircleIcon className="h-3.5 w-3.5" />
+                    {completedSteps} passed
+                  </span>
+                )}
+                {failedSteps > 0 && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-red-600">
+                    <XCircleIcon className="h-3.5 w-3.5" />
+                    {failedSteps} failed
+                  </span>
+                )}
+                {skippedSteps > 0 && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-amber-600">
+                    <ClockIcon className="h-3.5 w-3.5" />
+                    {skippedSteps} skipped
+                  </span>
+                )}
+                {runningSteps > 0 && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-blue-600">
+                    <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" />
+                    {runningSteps} running
+                  </span>
+                )}
+              </div>
+              <span className="text-xs text-gray-400 font-mono">{progressPercent}%</span>
+            </div>
+            {/* Progress bar */}
+            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden flex">
+              {completedSteps > 0 && (
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500"
+                  style={{ width: `${(completedSteps / workflowSteps.length) * 100}%` }}
+                />
+              )}
+              {failedSteps > 0 && (
+                <div
+                  className="h-full bg-gradient-to-r from-red-400 to-red-500 transition-all duration-500"
+                  style={{ width: `${(failedSteps / workflowSteps.length) * 100}%` }}
+                />
+              )}
+              {skippedSteps > 0 && (
+                <div
+                  className="h-full bg-gradient-to-r from-amber-300 to-amber-400 transition-all duration-500"
+                  style={{ width: `${(skippedSteps / workflowSteps.length) * 100}%` }}
+                />
+              )}
+              {runningSteps > 0 && (
+                <div
+                  className="h-full bg-gradient-to-r from-blue-400 to-blue-500 animate-pulse transition-all duration-500"
+                  style={{ width: `${(runningSteps / workflowSteps.length) * 100}%` }}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Canvas */}
         <div
           className="flex-1 border border-gray-200 rounded-b-2xl overflow-y-auto p-6 transition-all duration-300"
@@ -1957,15 +2036,31 @@ const WorkflowBuilder = () => {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-700 mb-2">Build your workflow</h3>
                 <p className="text-sm text-gray-400 max-w-sm mx-auto mb-5">
-                  Drag playbooks from the palette on the left, or click the + button to add steps to your pipeline.
+                  Drag playbooks from the palette, or start with a common workflow below.
                 </p>
-                <button
-                  onClick={() => { setPaletteTab('workflows'); setLibraryTab('templates'); loadSavedWorkflows(); loadWorkflowTemplates(); }}
-                  className="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 hover:shadow-sm transition-all inline-flex items-center gap-2"
-                >
-                  <RocketLaunchIcon className="h-4 w-4" />
-                  Start from a template
-                </button>
+                <div className="flex gap-3 justify-center flex-wrap">
+                  <button
+                    onClick={() => { setPaletteTab('workflows'); setLibraryTab('templates'); loadSavedWorkflows(); loadWorkflowTemplates(); }}
+                    className="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 hover:shadow-sm transition-all inline-flex items-center gap-2"
+                  >
+                    <RocketLaunchIcon className="h-4 w-4" />
+                    Start from a template
+                  </button>
+                  <button
+                    onClick={() => {
+                      const verify = availablePlaybooks.find(s => (s.name || '').toLowerCase().includes('verify'));
+                      const configure = availablePlaybooks.find(s => (s.name || '').toLowerCase().includes('configure'));
+                      const provision = availablePlaybooks.find(s => (s.name || '').toLowerCase().includes('provision'));
+                      if (verify) addStep(verify);
+                      if (configure) addStep(configure);
+                      if (provision) addStep(provision);
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:shadow-sm transition-all inline-flex items-center gap-2"
+                  >
+                    <ShieldCheckIcon className="h-4 w-4" />
+                    Quick start: Verify + Configure + Provision
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
