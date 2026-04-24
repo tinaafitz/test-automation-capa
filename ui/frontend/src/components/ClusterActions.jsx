@@ -77,8 +77,8 @@ const suiteGradients = {
 };
 
 const phaseColors = {
-  Day1: { bg: 'bg-blue-100', text: 'text-blue-700' },
-  Day2: { bg: 'bg-violet-100', text: 'text-violet-700' },
+  Day1: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
+  Day2: { bg: 'bg-blue-100', text: 'text-blue-700' },
 };
 
 // ============================================================================
@@ -108,13 +108,13 @@ const FeatureCard = ({ feature, clusterStatus, onToggle, selectedActions }) => {
     : (clusterStatus?.available_upgrades || []);
 
   return (
-    <div className={`relative rounded-xl border-2 transition-all duration-200 ${
+    <div className={`relative rounded-lg border transition-all duration-200 ${
       isSelected
         ? isDestructive
-          ? 'border-red-400 bg-gradient-to-r from-red-50 to-white ring-2 ring-red-100 shadow-md'
-          : 'border-indigo-400 bg-gradient-to-r from-indigo-50 to-white ring-2 ring-indigo-100 shadow-md'
+          ? 'border-red-300 bg-gradient-to-r from-red-50 to-white ring-2 ring-red-100 shadow-md'
+          : 'border-blue-300 bg-gradient-to-r from-blue-50 to-white ring-2 ring-blue-100 shadow-md'
         : isMutable
-          ? 'border-gray-200 bg-white hover:shadow-md hover:border-gray-300'
+          ? 'border-gray-200 bg-white hover:shadow-sm hover:border-gray-300'
           : 'border-gray-100 bg-gray-50/50'
     }`}>
       <div className="px-4 py-3">
@@ -126,7 +126,7 @@ const FeatureCard = ({ feature, clusterStatus, onToggle, selectedActions }) => {
                 checked={isSelected}
                 onChange={() => onToggle(feature)}
                 className={`h-4 w-4 rounded border-gray-300 focus:ring-2 ${
-                  isDestructive ? 'text-red-600 focus:ring-red-500' : 'text-indigo-600 focus:ring-indigo-500'
+                  isDestructive ? 'text-red-600 focus:ring-red-500' : 'text-blue-600 focus:ring-blue-500'
                 }`}
               />
             ) : (
@@ -153,8 +153,8 @@ const FeatureCard = ({ feature, clusterStatus, onToggle, selectedActions }) => {
                   <button key={v} onClick={() => onToggle(feature, v)}
                     className={`text-[11px] font-mono px-2 py-0.5 rounded-md border transition-colors ${
                       currentAction?.target_value === v
-                        ? 'bg-indigo-100 border-indigo-300 text-indigo-700 font-semibold'
-                        : 'bg-white border-gray-200 text-gray-600 hover:bg-indigo-50 hover:border-indigo-200'
+                        ? 'bg-indigo-100 border-blue-300 text-blue-700 font-semibold'
+                        : 'bg-white border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-200'
                     }`}>{v}</button>
                 ))}
               </div>
@@ -163,7 +163,7 @@ const FeatureCard = ({ feature, clusterStatus, onToggle, selectedActions }) => {
               <div className="mt-2">
                 <select value={currentAction?.target_value || feature.default}
                   onChange={(e) => onToggle(feature, e.target.value)}
-                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 focus:ring-2 focus:ring-indigo-500">
+                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 focus:ring-2 focus:ring-blue-500">
                   {(feature.options || []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                 </select>
               </div>
@@ -172,14 +172,14 @@ const FeatureCard = ({ feature, clusterStatus, onToggle, selectedActions }) => {
               <div className="mt-2">
                 <input type="number" value={currentAction?.target_value ?? feature.default}
                   onChange={(e) => onToggle(feature, parseInt(e.target.value) || 0)}
-                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-24 focus:ring-2 focus:ring-indigo-500" />
+                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-24 focus:ring-2 focus:ring-blue-500" />
               </div>
             )}
             {isSelected && feature.type === 'string' && (
               <div className="mt-2">
                 <input type="text" value={currentAction?.target_value || ''} placeholder={feature.placeholder || ''}
                   onChange={(e) => onToggle(feature, e.target.value)}
-                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-48 focus:ring-2 focus:ring-indigo-500"
+                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-48 focus:ring-2 focus:ring-blue-500"
                   maxLength={feature.max_length} />
               </div>
             )}
@@ -188,7 +188,7 @@ const FeatureCard = ({ feature, clusterStatus, onToggle, selectedActions }) => {
                 <textarea value={typeof currentAction?.target_value === 'object' ? JSON.stringify(currentAction.target_value, null, 2) : currentAction?.target_value || '{}'}
                   onChange={(e) => { try { onToggle(feature, JSON.parse(e.target.value)); } catch {} }}
                   placeholder='{"key": "value"}'
-                  className="text-xs font-mono border border-gray-300 rounded-md px-2 py-1.5 w-64 h-16 focus:ring-2 focus:ring-indigo-500" />
+                  className="text-xs font-mono border border-gray-300 rounded-md px-2 py-1.5 w-64 h-16 focus:ring-2 focus:ring-blue-500" />
               </div>
             )}
             {isSelected && feature.type === 'range' && (
@@ -196,11 +196,11 @@ const FeatureCard = ({ feature, clusterStatus, onToggle, selectedActions }) => {
                 <label className="text-xs text-gray-500">Min:</label>
                 <input type="number" value={currentAction?.target_value?.min ?? feature.default?.min ?? 1}
                   onChange={(e) => onToggle(feature, { ...currentAction?.target_value, min: parseInt(e.target.value) || 0 })}
-                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-16 focus:ring-2 focus:ring-indigo-500" />
+                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-16 focus:ring-2 focus:ring-blue-500" />
                 <label className="text-xs text-gray-500">Max:</label>
                 <input type="number" value={currentAction?.target_value?.max ?? feature.default?.max ?? 3}
                   onChange={(e) => onToggle(feature, { ...currentAction?.target_value, max: parseInt(e.target.value) || 0 })}
-                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-16 focus:ring-2 focus:ring-indigo-500" />
+                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-16 focus:ring-2 focus:ring-blue-500" />
               </div>
             )}
             {isSelected && feature.type === 'list' && (
@@ -208,7 +208,7 @@ const FeatureCard = ({ feature, clusterStatus, onToggle, selectedActions }) => {
                 <input type="text" value={Array.isArray(currentAction?.target_value) ? currentAction.target_value.join(', ') : ''}
                   onChange={(e) => onToggle(feature, e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
                   placeholder="item1, item2, item3"
-                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-64 focus:ring-2 focus:ring-indigo-500" />
+                  className="text-xs border border-gray-300 rounded-md px-2 py-1.5 w-64 focus:ring-2 focus:ring-blue-500" />
               </div>
             )}
           </div>
@@ -232,14 +232,14 @@ const SuiteAccordion = ({ suite, isExpanded, onToggle, clusterStatus, selectedAc
   const mutableCount = suite.features.filter(f => f.mutable).length;
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md">
-      <button onClick={onToggle} className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-gray-50/50 transition-colors">
-        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center text-white flex-shrink-0 shadow-sm`}>{icon}</div>
+    <div className="rounded-xl border border-gray-200 bg-white shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden">
+      <button onClick={onToggle} className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-blue-50/50 transition-colors">
+        <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${gradient} flex items-center justify-center text-white flex-shrink-0 shadow-md ring-1 ring-white/50`}>{icon}</div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-bold text-gray-900">{suite.name}</h3>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${phase.bg} ${phase.text}`}>{suite.phase}</span>
-            {selectedCount > 0 && <span className="text-[10px] px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full font-bold">{selectedCount} selected</span>}
+            <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-tight ${phase.bg} ${phase.text}`}>{suite.phase}</span>
+            {selectedCount > 0 && <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md font-bold">{selectedCount} selected</span>}
           </div>
           <p className="text-xs text-gray-500 mt-0.5">{suite.description}</p>
           <div className="flex items-center gap-3 mt-1">
@@ -359,7 +359,7 @@ const ExecutionPanel = ({ results, clusterStatus, onClose, onComplete }) => {
           <div key={i}
             onClick={() => result.job_id && setActiveJobId(result.job_id)}
             className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-all ${
-              result.job_id === activeJobId ? 'border-indigo-300 bg-indigo-50 ring-1 ring-indigo-200' :
+              result.job_id === activeJobId ? 'border-blue-300 bg-blue-50 ring-1 ring-blue-200' :
               result.status === 'error' || result.status === 'failed' ? 'border-red-200 bg-red-50' :
               result.status === 'completed' ? 'border-emerald-200 bg-emerald-50' :
               result.status === 'running' ? 'border-blue-200 bg-blue-50' :
@@ -380,7 +380,7 @@ const ExecutionPanel = ({ results, clusterStatus, onClose, onComplete }) => {
                     ? <span className="text-gray-400">{clusterStatus.version}</span>
                     : null}
                   {(result.feature_id === 'machine_pool_upgrade' || result.feature_id === 'control_plane_upgrade') && <span className="text-gray-400 mx-1">→</span>}
-                  <span className="text-indigo-600 font-semibold">{result.target_value}</span>
+                  <span className="text-blue-600 font-semibold">{result.target_value}</span>
                 </span>
               )}
               {!result.target_value && <span className="text-xs text-gray-500 ml-2">{result.message}</span>}
@@ -1173,7 +1173,7 @@ const ClusterActions = () => {
     <div className="space-y-6">
       {/* Header */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-violet-600 px-6 py-5">
+        <div className="bg-gradient-to-r from-blue-600 to-cyan-500 px-6 py-5 shadow-md">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-xl font-bold text-white">Cluster Actions</h2>
@@ -1190,27 +1190,27 @@ const ClusterActions = () => {
         </div>
 
         {/* Cluster selector */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100">
+        <div className="px-6 py-5 bg-white border-t border-gray-200">
           <div className="flex items-center gap-4">
             <div className="flex-1 max-w-xs">
               <label className="block text-xs font-medium text-gray-600 mb-1">Cluster Name</label>
               <input type="text" value={clusterName} onChange={(e) => setClusterName(e.target.value)}
                 placeholder="e.g., qe6-rosa-hcp"
-                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
             </div>
             <div className="w-36">
               <label className="block text-xs font-medium text-gray-600 mb-1">Namespace</label>
               <input type="text" value={namespace} onChange={(e) => setNamespace(e.target.value)}
-                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
             </div>
             <div className="flex items-end gap-2 mt-5">
               <button onClick={fetchClusterStatus} disabled={!clusterName.trim() || loadingStatus}
-                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                className="px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-600 rounded-lg hover:from-blue-700 hover:to-cyan-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md flex items-center gap-2">
                 {loadingStatus ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <MagnifyingGlassIcon className="h-4 w-4" />}
                 {loadingStatus ? 'Loading...' : 'Load Cluster'}
               </button>
               <button onClick={discoverClusters} disabled={discovering}
-                className="px-4 py-2 text-sm font-medium text-indigo-600 bg-white border border-indigo-300 rounded-lg hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                className="px-4 py-2.5 text-sm font-semibold text-blue-600 bg-white border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
                 {discovering ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <MagnifyingGlassIcon className="h-4 w-4" />}
                 {discovering ? 'Discovering...' : 'Discover Clusters'}
               </button>
@@ -1248,11 +1248,11 @@ const ClusterActions = () => {
                 <div className="divide-y divide-gray-100">
                   {discoveredClusters.clusters.map((cluster, i) => (
                     <button key={i} onClick={() => selectCluster(cluster)}
-                      className="w-full flex items-center gap-4 px-4 py-3 text-left hover:bg-indigo-50 transition-colors group">
+                      className="w-full flex items-center gap-4 px-4 py-3 text-left hover:bg-blue-50 transition-colors group">
                       <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${cluster.ready ? 'bg-emerald-400' : 'bg-amber-400'}`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700">{cluster.name}</span>
+                          <span className="text-sm font-semibold text-gray-900 group-hover:text-blue-700">{cluster.name}</span>
                           {cluster.ready && <span className="text-[9px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-bold uppercase">Ready</span>}
                         </div>
                         <div className="flex items-center gap-3 mt-0.5">
@@ -1289,7 +1289,7 @@ const ClusterActions = () => {
           <div className="relative">
             <MagnifyingGlassIcon className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input type="text" placeholder="Search features..." value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)}
-              className="text-sm border border-gray-200 rounded-xl pl-9 pr-3 py-2 w-56 focus:ring-2 focus:ring-indigo-500 bg-white" />
+              className="text-sm border border-gray-300 rounded-lg pl-9 pr-3 py-2.5 w-56 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-gray-400 transition-colors shadow-sm" />
           </div>
           <span className="text-xs px-3 py-1.5 rounded-lg font-medium bg-violet-100 text-violet-700">Day2</span>
           <button onClick={() => {
@@ -1313,17 +1313,17 @@ const ClusterActions = () => {
 
         <div className="flex items-center gap-3">
           {selectedActions.length > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-xl">
-              <span className="text-sm font-medium text-indigo-700">{selectedActions.length} action{selectedActions.length !== 1 ? 's' : ''} selected</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-xl">
+              <span className="text-sm font-medium text-blue-700">{selectedActions.length} action{selectedActions.length !== 1 ? 's' : ''} selected</span>
               {selectedActions.some(a => a.destructive) && <ExclamationTriangleIcon className="h-4 w-4 text-red-500" />}
-              <button onClick={() => setSelectedActions([])} className="text-xs text-indigo-500 hover:text-indigo-700 font-medium ml-1">Clear</button>
+              <button onClick={() => setSelectedActions([])} className="text-xs text-indigo-500 hover:text-blue-700 font-medium ml-1">Clear</button>
             </div>
           )}
           <button onClick={executeActions} disabled={selectedActions.length === 0 || !clusterName.trim() || executing}
-            className={`px-5 py-2.5 text-sm font-semibold text-white rounded-xl flex items-center gap-2 transition-all shadow-sm ${
+            className={`px-5 py-2.5 text-sm font-semibold text-white rounded-lg flex items-center gap-2 transition-all shadow-md ${
               executing ? 'bg-gray-400 cursor-not-allowed' :
-              selectedActions.some(a => a.destructive) ? 'bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800' :
-              'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 hover:shadow-md hover:shadow-indigo-200'
+              selectedActions.some(a => a.destructive) ? 'bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 hover:shadow-lg hover:shadow-red-200' :
+              'bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 hover:shadow-lg hover:shadow-blue-200'
             } disabled:opacity-40 disabled:cursor-not-allowed`}>
             {executing ? <><ArrowPathIcon className="h-4 w-4 animate-spin" /> Executing...</> : <><PlayIcon className="h-4 w-4" /> Execute Actions</>}
           </button>

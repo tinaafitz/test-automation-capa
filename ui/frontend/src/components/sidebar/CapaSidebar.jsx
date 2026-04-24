@@ -175,28 +175,10 @@ const CapaSidebar = ({
       label: 'TOOLS',
       items: [
         {
-          id: 'notifications',
-          label: 'Notifications',
-          icon: <BellIcon className="h-5 w-5" />,
-          onClick: onNotificationsClick
-        },
-        {
           id: 'recent-tasks',
           label: 'Task Summary',
           icon: <ClockIcon className="h-5 w-5" />,
           onClick: onRecentTasksClick
-        },
-        {
-          id: 'agent-dashboard',
-          label: 'AI Agent Pipeline',
-          icon: <CpuChipIcon className="h-5 w-5" />,
-          onClick: onAgentDashboardClick
-        },
-        {
-          id: 'aws-usage',
-          label: 'AWS Usage',
-          icon: <ChartBarIcon className="h-5 w-5" />,
-          onClick: onAWSUsageClick
         },
       ],
     },
