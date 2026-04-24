@@ -439,31 +439,54 @@ class DiagnosticAgent(BaseAgent):
 
         Returns: 'gone', 'uninstalling', 'error', 'ready', 'installing', or 'unknown'.
         """
-        try:
-            import os
-            import urllib.request
-            import urllib.parse
+        import base64
+        import os
+        import urllib.error
+        import urllib.parse
+        import urllib.request
 
+        VALID_STATES = {"gone", "uninstalling", "error", "ready", "installing", "unknown"}
+        STATE_MAP = {
+            "ready": "ready",
+            "installing": "installing",
+            "uninstalling": "uninstalling",
+            "error": "error",
+            "pending": "installing",
+            "hibernating": "ready",
+        }
+
+        try:
             ocm_client_id = os.environ.get("OCM_CLIENT_ID", "")
             ocm_client_secret = os.environ.get("OCM_CLIENT_SECRET", "")
             ocm_api_url = os.environ.get("OCM_API_URL", "https://api.stage.openshift.com").rstrip("/")
 
             if not ocm_client_id or not ocm_client_secret:
-                try:
-                    result = subprocess.run(
-                        ["oc", "get", "secret", "rosa-creds-secret", "-n", "multicluster-engine",
-                         "-o", "jsonpath={.data.ocmClientID}|{.data.ocmClientSecret}|{.data.ocmApiUrl}"],
-                        capture_output=True, text=True, timeout=10,
-                    )
-                    if result.returncode == 0 and "|" in result.stdout:
-                        import base64
-                        parts = result.stdout.split("|")
-                        ocm_client_id = base64.b64decode(parts[0]).decode() if parts[0] else ""
-                        ocm_client_secret = base64.b64decode(parts[1]).decode() if parts[1] else ""
-                        if len(parts) > 2 and parts[2]:
-                            ocm_api_url = base64.b64decode(parts[2]).decode().rstrip("/")
-                except Exception:
-                    pass
+                for ns in ["multicluster-engine", os.environ.get("CAPI_NAMESPACE", "ns-rosa-hcp")]:
+                    try:
+                        result = subprocess.run(
+                            ["oc", "get", "secret", "rosa-creds-secret", "-n", ns,
+                             "-o", "jsonpath={.data.ocmClientID}|{.data.ocmClientSecret}|{.data.ocmApiUrl}"],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        if result.returncode == 0 and "|" in result.stdout:
+                            parts = result.stdout.split("|")
+                            try:
+                                ocm_client_id = base64.b64decode(parts[0]).decode("utf-8") if parts[0] else ""
+                                ocm_client_secret = base64.b64decode(parts[1]).decode("utf-8") if len(parts) > 1 and parts[1] else ""
+                                if len(parts) > 2 and parts[2]:
+                                    ocm_api_url = base64.b64decode(parts[2]).decode("utf-8").rstrip("/")
+                            except Exception as e:
+                                self.log(f"Failed to decode credentials from secret in {ns}: {e}", "warning")
+                                continue
+                            if ocm_client_id and ocm_client_secret:
+                                break
+                    except FileNotFoundError:
+                        self.log("oc CLI not available, using environment variables for OCM credentials", "debug")
+                        break
+                    except subprocess.TimeoutExpired:
+                        self.log(f"Timeout reading rosa-creds-secret from {ns}", "warning")
+                    except Exception:
+                        pass
 
             if not ocm_client_id or not ocm_client_secret:
                 self.log("OCM credentials not available for cluster status check", "warning")
@@ -481,6 +504,10 @@ class DiagnosticAgent(BaseAgent):
                 token_result = json.loads(resp.read().decode())
             access_token = token_result.get("access_token", "")
 
+            if not access_token:
+                self.log(f"OCM token request failed: {token_result.get('error_description', 'no access_token')}", "warning")
+                return "unknown"
+
             search = urllib.parse.quote(f"name='{cluster_name}'")
             cluster_url = f"{ocm_api_url}/api/clusters_mgmt/v1/clusters?search={search}"
             cluster_req = urllib.request.Request(cluster_url,
@@ -491,15 +518,34 @@ class DiagnosticAgent(BaseAgent):
 
             items = clusters_result.get("items", [])
             if not items:
+                self.log(f"OCM cluster {cluster_name} not found — returning 'gone'", "info")
                 return "gone"
 
-            state = items[0].get("status", {}).get("state", "unknown")
+            if len(items) > 1:
+                self.log(f"OCM search for '{cluster_name}' returned {len(items)} matches, using exact match", "warning")
+                exact = [c for c in items if c.get("name") == cluster_name]
+                if exact:
+                    items = exact
+
+            raw_state = items[0].get("status", {}).get("state", "unknown")
+            state = STATE_MAP.get(raw_state, "unknown")
+            if raw_state not in STATE_MAP and raw_state != "unknown":
+                self.log(f"Unexpected OCM cluster state '{raw_state}' for {cluster_name}, treating as 'unknown'", "warning")
+            self.log(f"OCM cluster {cluster_name} state: {raw_state} -> {state}", "debug")
             return state
 
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return "gone"
-            self.log(f"OCM API error checking cluster status: {e.code}", "error")
+            if e.code in (401, 403):
+                self.log(f"OCM authentication failed (HTTP {e.code})", "error")
+            elif e.code == 429:
+                self.log("OCM API rate limited", "warning")
+            else:
+                self.log(f"OCM API error checking cluster status: {e.code}", "error")
+            return "unknown"
+        except urllib.error.URLError as e:
+            self.log(f"Network error reaching OCM API: {e.reason}", "error")
             return "unknown"
         except Exception as e:
             self.log(f"Error checking ROSA cluster status: {e}", "error")
