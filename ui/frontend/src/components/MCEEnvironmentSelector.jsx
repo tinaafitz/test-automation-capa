@@ -683,15 +683,17 @@ const MCEEnvironmentSelector = ({
   return (
     <div className="space-y-6">
       {/* Title */}
-      <h2 className={`text-2xl font-bold ${colors.title}`}>
-        {selectedEnv ? titleSingular : title}
-        {selectedEnv && (
-          <>
-            <span className="text-gray-400 mx-2">›</span>
-            <span className={colors.primary}>{selectedEnv.clusterName}</span>
-          </>
-        )}
-      </h2>
+      {(title || selectedEnv) && (
+        <h2 className={`text-2xl font-bold ${colors.title}`}>
+          {selectedEnv ? titleSingular : title}
+          {selectedEnv && (
+            <>
+              <span className="text-gray-400 mx-2">›</span>
+              <span className={colors.primary}>{selectedEnv.clusterName}</span>
+            </>
+          )}
+        </h2>
+      )}
 
       {/* Search and Filters - Hidden when viewing single environment */}
       {!selectedEnv && (
@@ -1050,7 +1052,7 @@ const MCEEnvironmentSelector = ({
 
       {/* Environments List or Selected Environment */}
       {!selectedEnv ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="bg-white rounded-lg shadow-md border border-gray-100">
           {loading ? (
             <div className="p-12 text-center text-gray-500">
               <ArrowPathIcon className="w-8 h-8 mx-auto mb-2 animate-spin" />
@@ -1185,7 +1187,7 @@ const MCEEnvironmentSelector = ({
         </div>
       ) : (
         /* Selected Environment Details - Replaces List */
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="bg-white rounded-lg shadow-md border border-gray-100">
           <div className="p-4 space-y-3">
               {/* Back Button */}
               <button

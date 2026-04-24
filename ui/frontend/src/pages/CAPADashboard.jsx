@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircleIcon, Cog6ToothIcon, ClockIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, Cog6ToothIcon, ClockIcon, TrashIcon, XCircleIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 
 import CapaSidebar from '../components/sidebar/CapaSidebar';
 import RosaHcpClustersSection from '../components/sections/RosaHcpClustersSection';
@@ -150,10 +150,11 @@ const TerminalInline = () => {
             <button
               onClick={executeCommand}
               disabled={executing || !command.trim()}
-              className="px-6 py-3 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-              style={!executing && command.trim() ? { backgroundColor: '#2684FF' } : {}}
-              onMouseEnter={(e) => !executing && command.trim() && (e.currentTarget.style.backgroundColor = '#0065FF')}
-              onMouseLeave={(e) => !executing && command.trim() && (e.currentTarget.style.backgroundColor = '#2684FF')}
+              className={`px-5 py-2.5 text-sm font-semibold text-white rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                !executing && command.trim()
+                  ? 'bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 shadow-sm hover:shadow-md'
+                  : 'bg-gray-400'
+              }`}
             >
               {executing ? 'Running...' : 'Execute'}
             </button>
@@ -211,7 +212,8 @@ const CAPADashboardContent = () => {
   const recentOps = useRecentOperationsContext();
 
   // UI State
-  const [activeSection, setActiveSection] = useState('environments');
+  const [activeSection, setActiveSection] = useState('credentials');
+  const [showEnvironments, setShowEnvironments] = useState(false);
   const [showYamlEditorModal, setShowYamlEditorModal] = useState(false);
   const [yamlEditorData, setYamlEditorData] = useState(null);
   const [provisionViewMode, setProvisionViewMode] = useState('form'); // 'form' or 'yaml'
@@ -1064,66 +1066,69 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Verify Environment</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Verify Environment</h2>
 
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-500">
               Run comprehensive verification checks on your MCE environment and CAPI/CAPA components.
             </p>
 
-            <button
-              onClick={handleMceVerification}
-              disabled={isVerifying}
-              className="px-6 py-3 text-white rounded transition-colors font-medium flex items-center gap-2"
-              style={!isVerifying ? { backgroundColor: '#2684FF' } : { backgroundColor: '#9CA3AF' }}
-              onMouseEnter={(e) => !isVerifying && (e.currentTarget.style.backgroundColor = '#0065FF')}
-              onMouseLeave={(e) => !isVerifying && (e.currentTarget.style.backgroundColor = '#2684FF')}
-            >
-              {isVerifying ? (
-                <>
-                  <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  Verifying...
-                </>
-              ) : (
-                <>
-                  <CheckCircleIcon className="h-5 w-5" />
-                  Run Verification
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={handleMceVerification}
+                disabled={isVerifying}
+                className={`px-5 py-2.5 text-sm font-semibold text-white rounded-lg flex items-center gap-2 transition-all shadow-sm hover:shadow-md ${
+                  isVerifying
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700'
+                }`}
+              >
+                {isVerifying ? (
+                  <>
+                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Verifying...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircleIcon className="h-5 w-5" />
+                    Run Verification
+                  </>
+                )}
+              </button>
 
-            {/* Last Verification Info */}
-            {mceLastVerified && (
-              <div className="text-sm text-gray-600">
-                <div className="flex items-center gap-2">
-                  <CheckCircleIcon className="h-4 w-4 text-green-600" />
+              {/* Last Verification Info */}
+              {mceLastVerified && (
+                <div className="flex items-center gap-2 text-sm text-gray-500 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                  <CheckCircleIcon className="h-4 w-4 text-emerald-600" />
                   <span>Last verified: {new Date(mceLastVerified).toLocaleString()}</span>
-                  <span className="text-green-600 font-medium">✅ Passed</span>
+                  <span className="text-emerald-600 font-semibold">Passed</span>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* CAPI/CAPA Components Section */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-              <div className="flex items-center justify-between mb-3">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
+              <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Components</h3>
                 <button
                   onClick={handleRefresh}
                   disabled={apiLoading}
-                  className="px-3 py-1.5 text-white rounded transition-colors text-xs flex items-center gap-1.5"
-                  style={!apiLoading ? { backgroundColor: '#2684FF' } : { backgroundColor: '#9CA3AF' }}
-                  onMouseEnter={(e) => !apiLoading && (e.currentTarget.style.backgroundColor = '#0065FF')}
-                  onMouseLeave={(e) => !apiLoading && (e.currentTarget.style.backgroundColor = '#2684FF')}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-lg flex items-center gap-1.5 transition-all ${
+                    apiLoading
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : 'text-blue-600 bg-blue-50 border border-blue-200 hover:bg-blue-100'
+                  }`}
                 >
-                  🔄 Refresh
+                  <ArrowPathIcon className={`h-4 w-4 ${apiLoading ? 'animate-spin' : ''}`} />
+                  Refresh
                 </button>
               </div>
 
               {/* Components Lists - Side by Side */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-6">
                 {/* CAPI/CAPA Components List */}
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">CAPI/CAPA</h3>
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">CAPI/CAPA</h3>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
                     {(() => {
                       const capiComponents = mceFeatures
                         .filter(component =>
@@ -1133,18 +1138,18 @@ const CAPADashboardContent = () => {
                         .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
                       return capiComponents.length === 0 ? (
-                        <div className="text-center py-8 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg">
-                          <p className="text-sm text-gray-600">No CAPI components configured</p>
+                        <div className="text-center py-8 bg-gray-50 border border-dashed border-gray-200 rounded-lg">
+                          <p className="text-sm text-gray-500">No CAPI components configured</p>
                         </div>
                       ) : (
                         capiComponents.map((component, index) => (
                           <div
                             key={index}
-                            className="flex items-center justify-between py-1 px-2 text-xs hover:bg-gray-50"
+                            className="flex items-center justify-between py-2 px-3 text-sm rounded-md hover:bg-gray-50 transition-colors"
                           >
-                            <span className="truncate">{component.name}</span>
-                            <span className={`ml-2 ${component.enabled ? 'text-green-600' : 'text-red-600'}`}>
-                              {component.enabled ? '✓' : '✕'}
+                            <span className="truncate text-gray-700">{component.name}</span>
+                            <span className={`ml-2 flex-shrink-0 ${component.enabled ? 'text-emerald-500' : 'text-red-400'}`}>
+                              {component.enabled ? <CheckCircleIcon className="h-4 w-4" /> : <XCircleIcon className="h-4 w-4" />}
                             </span>
                           </div>
                         ))
@@ -1155,26 +1160,26 @@ const CAPADashboardContent = () => {
 
                 {/* Hypershift Components List */}
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Hypershift</h3>
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Hypershift</h3>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
                     {(() => {
                       const hypershiftComponents = mceFeatures
                         .filter(component => component.name?.includes('hypershift'))
                         .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
                       return hypershiftComponents.length === 0 ? (
-                        <div className="text-center py-8 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg">
-                          <p className="text-sm text-gray-600">No Hypershift components configured</p>
+                        <div className="text-center py-8 bg-gray-50 border border-dashed border-gray-200 rounded-lg">
+                          <p className="text-sm text-gray-500">No Hypershift components configured</p>
                         </div>
                       ) : (
                         hypershiftComponents.map((component, index) => (
                           <div
                             key={index}
-                            className="flex items-center justify-between py-1 px-2 text-xs hover:bg-gray-50"
+                            className="flex items-center justify-between py-2 px-3 text-sm rounded-md hover:bg-gray-50 transition-colors"
                           >
-                            <span className="truncate">{component.name}</span>
-                            <span className={`ml-2 ${component.enabled ? 'text-green-600' : 'text-red-600'}`}>
-                              {component.enabled ? '✓' : '✕'}
+                            <span className="truncate text-gray-700">{component.name}</span>
+                            <span className={`ml-2 flex-shrink-0 ${component.enabled ? 'text-emerald-500' : 'text-red-400'}`}>
+                              {component.enabled ? <CheckCircleIcon className="h-4 w-4" /> : <XCircleIcon className="h-4 w-4" />}
                             </span>
                           </div>
                         ))
@@ -1189,14 +1194,20 @@ const CAPADashboardContent = () => {
             {(() => {
               console.log('🔍 Rendering verify section, verificationResults:', verificationResults);
               return verificationResults && (
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
+                <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
+                  <div className="flex items-center gap-2 mb-4">
                     {verificationResults.success === true ? (
-                      <CheckCircleIcon className="h-5 w-5 text-green-600" />
+                      <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                        <CheckCircleIcon className="h-5 w-5 text-emerald-600" />
+                      </div>
                     ) : verificationResults.needsConfiguration ? (
-                      <span className="text-xl">🆕</span>
+                      <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
+                        <span className="text-sm">🆕</span>
+                      </div>
                     ) : (
-                      <span className="text-xl">❌</span>
+                      <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
+                        <XCircleIcon className="h-5 w-5 text-red-600" />
+                      </div>
                     )}
                     <h3 className="text-lg font-semibold text-gray-900">
                       {verificationResults.success === true
@@ -1207,21 +1218,18 @@ const CAPADashboardContent = () => {
                     </h3>
                   </div>
 
-                  {/* Output Display - Always show if results exist */}
+                  {/* Output Display */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <h4 className="text-sm font-medium text-gray-700">Playbook Output:</h4>
+                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Playbook Output</h4>
                       <button
                         onClick={() => handleCopyOutput(verificationResults.output || 'No output available')}
-                        className="px-3 py-1 text-white rounded text-xs font-medium transition-colors"
-                        style={{ backgroundColor: '#2684FF' }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#0065FF')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#2684FF')}
+                        className="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
                       >
-                        {copySuccess || '📋 Copy'}
+                        {copySuccess || 'Copy'}
                       </button>
                     </div>
-                    <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto min-h-[100px]">
+                    <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto min-h-[100px] border border-gray-800">
                       <pre className="whitespace-pre-wrap">
                         {verificationResults.output || 'No output available'}
                       </pre>
@@ -1237,67 +1245,76 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Configure CAPI/CAPA</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Configure CAPI/CAPA</h2>
 
             {/* Configuration Card */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <p className="text-gray-600 mb-6">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
+              <p className="text-gray-500 mb-6">
                 Enable and configure CAPI/CAPA components on your MCE environment.
               </p>
 
-              <button
-                onClick={handleConfigure}
-                disabled={apiLoading}
-                className="px-6 py-3 text-white rounded transition-colors font-medium flex items-center gap-2"
-                style={!apiLoading ? { backgroundColor: '#2684FF' } : { backgroundColor: '#9CA3AF' }}
-                onMouseEnter={(e) => !apiLoading && (e.currentTarget.style.backgroundColor = '#0065FF')}
-                onMouseLeave={(e) => !apiLoading && (e.currentTarget.style.backgroundColor = '#2684FF')}
-              >
-                {apiLoading ? (
-                  <>
-                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    Configuring...
-                  </>
-                ) : (
-                  <>
-                    <Cog6ToothIcon className="h-5 w-5" />
-                    Start Configuration
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleConfigure}
+                  disabled={apiLoading}
+                  className={`px-5 py-2.5 text-sm font-semibold text-white rounded-lg flex items-center gap-2 transition-all shadow-sm hover:shadow-md ${
+                    apiLoading
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700'
+                  }`}
+                >
+                  {apiLoading ? (
+                    <>
+                      <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Configuring...
+                    </>
+                  ) : (
+                    <>
+                      <Cog6ToothIcon className="h-5 w-5" />
+                      Start Configuration
+                    </>
+                  )}
+                </button>
 
-              {/* Last Configuration Info */}
-              {mceLastConfigured && (
-                <div className="text-sm text-gray-600 mt-4">
-                  <div className="flex items-center gap-2">
-                    <Cog6ToothIcon className="h-4 w-4 text-blue-600" />
+                {/* Last Configuration Info */}
+                {mceLastConfigured && (
+                  <div className="flex items-center gap-2 text-sm text-gray-500 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                    <CheckCircleIcon className="h-4 w-4 text-emerald-600" />
                     <span>Last configured: {new Date(mceLastConfigured).toLocaleString()}</span>
-                    <span className="text-green-600 font-medium">✅ Completed</span>
+                    <span className="text-emerald-600 font-semibold">Completed</span>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {/* Configuration Results or Loading */}
             {isConfiguring && !configurationResults && (
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+              <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                    <ArrowPathIcon className="h-5 w-5 text-blue-600 animate-spin" />
+                  </div>
                   <h3 className="text-lg font-semibold text-gray-900">Running Configuration...</h3>
                 </div>
-                <p className="text-gray-600">Please wait while the playbook executes. This may take a minute or two.</p>
+                <p className="text-gray-500">Please wait while the playbook executes. This may take a minute or two.</p>
               </div>
             )}
 
             {configurationResults && (
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center gap-2 mb-4">
+              <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
+                <div className="flex items-center gap-3 mb-4">
                   {configurationResults.running ? (
-                    <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                      <ArrowPathIcon className="h-5 w-5 text-blue-600 animate-spin" />
+                    </div>
                   ) : configurationResults.success ? (
-                    <CheckCircleIcon className="h-6 w-6 text-green-600" />
+                    <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                      <CheckCircleIcon className="h-5 w-5 text-emerald-600" />
+                    </div>
                   ) : (
-                    <span className="text-2xl">❌</span>
+                    <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
+                      <XCircleIcon className="h-5 w-5 text-red-600" />
+                    </div>
                   )}
                   <h3 className="text-lg font-semibold text-gray-900">
                     {configurationResults.running ? 'Running Configuration...' : configurationResults.success ? 'Configuration Completed' : 'Configuration Failed'}
@@ -1307,18 +1324,15 @@ const CAPADashboardContent = () => {
                 {/* Output Display */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-sm font-medium text-gray-700">Playbook Output:</h4>
+                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Playbook Output</h4>
                     <button
                       onClick={() => handleCopyOutput(configurationResults.output || 'No output available')}
-                      className="px-3 py-1 text-white rounded text-xs font-medium transition-colors"
-                      style={{ backgroundColor: '#2684FF' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#0065FF')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#2684FF')}
+                      className="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
                     >
-                      {copySuccess || '📋 Copy'}
+                      {copySuccess || 'Copy'}
                     </button>
                   </div>
-                  <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto min-h-[100px]">
+                  <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto min-h-[100px] border border-gray-800">
                     <pre className="whitespace-pre-wrap">
                       {configurationResults.output || 'No output available'}
                     </pre>
@@ -1333,11 +1347,11 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Provision ROSA HCP Cluster</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Provision ROSA HCP Cluster</h2>
 
             {/* Provisioning in Progress Banner */}
             {isProvisioning && !provisionResults && (
-              <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
@@ -1370,7 +1384,7 @@ const CAPADashboardContent = () => {
 
             {/* Loading indicator while checking for running jobs */}
             {isCheckingProvisionJob ? (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
                 <div className="text-center py-12">
                   <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
                   <p className="mt-4 text-gray-600">Checking for running provision jobs...</p>
@@ -1381,7 +1395,7 @@ const CAPADashboardContent = () => {
               !provisionResults && !isProvisioning && (
                 provisionViewMode === 'form' ? (
                   /* Provision Form - Inline */
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                  <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
                     <RosaProvisionModal
                       isOpen={true}
                       inline={true}
@@ -1566,7 +1580,7 @@ const CAPADashboardContent = () => {
 
             {/* Provision Results Display - Inline Playbook Output */}
             {provisionResults && (
-              <div className={`mt-6 rounded-lg border-2 p-6 ${provisionResults.isRunning ? 'bg-blue-50 border-blue-300' : provisionResults.success ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+              <div className={`mt-6 rounded-lg border p-6 shadow-sm ${provisionResults.isRunning ? 'bg-blue-50 border-blue-200' : provisionResults.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     {provisionResults.isRunning ? (
@@ -1628,18 +1642,15 @@ const CAPADashboardContent = () => {
                 {/* Output Display */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-sm font-medium text-gray-700">Playbook Output:</h4>
+                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Playbook Output</h4>
                     <button
                       onClick={() => handleCopyOutput(provisionResults.output || 'No output available')}
-                      className="px-3 py-1 text-white rounded text-xs font-medium transition-colors"
-                      style={{ backgroundColor: '#2684FF' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#0065FF')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#2684FF')}
+                      className="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
                     >
-                      {copySuccess || '📋 Copy'}
+                      {copySuccess || 'Copy'}
                     </button>
                   </div>
-                  <div className="bg-gray-900 text-gray-100 rounded p-4 max-h-96 overflow-y-auto font-mono text-sm" ref={el => {
+                  <div className="bg-gray-900 text-gray-100 rounded-lg p-4 max-h-96 overflow-y-auto font-mono text-sm border border-gray-800" ref={el => {
                     if (el && provisionResults.isRunning) el.scrollTop = el.scrollHeight;
                   }}>
                     <pre className="whitespace-pre-wrap">
@@ -1659,7 +1670,7 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">CAPA Resources</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">CAPA Resources</h2>
 
             <ResourcesViewer theme="mce" />
           </div>
@@ -1676,9 +1687,9 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Credentials</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Credentials</h2>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
               <CredentialsModal
                 isOpen={true}
                 inline={true}
@@ -1686,11 +1697,27 @@ const CAPADashboardContent = () => {
                 theme="mce"
                 onSave={() => {
                   refreshAllStatus();
-                  // Force ActiveEnvironmentBanner to re-fetch credentials
                   setCredentialsRefreshKey(prev => prev + 1);
-                  setActiveSection('environments');
                 }}
               />
+            </div>
+
+            {/* Environments - collapsible, closed by default */}
+            <div className="border border-gray-100 rounded-lg bg-white shadow-md">
+              <button
+                onClick={() => setShowEnvironments(prev => !prev)}
+                className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition-colors"
+              >
+                <h3 className="text-lg font-semibold text-blue-900">MCE Environments</h3>
+                <span className={`text-gray-400 transition-transform duration-200 ${showEnvironments ? 'rotate-180' : ''}`}>
+                  &#9660;
+                </span>
+              </button>
+              {showEnvironments && (
+                <div className="border-t border-gray-200">
+                  <MCEEnvironmentSelector onUseCredentials={handleUseEnvironmentCredentials} title="" />
+                </div>
+              )}
             </div>
           </div>
         );
@@ -1698,7 +1725,7 @@ const CAPADashboardContent = () => {
       case 'workflows':
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-blue-900">Workflow Builder</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Workflow Builder</h2>
             <p className="text-gray-600">
               Chain playbooks into automated workflows. Drag from the palette, reorder steps, and run them as a pipeline.
             </p>
@@ -1715,9 +1742,9 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">MCE Terminal</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">MCE Terminal</h2>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
               <TerminalInline />
             </div>
           </div>
@@ -1727,9 +1754,9 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Notification Settings</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Notification Settings</h2>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
               <NotificationSettingsInline />
             </div>
           </div>
@@ -1740,7 +1767,7 @@ const CAPADashboardContent = () => {
           <div className="space-y-6">
             {/* Title */}
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-blue-900">Task Summary</h2>
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Task Summary</h2>
               {recentOps.recentOperations.filter((op) => op.environment === 'mce').length > 0 && (
                 <button
                   onClick={() => recentOps.clearRecentOperations()}
@@ -1752,7 +1779,7 @@ const CAPADashboardContent = () => {
               )}
             </div>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
               {recentOps.recentOperations.filter((op) => op.environment === 'mce').length === 0 ? (
                 <div className="text-center py-12">
                   <ClockIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -1869,15 +1896,12 @@ const CAPADashboardContent = () => {
                                 <h4 className="text-xs font-medium text-gray-700">Task Output:</h4>
                                 <button
                                   onClick={() => handleCopyOutput(typeof task.output === 'object' ? task.output.output : task.output)}
-                                  className="px-2 py-1 text-white rounded text-xs font-medium transition-colors"
-                                  style={{ backgroundColor: '#2684FF' }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#0065FF')}
-                                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#2684FF')}
+                                  className="px-2.5 py-1 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
                                 >
-                                  {copySuccess || '📋 Copy'}
+                                  {copySuccess || 'Copy'}
                                 </button>
                               </div>
-                              <div className="bg-gray-900 text-green-400 p-3 rounded-lg font-mono text-xs overflow-x-auto max-h-60 overflow-y-auto">
+                              <div className="bg-gray-900 text-green-400 p-3 rounded-lg font-mono text-xs overflow-x-auto max-h-60 overflow-y-auto border border-gray-800">
                                 <pre className="whitespace-pre-wrap">
                                   {typeof task.output === 'object' ? task.output.output : task.output}
                                 </pre>
@@ -1897,7 +1921,7 @@ const CAPADashboardContent = () => {
       default:
         return (
           <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-2xl font-bold text-blue-900 mb-4">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent mb-4">
               {activeSection.charAt(0).toUpperCase() + activeSection.slice(1)}
             </h2>
             <p className="text-gray-600">Content for {activeSection} section coming soon...</p>
@@ -1917,9 +1941,49 @@ const CAPADashboardContent = () => {
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto">
         {/* Page Header with Blue Gradient */}
-        <div className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-6 py-4 shadow-lg flex items-center h-[72px]">
-          <div>
-            <h1 className="text-2xl font-bold leading-tight tracking-tight">MCE Environment</h1>
+        <div className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-6 py-4 shadow-lg flex items-center gap-4 h-[72px]">
+          <h1 className="text-2xl font-bold leading-tight tracking-tight">MCE Environment</h1>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveSection('terminal')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                activeSection === 'terminal'
+                  ? 'bg-white/30'
+                  : 'bg-white/10 hover:bg-white/20'
+              }`}
+              title="Terminal"
+            >
+              <span>💻</span>
+              <span>Terminal</span>
+            </button>
+            <button
+              onClick={() => setActiveSection('notifications')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                activeSection === 'notifications'
+                  ? 'bg-white/30'
+                  : 'bg-white/10 hover:bg-white/20'
+              }`}
+              title="Notifications"
+            >
+              <span>🔔</span>
+              <span>Notifications</span>
+            </button>
+            <button
+              onClick={() => navigate('/agents')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-white/10 hover:bg-white/20"
+              title="AI Agent Pipeline"
+            >
+              <span>🧠</span>
+              <span>AI Agents</span>
+            </button>
+            <button
+              onClick={() => navigate('/aws-usage')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-white/10 hover:bg-white/20"
+              title="AWS Usage"
+            >
+              <span>☁️</span>
+              <span>AWS Usage</span>
+            </button>
           </div>
         </div>
 

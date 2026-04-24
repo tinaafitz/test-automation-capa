@@ -2114,9 +2114,49 @@ const MinikubeDashboardContent = () => {
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto">
         {/* Page Header with Purple Gradient */}
-        <div className="bg-gradient-to-r from-purple-600 to-violet-500 text-white px-6 py-4 shadow-lg flex items-center h-[72px]">
-          <div>
-            <h1 className="text-2xl font-bold leading-tight tracking-tight">Minikube Environment</h1>
+        <div className="bg-gradient-to-r from-purple-600 to-violet-500 text-white px-6 py-4 shadow-lg flex items-center gap-4 h-[72px]">
+          <h1 className="text-2xl font-bold leading-tight tracking-tight">Minikube Environment</h1>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveSection('terminal')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                activeSection === 'terminal'
+                  ? 'bg-white/30'
+                  : 'bg-white/10 hover:bg-white/20'
+              }`}
+              title="Terminal"
+            >
+              <span>💻</span>
+              <span>Terminal</span>
+            </button>
+            <button
+              onClick={() => setActiveSection('notifications')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                activeSection === 'notifications'
+                  ? 'bg-white/30'
+                  : 'bg-white/10 hover:bg-white/20'
+              }`}
+              title="Notifications"
+            >
+              <span>🔔</span>
+              <span>Notifications</span>
+            </button>
+            <button
+              onClick={() => window.location.href = '/agents'}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-white/10 hover:bg-white/20"
+              title="AI Agent Pipeline"
+            >
+              <span>🧠</span>
+              <span>AI Agents</span>
+            </button>
+            <button
+              onClick={() => window.location.href = '/aws-usage'}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-white/10 hover:bg-white/20"
+              title="AWS Usage"
+            >
+              <span>☁️</span>
+              <span>AWS Usage</span>
+            </button>
           </div>
         </div>
 
