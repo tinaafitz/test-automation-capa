@@ -683,15 +683,17 @@ const MCEEnvironmentSelector = ({
   return (
     <div className="space-y-6">
       {/* Title */}
-      <h2 className={`text-2xl font-bold ${colors.title}`}>
-        {selectedEnv ? titleSingular : title}
-        {selectedEnv && (
-          <>
-            <span className="text-gray-400 mx-2">›</span>
-            <span className={colors.primary}>{selectedEnv.clusterName}</span>
-          </>
-        )}
-      </h2>
+      {(title || selectedEnv) && (
+        <h2 className={`text-2xl font-bold ${colors.title}`}>
+          {selectedEnv ? titleSingular : title}
+          {selectedEnv && (
+            <>
+              <span className="text-gray-400 mx-2">›</span>
+              <span className={colors.primary}>{selectedEnv.clusterName}</span>
+            </>
+          )}
+        </h2>
+      )}
 
       {/* Search and Filters - Hidden when viewing single environment */}
       {!selectedEnv && (

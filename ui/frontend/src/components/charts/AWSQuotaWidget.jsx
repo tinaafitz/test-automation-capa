@@ -76,7 +76,7 @@ const AWSQuotaWidget = () => {
 
   // Calculate total estimated monthly cost
   const getTotalCost = () => {
-    if (!usage || config.length === 0) return null;
+    if (!usage || !config || config.length === 0) return null;
     let total = 0;
     config.forEach(r => {
       if (r.costPerMonth && usage[r.key] && usage[r.key] !== 'error') {
@@ -88,7 +88,7 @@ const AWSQuotaWidget = () => {
 
   // Key resources to show in the compact widget
   const getDisplayResources = () => {
-    if (!usage || config.length === 0) return [];
+    if (!usage || !config || config.length === 0) return [];
     // Show top 5 resources sorted by usage percentage (highest first)
     return config
       .filter(r => usage[r.key] !== undefined && usage[r.key] !== 'error')
