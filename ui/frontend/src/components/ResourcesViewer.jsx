@@ -165,7 +165,7 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
         <div className="text-center py-12">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
           <p className="mt-4 text-gray-600">Loading resources...</p>
@@ -205,7 +205,7 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+    <div className="bg-white rounded-lg shadow-md border border-gray-100">
       {/* Header */}
       <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-center gap-3">

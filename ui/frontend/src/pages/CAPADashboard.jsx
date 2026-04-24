@@ -1065,7 +1065,7 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Verify Environment</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Verify Environment</h2>
 
             <p className="text-gray-600 mb-6">
               Run comprehensive verification checks on your MCE environment and CAPI/CAPA components.
@@ -1104,7 +1104,7 @@ const CAPADashboardContent = () => {
             )}
 
             {/* CAPI/CAPA Components Section */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-lg font-semibold text-gray-900">Components</h3>
                 <button
@@ -1238,10 +1238,10 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Configure CAPI/CAPA</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Configure CAPI/CAPA</h2>
 
             {/* Configuration Card */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
               <p className="text-gray-600 mb-6">
                 Enable and configure CAPI/CAPA components on your MCE environment.
               </p>
@@ -1334,11 +1334,11 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Provision ROSA HCP Cluster</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Provision ROSA HCP Cluster</h2>
 
             {/* Provisioning in Progress Banner */}
             {isProvisioning && !provisionResults && (
-              <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
@@ -1371,7 +1371,7 @@ const CAPADashboardContent = () => {
 
             {/* Loading indicator while checking for running jobs */}
             {isCheckingProvisionJob ? (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
                 <div className="text-center py-12">
                   <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
                   <p className="mt-4 text-gray-600">Checking for running provision jobs...</p>
@@ -1382,7 +1382,7 @@ const CAPADashboardContent = () => {
               !provisionResults && !isProvisioning && (
                 provisionViewMode === 'form' ? (
                   /* Provision Form - Inline */
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                  <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
                     <RosaProvisionModal
                       isOpen={true}
                       inline={true}
@@ -1567,7 +1567,7 @@ const CAPADashboardContent = () => {
 
             {/* Provision Results Display - Inline Playbook Output */}
             {provisionResults && (
-              <div className={`mt-6 rounded-lg border-2 p-6 ${provisionResults.isRunning ? 'bg-blue-50 border-blue-300' : provisionResults.success ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+              <div className={`mt-6 rounded-lg border p-6 shadow-sm ${provisionResults.isRunning ? 'bg-blue-50 border-blue-200' : provisionResults.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     {provisionResults.isRunning ? (
@@ -1660,7 +1660,7 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">CAPA Resources</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">CAPA Resources</h2>
 
             <ResourcesViewer theme="mce" />
           </div>
@@ -1677,9 +1677,9 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Credentials</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Credentials</h2>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
               <CredentialsModal
                 isOpen={true}
                 inline={true}
@@ -1693,7 +1693,7 @@ const CAPADashboardContent = () => {
             </div>
 
             {/* Environments - collapsible, closed by default */}
-            <div className="border border-gray-200 rounded-lg bg-white shadow-sm">
+            <div className="border border-gray-100 rounded-lg bg-white shadow-md">
               <button
                 onClick={() => setShowEnvironments(prev => !prev)}
                 className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition-colors"
@@ -1715,7 +1715,7 @@ const CAPADashboardContent = () => {
       case 'workflows':
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-blue-900">Workflow Builder</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Workflow Builder</h2>
             <p className="text-gray-600">
               Chain playbooks into automated workflows. Drag from the palette, reorder steps, and run them as a pipeline.
             </p>
@@ -1732,9 +1732,9 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">MCE Terminal</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">MCE Terminal</h2>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
               <TerminalInline />
             </div>
           </div>
@@ -1744,9 +1744,9 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">Notification Settings</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Notification Settings</h2>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
               <NotificationSettingsInline />
             </div>
           </div>
@@ -1757,7 +1757,7 @@ const CAPADashboardContent = () => {
           <div className="space-y-6">
             {/* Title */}
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-blue-900">Task Summary</h2>
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Task Summary</h2>
               {recentOps.recentOperations.filter((op) => op.environment === 'mce').length > 0 && (
                 <button
                   onClick={() => recentOps.clearRecentOperations()}
@@ -1769,7 +1769,7 @@ const CAPADashboardContent = () => {
               )}
             </div>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
               {recentOps.recentOperations.filter((op) => op.environment === 'mce').length === 0 ? (
                 <div className="text-center py-12">
                   <ClockIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -1914,7 +1914,7 @@ const CAPADashboardContent = () => {
       default:
         return (
           <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-2xl font-bold text-blue-900 mb-4">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent mb-4">
               {activeSection.charAt(0).toUpperCase() + activeSection.slice(1)}
             </h2>
             <p className="text-gray-600">Content for {activeSection} section coming soon...</p>
