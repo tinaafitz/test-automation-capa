@@ -211,7 +211,8 @@ const CAPADashboardContent = () => {
   const recentOps = useRecentOperationsContext();
 
   // UI State
-  const [activeSection, setActiveSection] = useState('environments');
+  const [activeSection, setActiveSection] = useState('credentials');
+  const [showEnvironments, setShowEnvironments] = useState(false);
   const [showYamlEditorModal, setShowYamlEditorModal] = useState(false);
   const [yamlEditorData, setYamlEditorData] = useState(null);
   const [provisionViewMode, setProvisionViewMode] = useState('form'); // 'form' or 'yaml'
@@ -1686,11 +1687,27 @@ const CAPADashboardContent = () => {
                 theme="mce"
                 onSave={() => {
                   refreshAllStatus();
-                  // Force ActiveEnvironmentBanner to re-fetch credentials
                   setCredentialsRefreshKey(prev => prev + 1);
-                  setActiveSection('environments');
                 }}
               />
+            </div>
+
+            {/* Environments - collapsible, closed by default */}
+            <div className="border border-gray-200 rounded-lg bg-white shadow-sm">
+              <button
+                onClick={() => setShowEnvironments(prev => !prev)}
+                className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition-colors"
+              >
+                <h3 className="text-lg font-semibold text-blue-900">MCE Environments</h3>
+                <span className={`text-gray-400 transition-transform duration-200 ${showEnvironments ? 'rotate-180' : ''}`}>
+                  &#9660;
+                </span>
+              </button>
+              {showEnvironments && (
+                <div className="border-t border-gray-200">
+                  <MCEEnvironmentSelector onUseCredentials={handleUseEnvironmentCredentials} title="" />
+                </div>
+              )}
             </div>
           </div>
         );
@@ -1917,10 +1934,20 @@ const CAPADashboardContent = () => {
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto">
         {/* Page Header with Blue Gradient */}
-        <div className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-6 py-4 shadow-lg flex items-center h-[72px]">
-          <div>
-            <h1 className="text-2xl font-bold leading-tight tracking-tight">MCE Environment</h1>
-          </div>
+        <div className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-6 py-4 shadow-lg flex items-center gap-4 h-[72px]">
+          <h1 className="text-2xl font-bold leading-tight tracking-tight">MCE Environment</h1>
+          <button
+            onClick={() => setActiveSection('terminal')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              activeSection === 'terminal'
+                ? 'bg-white/30'
+                : 'bg-white/10 hover:bg-white/20'
+            }`}
+            title="Terminal"
+          >
+            <span>💻</span>
+            <span>Terminal</span>
+          </button>
         </div>
 
         <div className="p-6">

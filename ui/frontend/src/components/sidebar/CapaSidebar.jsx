@@ -13,6 +13,14 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   Bars3Icon,
+  KeyIcon,
+  GlobeAltIcon,
+  RocketLaunchIcon,
+  CloudIcon,
+  DocumentTextIcon,
+  BoltIcon,
+  QueueListIcon,
+  CpuChipIcon,
 } from '@heroicons/react/24/outline';
 import { useRecentOperationsContext, useApiStatusContext } from '../../store/AppContext';
 
@@ -43,7 +51,7 @@ const CapaSidebar = ({
   onAgentDashboardClick,
   onWorkflowsClick,
   onClusterActionsClick,
-  activeSection = 'environments',
+  activeSection = 'credentials',
   environment = 'mce' // 'mce' or 'minikube'
 }) => {
   const [isRecentTasksExpanded, setIsRecentTasksExpanded] = useState(true);
@@ -86,111 +94,122 @@ const CapaSidebar = ({
     return '📄';
   };
 
-  // Navigation menu items
-  const allMenuItems = [
+  // Navigation menu items grouped by section
+  const menuGroups = [
     {
-      id: 'environments',
-      label: 'Environments',
-      icon: <span className="text-lg">🌍</span>,
-      onClick: onEnvironmentsClick
+      label: 'SETUP',
+      items: [
+        {
+          id: 'environments',
+          label: 'Environments',
+          icon: <GlobeAltIcon className="h-5 w-5" />,
+          onClick: onEnvironmentsClick,
+          showInEnvironments: ['minikube']
+        },
+        {
+          id: 'credentials',
+          label: 'Credentials',
+          icon: <KeyIcon className="h-5 w-5" />,
+          onClick: onCredentialsClick,
+          showInEnvironments: ['mce']
+        },
+        {
+          id: 'verify',
+          label: 'Verify',
+          icon: <CheckCircleIcon className="h-5 w-5" />,
+          onClick: onVerifyClick,
+          showInEnvironments: ['mce']
+        },
+        {
+          id: 'configure',
+          label: 'Configure',
+          icon: <Cog6ToothIcon className="h-5 w-5" />,
+          onClick: onConfigureClick
+        },
+        {
+          id: 'reconfigure',
+          label: 'Set Custom CAPA Image',
+          icon: <ArrowPathIcon className="h-5 w-5" />,
+          onClick: onReconfigureClick,
+          showInEnvironments: ['minikube']
+        },
+      ],
     },
     {
-      id: 'credentials',
-      label: 'Credentials',
-      icon: <span className="text-lg">🔑</span>,
-      onClick: onCredentialsClick,
-      showInEnvironments: ['mce'] // Only show in MCE, not minikube
+      label: 'CLUSTERS',
+      items: [
+        {
+          id: 'workflows',
+          label: 'Workflows',
+          icon: <QueueListIcon className="h-5 w-5" />,
+          onClick: onWorkflowsClick
+        },
+        {
+          id: 'rosa-hcp-clusters',
+          label: 'ROSA HCP Clusters',
+          icon: <CloudIcon className="h-5 w-5" />,
+          onClick: onRosaHcpClustersClick
+        },
+        {
+          id: 'provision',
+          label: 'Provision',
+          icon: <RocketLaunchIcon className="h-5 w-5" />,
+          onClick: onProvisionClick
+        },
+        {
+          id: 'resources',
+          label: 'CAPA Resources',
+          icon: <DocumentTextIcon className="h-5 w-5" />,
+          onClick: onResourcesClick
+        },
+        {
+          id: 'cluster-actions',
+          label: 'Cluster Actions',
+          icon: <BoltIcon className="h-5 w-5" />,
+          onClick: onClusterActionsClick,
+          showInEnvironments: ['mce']
+        },
+      ],
     },
     {
-      id: 'verify',
-      label: 'Verify',
-      icon: <CheckCircleIcon className="h-5 w-5" />,
-      onClick: onVerifyClick,
-      showInEnvironments: ['mce'] // Only show in MCE, not minikube
-    },
-    {
-      id: 'configure',
-      label: 'Configure',
-      icon: <Cog6ToothIcon className="h-5 w-5" />,
-      onClick: onConfigureClick
-    },
-    {
-      id: 'reconfigure',
-      label: 'Set Custom CAPA Image',
-      icon: <ArrowPathIcon className="h-5 w-5" />,
-      onClick: onReconfigureClick,
-      showInEnvironments: ['minikube'] // Only show in Minikube, not MCE
-    },
-    {
-      id: 'provision',
-      label: 'Provision',
-      icon: <span className="text-lg">🚀</span>,
-      onClick: onProvisionClick
-    },
-    {
-      id: 'resources',
-      label: 'CAPA Resources',
-      icon: <span className="text-lg">📄</span>,
-      onClick: onResourcesClick
-    },
-    {
-      id: 'rosa-hcp-clusters',
-      label: 'ROSA HCP Clusters',
-      icon: <span className="text-lg">☁️</span>,
-      onClick: onRosaHcpClustersClick
-    },
-    {
-      id: 'workflows',
-      label: 'Workflows',
-      icon: <span className="text-lg">&#9776;</span>,
-      onClick: onWorkflowsClick
-    },
-    {
-      id: 'cluster-actions',
-      label: 'Cluster Actions',
-      icon: <span className="text-lg">&#9889;</span>,
-      onClick: onClusterActionsClick,
-      showInEnvironments: ['mce']
-    },
-    {
-      id: 'terminal',
-      label: 'Terminal',
-      icon: <span className="text-lg">💻</span>,
-      onClick: onTerminalClick
-    },
-    {
-      id: 'notifications',
-      label: 'Notifications',
-      icon: <BellIcon className="h-5 w-5" />,
-      onClick: onNotificationsClick
-    },
-    {
-      id: 'recent-tasks',
-      label: 'Task Summary',
-      icon: <ClockIcon className="h-5 w-5" />,
-      onClick: onRecentTasksClick
-    },
-    {
-      id: 'agent-dashboard',
-      label: 'AI Agent Pipeline',
-      icon: <span className="text-lg">🧠</span>,
-      onClick: onAgentDashboardClick
-    },
-    {
-      id: 'aws-usage',
-      label: 'AWS Usage',
-      icon: <span className="text-lg">☁️</span>,
-      onClick: onAWSUsageClick
+      label: 'TOOLS',
+      items: [
+        {
+          id: 'notifications',
+          label: 'Notifications',
+          icon: <BellIcon className="h-5 w-5" />,
+          onClick: onNotificationsClick
+        },
+        {
+          id: 'recent-tasks',
+          label: 'Task Summary',
+          icon: <ClockIcon className="h-5 w-5" />,
+          onClick: onRecentTasksClick
+        },
+        {
+          id: 'agent-dashboard',
+          label: 'AI Agent Pipeline',
+          icon: <CpuChipIcon className="h-5 w-5" />,
+          onClick: onAgentDashboardClick
+        },
+        {
+          id: 'aws-usage',
+          label: 'AWS Usage',
+          icon: <ChartBarIcon className="h-5 w-5" />,
+          onClick: onAWSUsageClick
+        },
+      ],
     },
   ];
 
-  // Filter menu items based on environment
-  const menuItems = allMenuItems.filter(item => {
-    // If item doesn't specify environments, show it in all environments
-    if (!item.showInEnvironments) return true;
-    // Otherwise, only show if current environment is in the list
-    return item.showInEnvironments.includes(environment);
-  });
+  // Filter items per group based on environment
+  const filteredGroups = menuGroups.map(group => ({
+    ...group,
+    items: group.items.filter(item => {
+      if (!item.showInEnvironments) return true;
+      return item.showInEnvironments.includes(environment);
+    }),
+  })).filter(group => group.items.length > 0);
 
   const [showEnvMenu, setShowEnvMenu] = useState(false);
   const navigate = useNavigate();
@@ -201,7 +220,7 @@ const CapaSidebar = ({
   };
 
   return (
-    <div className="w-72 bg-gray-100 border-r border-gray-300 flex flex-col h-full">
+    <div className="w-72 bg-gray-50 border-r border-gray-200 flex flex-col h-full">
       {/* Sidebar Title - White background with black text */}
       <div className="flex-shrink-0 bg-white px-4 py-4 border-b border-gray-300 h-[72px] relative">
         <div className="flex items-center justify-between gap-3">
@@ -273,30 +292,38 @@ const CapaSidebar = ({
       </div>
 
       {/* Navigation Menu */}
-      <div className="flex-shrink-0 border-b border-gray-300">
-        <nav className="py-2">
-          {menuItems.map((item) => (
-            <div key={item.id}>
-              {/* Menu Item */}
-              <button
-                onClick={() => {
-                  if (typeof item.onClick === 'function') item.onClick();
-                }}
-                className={`
-                  w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm
-                  transition-all duration-150 ease-in-out
-                  ${activeSection === item.id
-                    ? 'bg-blue-100 text-blue-900 border-l-4 border-blue-600 font-medium shadow-sm'
-                    : 'text-gray-700 hover:bg-gray-200 hover:shadow-sm hover:translate-x-0.5'
-                  }
-                `}
-              >
-                <span className={activeSection === item.id
-                  ? 'text-blue-600' : 'text-gray-500'}>
-                  {item.icon}
+      <div className="flex-shrink-0 border-b border-gray-200">
+        <nav className="py-1">
+          {filteredGroups.map((group, groupIndex) => (
+            <div key={group.label}>
+              {groupIndex > 0 && <div className="mx-4 my-1.5 border-t border-gray-200" />}
+              <div className="px-4 pt-3 pb-1">
+                <span className="text-xs font-bold tracking-widest text-gray-400 uppercase">
+                  {group.label}
                 </span>
-                <span className="flex-1">{item.label}</span>
-              </button>
+              </div>
+              {group.items.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    if (typeof item.onClick === 'function') item.onClick();
+                  }}
+                  className={`
+                    w-full flex items-center gap-3 px-4 py-2 text-left text-sm
+                    transition-all duration-150 ease-in-out
+                    ${activeSection === item.id
+                      ? 'bg-blue-50 text-blue-700 border-l-4 border-blue-500 font-semibold'
+                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    }
+                  `}
+                >
+                  <span className={activeSection === item.id
+                    ? 'text-blue-500' : 'text-gray-400'}>
+                    {item.icon}
+                  </span>
+                  <span className="flex-1">{item.label}</span>
+                </button>
+              ))}
             </div>
           ))}
         </nav>
@@ -304,29 +331,30 @@ const CapaSidebar = ({
 
       {/* Recent Task Section */}
       {recentTests.length > 0 && (
-        <div className="flex-1 border-t border-gray-300 bg-gray-100 overflow-hidden flex flex-col">
-          <div className="px-4 py-2.5 text-sm text-gray-700 font-medium flex-shrink-0">
-            Recent Tasks ({recentTests.length})
+        <div className="flex-1 border-t border-gray-200 bg-gray-50 overflow-hidden flex flex-col">
+          <div className="px-4 pt-3 pb-1.5 flex-shrink-0">
+            <span className="text-xs font-bold tracking-widest text-gray-400 uppercase">
+              Recent Tasks ({recentTests.length})
+            </span>
           </div>
-          <div className="px-4 pb-3 space-y-2 flex-1 overflow-y-auto">
+          <div className="px-3 pb-3 space-y-1.5 flex-1 overflow-y-auto">
             {recentTests.map((task, index) => {
               const status = typeof task.status === 'object' ? task.status.status : task.status;
               const statusIcon = getStatusIcon(task.status);
-              // Remove emoji from status text since we show it as an icon
               const statusText = String(status).replace(/[✅❌⚠️⏳]/g, '').trim();
 
               return (
                 <div
                   key={task.id || index}
                   onClick={onRecentTasksClick}
-                  className="bg-white rounded border border-gray-200 p-2 cursor-pointer hover:bg-gray-50 hover:border-blue-400 transition-colors"
+                  className="bg-white rounded-md border border-gray-200 p-2.5 cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-all duration-150"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-gray-900 truncate">
+                      <div className="text-xs font-medium text-gray-800 truncate">
                         {task.title}
                       </div>
-                      <div className="text-xs text-gray-600 mt-1 truncate">
+                      <div className="text-[11px] text-gray-500 mt-0.5 truncate">
                         {statusText}
                       </div>
                     </div>
@@ -342,10 +370,12 @@ const CapaSidebar = ({
       )}
 
       {/* Sidebar Footer */}
-      <div className="flex-shrink-0 border-t border-gray-300 px-4 py-3 text-sm font-semibold bg-gray-50">
+      <div className="flex-shrink-0 border-t border-gray-200 px-4 py-3 bg-white">
         <div className="flex items-center gap-2">
-          <span className="text-base">{environment === 'minikube' ? '🔮' : '🌐'}</span>
-          <span className="text-gray-700">{environment === 'minikube' ? 'Minikube Environment' : 'MCE Environment'}</span>
+          <GlobeAltIcon className="h-4 w-4 text-gray-400" />
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            {environment === 'minikube' ? 'Minikube' : 'MCE'} Environment
+          </span>
         </div>
       </div>
     </div>
