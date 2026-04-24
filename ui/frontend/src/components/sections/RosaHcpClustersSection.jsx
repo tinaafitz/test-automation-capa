@@ -606,7 +606,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
     <div className="space-y-6">
       {/* Title and Refresh Button */}
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-blue-900">ROSA HCP Clusters</h2>
+        <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">ROSA HCP Clusters</h2>
         <button
           onClick={fetchClusters}
           disabled={clustersLoading}
@@ -620,7 +620,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         </button>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-lg shadow-md border border-gray-100 overflow-hidden">
         {/* Cluster Table */}
         {clustersError ? (
           <div className="text-center py-8 text-red-600 p-6">
