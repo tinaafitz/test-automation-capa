@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "capa-automation": {
+      "command": "/Users/tinafitzgerald/acm_dev/test-automation-capa/mcp_server/venv/bin/python",
+      "args": [
+        "/Users/tinafitzgerald/acm_dev/test-automation-capa/mcp_server/server.py"
+      ],
+      "env": {
+        "AWS_DEFAULT_REGION": "us-west-2"
+      }
+    }
+  }
+}
