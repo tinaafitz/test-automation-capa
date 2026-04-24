@@ -1,75 +1,53 @@
 """
 AI Assistant Service for ROSA Cluster Management
-Integrates with Claude API to provide intelligent assistance
+Integrates with Claude API to provide intelligent assistance with tool use
 """
 
+import json
 import os
 import anthropic
 from typing import List, Dict, Any
 
+from tool_functions import TOOL_DEFINITIONS, TOOL_DISPATCH
+
+MAX_TOOL_CALLS = 5
+
 
 class AIAssistantService:
     def __init__(self):
-        # Use Anthropic API key from environment
         self.client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
         self.system_prompt = """You are an AI assistant specialized in Red Hat OpenShift Service on AWS (ROSA) and Cluster API (CAPI) operations.
 
-CRITICAL INSTRUCTION - READ CAREFULLY:
-When the user asks "What clusters are running?" or similar questions about clusters, you MUST:
-1. Look at the "Current cluster context" section that will be provided
-2. Find the line that says "Active clusters: [number]"
-3. Find the lines starting with "  - " which contain cluster details
-4. COPY the cluster name, namespace, and status from those lines into your response
-5. NEVER just say "You have 1 cluster(s)" without the name
+You have access to tools that let you query live cluster data, AWS resources, Kubernetes resources, and a knowledge base of known issues. USE THESE TOOLS to answer questions with real, current data rather than relying solely on context provided in the message.
 
-MANDATORY RESPONSE FORMAT for cluster queries:
-"You have [N] cluster(s):
-- [exact cluster name from context] (namespace: [exact namespace from context], status: [exact status from context])"
+When a user asks about clusters, resources, or issues:
+1. Call the appropriate tool(s) to get live data
+2. Interpret the results and present them clearly
+3. Offer relevant follow-up suggestions
 
-Example - If context shows:
-"  - wed-rosa-test (namespace: ns-rosa-hcp): uninstalling"
-
-You MUST respond:
-"You have 1 cluster:
-- wed-rosa-test (namespace: ns-rosa-hcp, status: uninstalling)"
-
-Your role is to help users:
-- List running clusters with their full details (name, status, namespace)
-- Analyze actual provisioning job logs to identify specific errors
-- Troubleshoot failed cluster provisioning by examining real error messages
-- Interpret Ansible playbook output and Kubernetes resource status
-- Provide targeted fixes based on the actual error (not generic advice)
-- Explain CAPI and ROSA concepts
-
-When listing clusters:
-- READ the "Current cluster context" section that will be provided to you
-- EXTRACT the cluster name, namespace, and status from the context
-- ALWAYS include these details in your response
-- Example response: "You have 1 cluster:
-  - wed-rosa-test (namespace: ns-wed-rosa-test, status: ready)"
+Your capabilities via tools:
+- List and inspect ROSA HCP clusters (capa_list_clusters, capa_cluster_status)
+- Query AWS resource usage and details (capa_aws_resource_usage, capa_aws_resource_details)
+- Check CloudFormation stack status (capa_cloudformation_stack_status)
+- Query Kubernetes resources and events (capa_k8s_get_resource, capa_k8s_events)
+- Search known issues and remediation history (capa_search_known_issues, capa_remediation_history)
+- View AI agent learning statistics (capa_learning_stats)
+- Run diagnostics on cluster issues (capa_diagnose_issue)
 
 When analyzing failed clusters:
-1. **Read the actual job logs** provided in the context
-2. **Identify the specific error** (credentials, network timeout, AWS API error, IAM permissions, etc.)
-3. **Provide the exact fix** for that specific error
-4. **Reference the line/section** of the log that shows the problem
+1. Read the actual job logs provided in the context
+2. Identify the specific error (credentials, network timeout, AWS API error, IAM permissions, etc.)
+3. Provide the exact fix for that specific error
+4. Use tools to gather additional context (e.g., check CF stack status, search known issues)
 
-Common error patterns to look for:
-- "AWS credentials" or "AccessDenied" → AWS credential issue
-- "NetworkNotReady" or "VPC creation failed" → Network configuration problem
-- "RoleNotReady" or "IAM role" → IAM role configuration issue
-- "secret not found" → rosa-creds-secret missing
-- "Unauthorized" or "login failed" → OpenShift Hub login issue
-- "timeout" → Resource creation taking too long
-
-Be specific, cite the actual error from logs, and give the exact fix. Avoid generic troubleshooting steps unless no logs are available."""
+Be specific, cite actual data from tool results, and give actionable recommendations."""
 
     async def chat(
         self, message: str, context: Dict[str, Any], history: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
-        Process a chat message with cluster context
+        Process a chat message with cluster context and tool use.
 
         Args:
             message: User's message
@@ -79,43 +57,81 @@ Be specific, cite the actual error from logs, and give the exact fix. Avoid gene
         Returns:
             Response with assistant message and optional suggestions
         """
-        # Build context summary
         context_summary = self._build_context_summary(context)
 
-        print(f"📝 [CONTEXT SUMMARY SENT TO CLAUDE]:\n{context_summary}\n")
-
-        # Build conversation history
         messages = []
         if history:
-            for msg in history[-5:]:  # Last 5 messages
+            for msg in history[-5:]:
                 messages.append({"role": msg.get("role"), "content": msg.get("content")})
 
         user_prompt = f"{context_summary}\n\nUser question: {message}"
-        print(f"💬 [FULL PROMPT TO CLAUDE]:\n{user_prompt}\n")
-
         messages.append({"role": "user", "content": user_prompt})
 
         try:
-            # Call Claude API
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=1024,
-                system=self.system_prompt,
-                messages=messages,
-            )
+            tool_call_count = 0
 
-            assistant_message = response.content[0].text
+            while True:
+                response = self.client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=4096,
+                    system=self.system_prompt,
+                    messages=messages,
+                    tools=TOOL_DEFINITIONS,
+                )
 
-            # Extract suggestions (if any)
-            suggestions = self._extract_suggestions(assistant_message, context)
+                if response.stop_reason == "tool_use":
+                    messages.append({"role": "assistant", "content": response.content})
 
-            return {"response": assistant_message, "suggestions": suggestions}
+                    tool_results = []
+                    for block in response.content:
+                        if block.type == "tool_use":
+                            tool_call_count += 1
+                            if tool_call_count > MAX_TOOL_CALLS:
+                                tool_results.append({
+                                    "type": "tool_result",
+                                    "tool_use_id": block.id,
+                                    "content": json.dumps({"error": "Tool call limit reached"}),
+                                    "is_error": True,
+                                })
+                                continue
+
+                            result = await self._execute_tool(block.name, block.input)
+                            print(f"🔧 Tool call: {block.name}({block.input}) -> {len(result)} chars")
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": result,
+                            })
+
+                    messages.append({"role": "user", "content": tool_results})
+
+                    if tool_call_count > MAX_TOOL_CALLS:
+                        break
+                else:
+                    break
+
+            text = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    text += block.text
+
+            suggestions = self._extract_suggestions(text, context)
+            return {"response": text, "suggestions": suggestions}
 
         except Exception as e:
             return {
                 "response": f"I encountered an error: {str(e)}. Please try again or contact support.",
                 "suggestions": [],
             }
+
+    async def _execute_tool(self, tool_name: str, tool_input: dict) -> str:
+        func = TOOL_DISPATCH.get(tool_name)
+        if not func:
+            return json.dumps({"error": f"Unknown tool: {tool_name}"})
+        try:
+            return await func(**tool_input)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
 
     def _build_context_summary(self, context: Dict[str, Any]) -> str:
         """Build a summary of the current cluster context"""

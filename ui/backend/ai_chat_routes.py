@@ -95,34 +95,6 @@ async def ai_assistant_chat(request: Request):
 
                 logger.info(f"🤖 [AI-ASSISTANT] AI Response: {response_text[:200]}...")
 
-                # Post-process: If user asked about clusters and AI didn't include names, fix it
-                if "what clusters" in message.lower() or "clusters are running" in message.lower():
-                    logger.info(
-                        f"🔍 [AI-ASSISTANT] Cluster query detected. Clusters data: {[c.get('name') for c in clusters_data]}"
-                    )
-                    has_cluster_names = any(
-                        c.get("name", "") in response_text for c in clusters_data
-                    )
-                    logger.info(
-                        f"🔍 [AI-ASSISTANT] Response contains cluster names: {has_cluster_names}"
-                    )
-
-                    if clusters_data and not has_cluster_names:
-                        # AI didn't include cluster names, build proper response
-                        logger.info(
-                            "🔧 [AI-ASSISTANT] AI response missing cluster names, fixing..."
-                        )
-                        cluster_list = "\n".join(
-                            [
-                                f"  - {c.get('name', 'unknown')} (namespace: {c.get('namespace', 'unknown')}, status: {c.get('status', 'unknown')})"
-                                for c in clusters_data
-                            ]
-                        )
-                        response_text = (
-                            f"You have {len(clusters_data)} cluster(s):\n\n{cluster_list}"
-                        )
-                        logger.info(f"✅ [AI-ASSISTANT] Fixed response: {response_text}")
-
                 return {
                     "success": True,
                     "response": response_text,

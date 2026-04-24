@@ -171,12 +171,6 @@ const CapaSidebar = ({
       onClick: onRecentTasksClick
     },
     {
-      id: 'ai-assistant',
-      label: 'AI Assistant',
-      icon: <span className="text-lg">🤖</span>,
-      onClick: onAIAssistantClick
-    },
-    {
       id: 'agent-dashboard',
       label: 'AI Agent Pipeline',
       icon: <span className="text-lg">🧠</span>,

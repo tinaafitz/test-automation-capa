@@ -6,7 +6,6 @@ import { buildApiUrl, API_ENDPOINTS } from '../config/api';
 import JenkinsTestResultsTrend from '../components/charts/JenkinsTestResultsTrend';
 import GitHubRepoActivity from '../components/charts/GitHubRepoActivity';
 import AWSQuotaWidget from '../components/charts/AWSQuotaWidget';
-import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import NotificationSettingsInline from '../components/NotificationSettingsInline';
 import AWSUsageDashboard from './AWSUsageDashboard';
 
@@ -541,17 +540,6 @@ const MainDashboard = () => {
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-blue-900">Notification Settings</h2>
               <NotificationSettingsInline />
-            </div>
-          )}
-
-          {/* AI Assistant View */}
-          {activeSection === 'ai-assistant' && (
-            <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-blue-900">AI Assistant</h2>
-              <p className="text-gray-600">
-                Chat with the AI assistant to get help with CAPI/CAPA automation, troubleshooting, and best practices.
-              </p>
-              <AIAssistantChat inline={true} />
             </div>
           )}
 
