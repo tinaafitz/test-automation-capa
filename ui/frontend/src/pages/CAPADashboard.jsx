@@ -11,7 +11,6 @@ import ActiveEnvironmentBanner from '../components/ActiveEnvironmentBanner';
 import { YamlEditorModal } from '../components/YamlEditorModal';
 import { RosaProvisionModal } from '../components/RosaProvisionModal';
 import ResourcesViewer from '../components/ResourcesViewer';
-import { AIAssistantChat } from '../components/chat/AIAssistantChat';
 import NotificationSettingsInline from '../components/NotificationSettingsInline';
 import WorkflowBuilder from '../components/WorkflowBuilder';
 import ClusterActions from '../components/ClusterActions';
@@ -1711,21 +1710,6 @@ const CAPADashboardContent = () => {
         return (
           <ClusterActions />
         );
-
-      case 'ai-assistant':
-        return (
-          <div className="space-y-6">
-            {/* Title */}
-            <h2 className="text-2xl font-bold text-blue-900">AI Assistant</h2>
-
-            <p className="text-gray-600">
-              Chat with the AI assistant to get help with CAPI/CAPA automation, troubleshooting, and best practices.
-            </p>
-
-            <AIAssistantChat inline={true} />
-          </div>
-        );
-
 
       case 'terminal':
         return (
