@@ -1,15 +1,64 @@
+---
+# Wait for ROSAControlPlane version upgrade to complete.
+# Checks .status.version (actual) not .spec.version (desired) to ensure
+# the upgrade has fully rolled out before proceeding.
 
-- name: Wait for ROSA Control Plane version upgrade to be complete.
-  shell: rosa describe cluster --cluster=tfitzger-rosa-hcp-xyz-test -o yaml | grep openshift_version
-  register: rcp_version
-  until: requested_version in rcp_version.stdout
-  retries: "{{ 100 if retry_count is undefined else retry_count|int }}"
-  delay: "{{ 30 if delay is undefined else delay|int }}"
-  ignore_errors: true
+- name: Validate required variables for upgrade wait
+  fail:
+    msg: "Missing required variable: {{ item }}"
+  when: vars[item] is not defined or vars[item] == ""
+  loop:
+    - cluster_name
+    - requested_version
 
-#  until: '"ready" | string in rcp_status.stdout'
+- name: Wait for ROSA Control Plane version upgrade to complete
+  block:
+    - name: Record upgrade wait start time
+      set_fact:
+        upgrade_wait_start: "{{ ansible_date_time.epoch }}"
+      when: upgrade_wait_start is not defined
 
-- name: Print the ROSA control plane version upgrade is complete.
-  debug:
-    msg: "The rosa_control_plane version has been updated."
-  when: requested_version in rcp_version.stdout
+    - name: Poll ROSAControlPlane status version and ready state
+      shell: |
+        VERSION=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace | default('ns-rosa-hcp') }} \
+          -o jsonpath='{.status.version}' 2>/dev/null || echo "")
+        READY=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace | default('ns-rosa-hcp') }} \
+          -o jsonpath='{.status.ready}' 2>/dev/null || echo "")
+        ELAPSED=$(( $(date +%s) - {{ upgrade_wait_start | default(ansible_date_time.epoch) }} ))
+        MINS=$((ELAPSED / 60))
+        SECS=$((ELAPSED % 60))
+        echo "${VERSION}|${READY}"
+        echo "[${MINS}m${SECS}s] Upgrade status: version=${VERSION:-pending} ready=${READY:-unknown} target={{ requested_version }}" >&2
+      register: rcp_version
+      until: >-
+        rcp_version.stdout.split('|')[0] == requested_version and
+        rcp_version.stdout.split('|')[1] == 'true'
+      retries: "{{ 120 if retry_count is undefined else retry_count|int }}"
+      delay: "{{ 30 if delay is undefined else delay|int }}"
+
+    - name: Display upgrade completion
+      debug:
+        msg: "ROSAControlPlane {{ cluster_name }} upgraded to {{ requested_version }}."
+
+  rescue:
+    - name: Get diagnostic conditions on failure
+      shell: |
+        oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace | default('ns-rosa-hcp') }} \
+          -o jsonpath='{.status.version}|{.status.ready}|{range .status.conditions[*]}{.type}={.status}: {.message}{"\n"}{end}' \
+          2>/dev/null || echo "Resource not found"
+      register: upgrade_diag
+      ignore_errors: true
+
+    - name: Fail with diagnostic info
+      fail:
+        msg: |
+          ROSAControlPlane upgrade timed out or failed.
+          Cluster: {{ cluster_name }}
+          Expected version: {{ requested_version }}
+          Last output: {{ rcp_version.stdout | default('no output') }}
+
+          Diagnostics:
+          {{ upgrade_diag.stdout | default('No diagnostics available') }}
+
+          Check status:
+            oc describe rosacontrolplane {{ cluster_name }} -n {{ capi_namespace | default('ns-rosa-hcp') }}
