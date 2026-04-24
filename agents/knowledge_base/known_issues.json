@@ -59,7 +59,7 @@
         "1. Check if an OCM role exists: aws iam list-roles --query 'Roles[?contains(RoleName, `OCM-Role`)]'",
         "2. If the role exists but is unlinked: rosa link ocm-role --role-arn <role-arn>",
         "3. If the role doesn't exist: rosa unlink ocm-role (to clear stale reference), then rosa create ocm-role --admin --mode auto --yes",
-        "4. IMPORTANT: Never delete or modify roles with 'mv' prefix — those belong to other developers"
+        "4. IMPORTANT: Never delete or modify roles with 'mv' prefix \u2014 those belong to other developers"
       ]
     },
     {
@@ -170,7 +170,10 @@
         "Finalizers blocking deletion",
         "IAM roles still in use",
         "Controller unable to clean up resources"
-      ]
+      ],
+      "learned_confidence": 1.0,
+      "last_adjusted": "2026-04-20T16:21:21.617842",
+      "adjustment_reason": "4 consecutive successes in last 4 runs"
     },
     {
       "type": "vpc_deletion_failure",
