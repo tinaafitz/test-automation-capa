@@ -128,27 +128,27 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
 
   const statusIcons = {
     pending: (
-      <div className={`w-6 h-6 rounded-lg ${st.iconBg} flex items-center justify-center text-xs font-bold ${st.iconText} flex-shrink-0`}>
+      <div className={`w-7 h-7 rounded-full ${st.iconBg} flex items-center justify-center text-xs font-bold ${st.iconText} flex-shrink-0 border border-gray-200`}>
         {index + 1}
       </div>
     ),
     running: (
-      <div className={`w-6 h-6 rounded-lg ${st.iconBg} flex items-center justify-center flex-shrink-0`}>
+      <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 border-2 border-blue-400 ring-2 ring-blue-200 animate-pulse">
         <ArrowPathIcon className="h-4 w-4 text-blue-600 animate-spin" />
       </div>
     ),
     completed: (
-      <div className={`w-6 h-6 rounded-lg ${st.iconBg} flex items-center justify-center flex-shrink-0`}>
+      <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 border border-emerald-300">
         <CheckCircleIcon className="h-4 w-4 text-emerald-600" />
       </div>
     ),
     failed: (
-      <div className={`w-6 h-6 rounded-lg ${st.iconBg} flex items-center justify-center flex-shrink-0`}>
+      <div className="w-7 h-7 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 border border-red-300">
         <XCircleIcon className="h-4 w-4 text-red-600" />
       </div>
     ),
     skipped: (
-      <div className={`w-6 h-6 rounded-lg ${st.iconBg} flex items-center justify-center flex-shrink-0`}>
+      <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0 border border-amber-300">
         <ClockIcon className="h-4 w-4 text-amber-600" />
       </div>
     ),
@@ -174,6 +174,17 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
       <div className={`rounded-lg border-2 ${st.card} transition-all duration-300 overflow-hidden`}>
         {/* Color accent bar — uses category color when pending, status color when running/completed/failed */}
         <div className={`h-0.5 ${step.status === 'pending' ? (stepCategoryColors[step.category]?.accent || st.accent) : st.accent} transition-all duration-500`} />
+
+        {/* Animated progress bar for running steps */}
+        {step.status === 'running' && (
+          <div className="h-0.5 bg-blue-100 overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 animate-[shimmer_1.5s_ease-in-out_infinite]"
+              style={{ width: '40%', animation: 'shimmer 3s ease-in-out infinite' }}
+            />
+            <style>{`@keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }`}</style>
+
+          </div>
+        )}
 
         <div className="flex items-center gap-2.5 px-3.5 py-2.5">
           {/* Drag handle */}
@@ -1817,6 +1828,41 @@ const WorkflowBuilder = () => {
             </button>
           </div>
         </div>
+
+        {/* Step Progress Minimap */}
+        {workflowSteps.length > 0 && (
+          <div className="bg-white border-x border-gray-200 px-5 py-2 border-b border-gray-100">
+            <div className="flex items-center gap-1.5">
+              {workflowSteps.map((step, i) => {
+                const colors = {
+                  pending: 'bg-gray-300',
+                  running: 'bg-blue-500 animate-pulse ring-2 ring-blue-200',
+                  completed: 'bg-emerald-500',
+                  failed: 'bg-red-500',
+                  skipped: 'bg-amber-400',
+                };
+                return (
+                  <div key={step.id} className="flex items-center gap-1.5">
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full ${colors[step.status] || colors.pending} transition-all duration-300`}
+                      title={`Step ${i + 1}: ${step.name} (${step.status})`}
+                    />
+                    {i < workflowSteps.length - 1 && (
+                      <div className={`w-3 h-px ${
+                        step.status === 'completed' ? 'bg-emerald-300' :
+                        step.status === 'running' ? 'bg-blue-300' :
+                        'bg-gray-200'
+                      }`} />
+                    )}
+                  </div>
+                );
+              })}
+              <span className="text-[10px] text-gray-400 ml-2 font-medium">
+                {workflowSteps.filter(s => s.status === 'completed').length}/{workflowSteps.length}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Global Variables Panel */}
         <div className="bg-white border-x border-gray-200">
