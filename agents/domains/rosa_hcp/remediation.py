@@ -34,6 +34,7 @@ class RosaHcpRemediationAgent(RemediationAgent):
             "retry_cloudformation_delete": self._fix_retry_cloudformation_delete,
             "install_capi_capa": self._fix_install_capi,
             "increase_timeout_and_monitor": self._fix_increase_timeout,
+            "create_and_link_ocm_role": self._fix_create_and_link_ocm_role,
         }
         method = rosa_methods.get(fix_name)
         if method:
@@ -72,6 +73,53 @@ class RosaHcpRemediationAgent(RemediationAgent):
     def _fix_refresh_ocm_token(self, params: Dict) -> Tuple[bool, str]:
         self.log("Refreshing OCM token", "info")
         return False, "OCM token refresh requires manual intervention - credentials need to be updated"
+
+    def _fix_create_and_link_ocm_role(self, params: Dict) -> Tuple[bool, str]:
+        """Create and link OCM role using boto3 + OCM API."""
+        import os
+        self.log("Attempting to create/link OCM role", "info")
+
+        ocm_client_id = os.environ.get("OCM_CLIENT_ID", "")
+        ocm_client_secret = os.environ.get("OCM_CLIENT_SECRET", "")
+        ocm_api_url = os.environ.get("OCM_API_URL", "https://api.stage.openshift.com")
+        aws_account_id = os.environ.get("AWS_ACCOUNT_ID", "")
+
+        if not ocm_client_id or not ocm_client_secret:
+            if not ocm_client_id:
+                try:
+                    result = subprocess.run(
+                        ["oc", "get", "secret", "rosa-creds-secret", "-n", "multicluster-engine",
+                         "-o", "jsonpath={.data.ocmClientID}"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if result.returncode == 0 and result.stdout:
+                        import base64
+                        ocm_client_id = base64.b64decode(result.stdout).decode()
+                        result2 = subprocess.run(
+                            ["oc", "get", "secret", "rosa-creds-secret", "-n", "multicluster-engine",
+                             "-o", "jsonpath={.data.ocmClientSecret}"],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        if result2.returncode == 0 and result2.stdout:
+                            ocm_client_secret = base64.b64decode(result2.stdout).decode()
+                except Exception:
+                    pass
+
+        if not ocm_client_id or not ocm_client_secret:
+            return False, "OCM credentials not available (set OCM_CLIENT_ID/OCM_CLIENT_SECRET or ensure rosa-creds-secret exists)"
+
+        try:
+            from .ocm_role_manager import OcmRoleManager
+            mgr = OcmRoleManager(
+                ocm_client_id=ocm_client_id,
+                ocm_client_secret=ocm_client_secret,
+                ocm_api_url=ocm_api_url,
+                aws_account_id=aws_account_id,
+                dry_run=self.dry_run,
+            )
+            return mgr.ensure_ocm_role()
+        except Exception as e:
+            return False, f"OCM role creation failed: {e}"
 
     def _fix_backoff_retry(self, params: Dict) -> Tuple[bool, str]:
         backoff_seconds = params.get("backoff_seconds", 60)
