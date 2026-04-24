@@ -43,7 +43,7 @@
       "type": "ocm_role_not_linked",
       "pattern": "(?i)(?:not authorized to access AWS Account|rosa create ocm-role|CLUSTERS-MGMT-403)",
       "severity": "critical",
-      "auto_fix": false,
+      "auto_fix": true,
       "description": "OCM role is not linked to the AWS account. The ROSA organization cannot create or manage clusters in this AWS account.",
       "symptoms": [
         "ROSAControlPlane stuck with 403 error",

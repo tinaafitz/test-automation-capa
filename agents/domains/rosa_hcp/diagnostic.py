@@ -293,30 +293,14 @@ class RosaHcpDiagnosticAgent(DiagnosticAgent):
                 "root_cause": f"ROSA cluster is still {rosa_status} — waiting for full removal",
                 "severity": "low",
                 "confidence": 0.5,
-                "evidence": [f"rosa describe cluster shows state: {rosa_status}"],
+                "evidence": [f"OCM API cluster state: {rosa_status}"],
                 "recommended_fix": "log_and_continue",
                 "fix_parameters": {}
             }
 
     def _get_rosa_cluster_status(self, cluster_name: str) -> str:
-        try:
-            cmd = ["rosa", "describe", "cluster", "--cluster", cluster_name, "-o", "json"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            if result.returncode != 0:
-                stderr = result.stderr.lower()
-                if "not found" in stderr or "there is no cluster" in stderr:
-                    return "gone"
-                return "unknown"
-            import json as _json
-            cluster_info = _json.loads(result.stdout)
-            state = cluster_info.get("status", {}).get("state", "unknown")
-            return state
-        except subprocess.TimeoutExpired:
-            self.log("Timeout checking ROSA cluster status", "warning")
-            return "unknown"
-        except Exception as e:
-            self.log(f"Error checking ROSA cluster status: {e}", "error")
-            return "unknown"
+        """Check ROSA cluster status via OCM API (no rosa CLI needed)."""
+        return super()._get_rosa_cluster_status(cluster_name)
 
     def _diagnose_stuck_rosaroleconfig(self, context: Dict) -> Dict:
         return self._diagnose_stuck_resource(context, "rosaroleconfig", "rosaroleconfig_stuck_deletion")
