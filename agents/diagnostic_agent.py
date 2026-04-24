@@ -429,30 +429,77 @@ class DiagnosticAgent(BaseAgent):
             "root_cause": f"ROSA cluster status: {rosa_status} — CAPA controller managing deletion",
             "severity": "low",
             "confidence": 0.4,
-            "evidence": [f"rosa describe cluster shows state: {rosa_status}"],
+            "evidence": [f"OCM API cluster state: {rosa_status}"],
             "recommended_fix": "log_and_continue",
             "fix_parameters": {}
         }
 
     def _get_rosa_cluster_status(self, cluster_name: str) -> str:
-        """Check ROSA cluster status via rosa CLI.
+        """Check ROSA cluster status via OCM API.
 
         Returns: 'gone', 'uninstalling', 'error', 'ready', 'installing', or 'unknown'.
         """
         try:
-            cmd = ["rosa", "describe", "cluster", "--cluster", cluster_name, "-o", "json"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            if result.returncode != 0:
-                stderr = result.stderr.lower()
-                if "not found" in stderr or "there is no cluster" in stderr:
-                    return "gone"
+            import os
+            import urllib.request
+            import urllib.parse
+
+            ocm_client_id = os.environ.get("OCM_CLIENT_ID", "")
+            ocm_client_secret = os.environ.get("OCM_CLIENT_SECRET", "")
+            ocm_api_url = os.environ.get("OCM_API_URL", "https://api.stage.openshift.com").rstrip("/")
+
+            if not ocm_client_id or not ocm_client_secret:
+                try:
+                    result = subprocess.run(
+                        ["oc", "get", "secret", "rosa-creds-secret", "-n", "multicluster-engine",
+                         "-o", "jsonpath={.data.ocmClientID}|{.data.ocmClientSecret}|{.data.ocmApiUrl}"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if result.returncode == 0 and "|" in result.stdout:
+                        import base64
+                        parts = result.stdout.split("|")
+                        ocm_client_id = base64.b64decode(parts[0]).decode() if parts[0] else ""
+                        ocm_client_secret = base64.b64decode(parts[1]).decode() if parts[1] else ""
+                        if len(parts) > 2 and parts[2]:
+                            ocm_api_url = base64.b64decode(parts[2]).decode().rstrip("/")
+                except Exception:
+                    pass
+
+            if not ocm_client_id or not ocm_client_secret:
+                self.log("OCM credentials not available for cluster status check", "warning")
                 return "unknown"
-            import json as _json
-            cluster_info = _json.loads(result.stdout)
-            state = cluster_info.get("status", {}).get("state", "unknown")
+
+            sso_url = "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token"
+            token_data = urllib.parse.urlencode({
+                "grant_type": "client_credentials",
+                "client_id": ocm_client_id,
+                "client_secret": ocm_client_secret,
+            }).encode()
+            token_req = urllib.request.Request(sso_url, data=token_data,
+                                               headers={"Content-Type": "application/x-www-form-urlencoded"})
+            with urllib.request.urlopen(token_req, timeout=15) as resp:
+                token_result = json.loads(resp.read().decode())
+            access_token = token_result.get("access_token", "")
+
+            search = urllib.parse.quote(f"name='{cluster_name}'")
+            cluster_url = f"{ocm_api_url}/api/clusters_mgmt/v1/clusters?search={search}"
+            cluster_req = urllib.request.Request(cluster_url,
+                                                 headers={"Authorization": f"Bearer {access_token}",
+                                                          "Accept": "application/json"})
+            with urllib.request.urlopen(cluster_req, timeout=15) as resp:
+                clusters_result = json.loads(resp.read().decode())
+
+            items = clusters_result.get("items", [])
+            if not items:
+                return "gone"
+
+            state = items[0].get("status", {}).get("state", "unknown")
             return state
-        except subprocess.TimeoutExpired:
-            self.log("Timeout checking ROSA cluster status", "warning")
+
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return "gone"
+            self.log(f"OCM API error checking cluster status: {e.code}", "error")
             return "unknown"
         except Exception as e:
             self.log(f"Error checking ROSA cluster status: {e}", "error")
