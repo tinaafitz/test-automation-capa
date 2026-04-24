@@ -117,11 +117,11 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
   };
 
   const statusStyles = {
-    pending: { card: 'border-gray-200 bg-white hover:shadow-md', accent: 'bg-gray-300', iconBg: 'bg-gray-100', iconText: 'text-gray-500' },
-    running: { card: 'border-blue-400 bg-gradient-to-r from-blue-50 to-white ring-2 ring-blue-200 shadow-lg shadow-blue-100', accent: 'bg-blue-500', iconBg: 'bg-blue-100', iconText: 'text-blue-600' },
-    completed: { card: 'border-emerald-400 bg-gradient-to-r from-emerald-50 to-white', accent: 'bg-emerald-500', iconBg: 'bg-emerald-100', iconText: 'text-emerald-600' },
-    failed: { card: 'border-red-400 bg-gradient-to-r from-red-50 to-white', accent: 'bg-red-500', iconBg: 'bg-red-100', iconText: 'text-red-600' },
-    skipped: { card: 'border-amber-300 bg-gradient-to-r from-amber-50 to-white', accent: 'bg-amber-400', iconBg: 'bg-amber-100', iconText: 'text-amber-600' },
+    pending: { card: 'border-gray-200 bg-white shadow-sm hover:shadow-md', accent: 'bg-gray-400', iconBg: 'bg-gray-50', iconText: 'text-gray-600' },
+    running: { card: 'border-blue-400 bg-gradient-to-r from-blue-50 to-white ring-2 ring-blue-100 shadow-md shadow-blue-100/50', accent: 'bg-blue-500', iconBg: 'bg-blue-100', iconText: 'text-blue-600' },
+    completed: { card: 'border-emerald-400 bg-gradient-to-r from-emerald-50 to-white shadow-sm hover:shadow-md', accent: 'bg-emerald-500', iconBg: 'bg-emerald-100', iconText: 'text-emerald-600' },
+    failed: { card: 'border-red-400 bg-gradient-to-r from-red-50 to-white shadow-sm hover:shadow-md', accent: 'bg-red-500', iconBg: 'bg-red-100', iconText: 'text-red-600' },
+    skipped: { card: 'border-amber-300 bg-gradient-to-r from-amber-50 to-white shadow-sm hover:shadow-md', accent: 'bg-amber-400', iconBg: 'bg-amber-100', iconText: 'text-amber-600' },
   };
 
   const st = statusStyles[step.status] || statusStyles.pending;
@@ -164,9 +164,9 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
     <div ref={setNodeRef} style={style}>
       {/* Connector */}
       {index > 0 && (
-        <div className="flex flex-col items-center py-0.5">
-          <div className={`w-0.5 h-2 ${step.status === 'running' ? 'bg-blue-300' : step.status === 'completed' ? 'bg-emerald-300' : 'bg-gray-300'} rounded-full`} />
-          <ArrowDownIcon className={`h-3 w-3 ${step.status === 'running' ? 'text-blue-400' : step.status === 'completed' ? 'text-emerald-400' : 'text-gray-300'}`} />
+        <div className="flex flex-col items-center py-1">
+          <div className={`w-0.5 h-3 ${step.status === 'running' ? 'bg-blue-400' : step.status === 'completed' ? 'bg-emerald-400' : 'bg-gray-300'} rounded-full`} />
+          <ArrowDownIcon className={`h-4 w-4 -mt-0.5 ${step.status === 'running' ? 'text-blue-500' : step.status === 'completed' ? 'text-emerald-500' : 'text-gray-400'}`} />
         </div>
       )}
 
@@ -269,7 +269,7 @@ const SortableStep = ({ step, index, totalSteps, onRemove, onToggleConfig, onUpd
 
         {/* Expanded config panel */}
         {step.showConfig && (
-          <div className="border-t border-gray-200 px-4 py-3 bg-gradient-to-b from-gray-50 to-white space-y-3">
+          <div className="border-t border-gray-100 px-4 py-4 bg-gradient-to-b from-slate-50/50 to-white space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">On Failure</label>
@@ -1797,10 +1797,10 @@ const WorkflowBuilder = () => {
             <button
               onClick={runWorkflow}
               disabled={workflowSteps.length === 0 || isRunning}
-              className={`px-5 py-2 text-sm font-semibold text-white rounded-xl flex items-center gap-2 transition-all duration-300 shadow-sm ${
+              className={`px-5 py-2.5 text-sm font-semibold text-white rounded-lg flex items-center gap-2 transition-all duration-200 ${
                 isRunning
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 hover:shadow-md hover:shadow-indigo-200'
+                  ? 'bg-gradient-to-r from-gray-400 to-gray-500 cursor-not-allowed shadow-sm'
+                  : 'bg-gradient-to-r from-indigo-600 to-blue-600 shadow-md hover:from-indigo-700 hover:to-blue-700 hover:shadow-lg hover:shadow-indigo-300/50'
               }`}
             >
               {isRunning ? (
@@ -2031,11 +2031,11 @@ const WorkflowBuilder = () => {
           {workflowSteps.length === 0 ? (
             <div className="h-full flex items-center justify-center">
               <div className="text-center">
-                <div className="w-20 h-20 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center shadow-sm">
-                  <PlusIcon className="h-10 w-10 text-indigo-400" />
+                <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-indigo-50 via-indigo-100 to-purple-100 flex items-center justify-center shadow-md border border-indigo-200/50">
+                  <PlusIcon className="h-12 w-12 text-indigo-500" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-700 mb-2">Build your workflow</h3>
-                <p className="text-sm text-gray-400 max-w-sm mx-auto mb-5">
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">Build your workflow</h3>
+                <p className="text-sm text-gray-500 max-w-sm mx-auto mb-6">
                   Drag playbooks from the palette, or start with a common workflow below.
                 </p>
                 <div className="flex gap-3 justify-center flex-wrap">
