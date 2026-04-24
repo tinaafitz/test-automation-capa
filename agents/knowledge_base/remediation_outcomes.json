@@ -248,5 +248,126 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/lol-rosa-hcp-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+  },
+  {
+    "timestamp": "2026-04-20T14:48:47.728623",
+    "issue_type": "rosanetwork_stuck_deletion",
+    "recommended_fix": "retry_cloudformation_delete",
+    "success": false,
+    "confidence_used": 1.0,
+    "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
+    "resource_key": "ROSANetwork",
+    "details": "Timeout during CloudFormation retry",
+    "duration_seconds": 28.58
+  },
+  {
+    "timestamp": "2026-04-20T14:50:51.329800",
+    "issue_type": "rosanetwork_stuck_deletion",
+    "recommended_fix": "retry_cloudformation_delete",
+    "success": true,
+    "confidence_used": 1.0,
+    "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
+    "resource_key": "ROSANetwork",
+    "details": "Cleaned up VPC dependencies for new-rosa-hcp-rosa-network-stack; Deleted security group sg-0a6d51bc162863563 (2pq1gpp690ro1rn1dco9op4vlftj8bbs-vpce-private-router)",
+    "duration_seconds": 55.2
+  },
+  {
+    "timestamp": "2026-04-20T14:52:36.779560",
+    "issue_type": "cloudformation_deletion_failure",
+    "recommended_fix": "manual_cloudformation_cleanup",
+    "success": true,
+    "confidence_used": 0.9,
+    "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+    "resource_key": "ns-rosa-hcp/new-rosa-hcp-network",
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "duration_seconds": 10.56
+  },
+  {
+    "timestamp": "2026-04-20T14:52:44.390778",
+    "issue_type": "rosaroleconfig_stuck_deletion",
+    "recommended_fix": "remove_finalizers",
+    "success": true,
+    "confidence_used": 0.7,
+    "root_cause": "rosaroleconfig has finalizers preventing deletion",
+    "resource_key": "ns-rosa-hcp/new-rosa-hcp-roles",
+    "details": "Resource rosaroleconfig/new-rosa-hcp-roles already deleted (no finalizer removal needed)",
+    "duration_seconds": 2.24
+  },
+  {
+    "timestamp": "2026-04-20T16:20:22.273000",
+    "issue_type": "rosanetwork_stuck_deletion",
+    "recommended_fix": "retry_cloudformation_delete",
+    "success": true,
+    "confidence_used": 1.0,
+    "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
+    "resource_key": "ROSANetwork",
+    "details": "Cleaned up VPC dependencies for upg1-rosa-hcp-rosa-network-stack; Deleted security group sg-05e7fab9dee3e0639 (2ppte113ai4oob9r19tss8nm8lcijqp2-vpce-private-router)",
+    "duration_seconds": 28.74
+  },
+  {
+    "timestamp": "2026-04-20T16:21:16.077501",
+    "issue_type": "cloudformation_deletion_failure",
+    "recommended_fix": "manual_cloudformation_cleanup",
+    "success": true,
+    "confidence_used": 0.9,
+    "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+    "resource_key": "ns-rosa-hcp/upg1-rosa-hcp-network",
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "duration_seconds": 1.42
+  },
+  {
+    "timestamp": "2026-04-20T16:21:20.939726",
+    "issue_type": "rosaroleconfig_stuck_deletion",
+    "recommended_fix": "remove_finalizers",
+    "success": true,
+    "confidence_used": 0.8,
+    "root_cause": "rosaroleconfig has finalizers preventing deletion",
+    "resource_key": "ns-rosa-hcp/upg1-rosa-hcp-roles",
+    "details": "Resource rosaroleconfig/upg1-rosa-hcp-roles already deleted (no finalizer removal needed)",
+    "duration_seconds": 0.79
+  },
+  {
+    "timestamp": "2026-04-22T10:01:18.547523",
+    "issue_type": "rosanetwork_stuck_deletion",
+    "recommended_fix": "retry_cloudformation_delete",
+    "success": true,
+    "confidence_used": 1.0,
+    "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
+    "resource_key": "ROSANetwork",
+    "details": "Cleaned up VPC dependencies for sp2-rosa-hcp-rosa-network-stack; Deleted security group sg-08dd02a9dde996381 (2pr7es9p9bldn3pafh2p65viv61j13h4-vpce-private-router)",
+    "duration_seconds": 36.21
+  },
+  {
+    "timestamp": "2026-04-22T10:02:23.884125",
+    "issue_type": "cloudformation_deletion_failure",
+    "recommended_fix": "manual_cloudformation_cleanup",
+    "success": true,
+    "confidence_used": 0.9,
+    "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+    "resource_key": "ns-rosa-hcp/sp2-rosa-hcp-network",
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "duration_seconds": 1.93
+  },
+  {
+    "timestamp": "2026-04-22T16:36:55.819000",
+    "issue_type": "rosanetwork_stuck_deletion",
+    "recommended_fix": "retry_cloudformation_delete",
+    "success": true,
+    "confidence_used": 1.0,
+    "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
+    "resource_key": "ROSANetwork",
+    "details": "Cleaned up VPC dependencies for mpa-rosa-hcp-rosa-network-stack; Deleted security group sg-0581aa6df1bc3789b (2pr98lr2vvaktacnp7dfimoj51lhnd7g-vpce-private-router)",
+    "duration_seconds": 25.15
+  },
+  {
+    "timestamp": "2026-04-22T16:37:06.452937",
+    "issue_type": "cloudformation_deletion_failure",
+    "recommended_fix": "manual_cloudformation_cleanup",
+    "success": true,
+    "confidence_used": 0.9,
+    "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+    "resource_key": "ns-rosa-hcp/mpa-rosa-hcp-network",
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "duration_seconds": 1.71
   }
 ]
