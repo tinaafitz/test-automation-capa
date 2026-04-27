@@ -45,7 +45,14 @@
       fi
       MINS=$((ELAPSED / 60))
       SECS=$((ELAPSED % 60))
-      echo "FAILED - RETRYING: [localhost]: Wait for rosaroleconfig {{ rosa_role_config_name }} deletion (${MINS}m${SECS}s elapsed)." | tee -a "$LOGFILE"
+      RRC_REASON=$(oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} \
+        -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}' 2>/dev/null || echo "unknown")
+      RRC_MSG=$(oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} \
+        -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || echo "")
+      echo "FAILED - RETRYING: [localhost]: Wait for rosaroleconfig {{ rosa_role_config_name }} deletion. Reason: ${RRC_REASON} (${MINS}m${SECS}s elapsed)." | tee -a "$LOGFILE"
+      if [ -n "$RRC_MSG" ]; then
+        echo "  Message: ${RRC_MSG}" | tee -a "$LOGFILE"
+      fi
       sleep 10
     done
   args:

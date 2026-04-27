@@ -45,7 +45,19 @@
       fi
       MINS=$((ELAPSED / 60))
       SECS=$((ELAPSED % 60))
-      echo "FAILED - RETRYING: [localhost]: Wait for rosanetwork {{ rosa_network_name }} deletion (${MINS}m${SECS}s elapsed)." | tee -a "$LOGFILE"
+      STACK_STATUS=$(oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} \
+        -o jsonpath='{.status.stackStatus}' 2>/dev/null || echo "unknown")
+      NET_REASON=$(oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} \
+        -o jsonpath='{.status.conditions[?(@.type=="ROSANetworkReady")].reason}' 2>/dev/null || echo "unknown")
+      NET_MSG=$(oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} \
+        -o jsonpath='{.status.conditions[?(@.type=="ROSANetworkReady")].message}' 2>/dev/null || echo "")
+      echo "FAILED - RETRYING: [localhost]: Wait for rosanetwork {{ rosa_network_name }} deletion. Reason: ${NET_REASON} stackStatus: ${STACK_STATUS} (${MINS}m${SECS}s elapsed)." | tee -a "$LOGFILE"
+      if [ -n "$NET_MSG" ]; then
+        echo "  Message: ${NET_MSG}" | tee -a "$LOGFILE"
+      fi
+      if [ "$STACK_STATUS" = "DELETE_FAILED" ]; then
+        echo "CloudFormation stack DELETE_FAILED: {{ rosa_network_name }} — orphaned AWS resources detected" | tee -a "$LOGFILE"
+      fi
       sleep 10
     done
   args:
