@@ -164,7 +164,7 @@ export default function StepFunctionsView() {
     defaults.openshift_version = '4.20.10';
     defaults.create_rosa_roles = 'true';
     defaults.create_rosa_network = 'true';
-    defaults.availability_zone_count = '1';
+    defaults.availability_zone_count = '2';
     defaults.network_cidr = '10.0.0.0/16';
     return defaults;
   }, []);
@@ -227,7 +227,7 @@ export default function StepFunctionsView() {
 
   // Poll running executions
   useEffect(() => {
-    if (liveExecution && liveExecution.status === 'running') {
+    if (liveExecution && (liveExecution.status === 'running' || liveExecution.status === 'pending')) {
       pollingRef.current = setInterval(() => {
         fetchExecutionDetail(liveExecution.execution_id);
         fetchExecutions();

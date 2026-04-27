@@ -212,26 +212,24 @@ class TestRunAnsibleTaskSync:
         assert "not found" in result["error"]
 
     @patch("subprocess.run")
-    def test_successful_run(self, mock_run):
+    @patch("playbook_executor.build_playbook_command")
+    def test_successful_run(self, mock_build, mock_run):
+        mock_build.return_value = (["ansible-playbook", "test.yml"], os.environ.copy())
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         with patch("os.path.exists", return_value=True):
-            with patch("tempfile.NamedTemporaryFile") as mock_tmp:
-                mock_tmp.return_value.__enter__ = lambda s: MagicMock(name="/tmp/test.yml")
-                mock_tmp.return_value.__exit__ = MagicMock(return_value=False)
-                result = _run_ansible_task_sync("/tmp", "test.yml", {"cluster_name": "t"}, 30)
+            result = _run_ansible_task_sync("/tmp", "playbooks/test.yml", {"cluster_name": "t"}, 30)
         assert result["success"]
 
-    @patch("subprocess.run", side_effect=TimeoutError("timed out"))
-    def test_timeout(self, mock_run):
+    @patch("subprocess.run")
+    @patch("playbook_executor.build_playbook_command")
+    def test_timeout(self, mock_build, mock_run):
         import subprocess
+        mock_build.return_value = (["ansible-playbook", "test.yml"], os.environ.copy())
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=30)
         with patch("os.path.exists", return_value=True):
-            with patch("tempfile.NamedTemporaryFile") as mock_tmp:
-                mock_tmp.return_value.__enter__ = lambda s: MagicMock(name="/tmp/test.yml")
-                mock_tmp.return_value.__exit__ = MagicMock(return_value=False)
-                result = _run_ansible_task_sync("/tmp", "test.yml", {}, 30)
+            result = _run_ansible_task_sync("/tmp", "playbooks/test.yml", {}, 30)
         assert not result["success"]
-        assert "timed out" in result["error"].lower()
+        assert "timed out" in result["error"].lower() or "timeout" in result["error"].lower()
 
 
 @pytest.mark.asyncio

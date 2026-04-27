@@ -99,7 +99,7 @@ PROVISION_STATE_MACHINE = {
             "Type": "Task",
             "Comment": "Create ROSAControlPlane (depends on network + roles + OIDC)",
             "Resource": "create_control_plane",
-            "TimeoutSeconds": 300,
+            "TimeoutSeconds": 2400,
             "Retry": [{"ErrorEquals": ["RetryableError"], "MaxAttempts": 2, "IntervalSeconds": 30, "BackoffRate": 2.0}],
             "Next": "WaitForClusterReady",
         },
@@ -421,7 +421,7 @@ TASK_RESOURCE_MAP = {
     "create_rosa_network": "tasks/create_rosa_network.yml",
     "create_rosa_role_config": "tasks/create_rosa_role_config.yml",
     "verify_oidc": "tasks/wait_for_rosa_roles.yml",
-    "create_control_plane": "tasks/create_rosa_control_plane_versioned.yml",
+    "create_control_plane": "playbooks/create_rosa_hcp_automated.yaml",
     "wait_for_cluster_ready": "tasks/wait_for_rosa_control_plane_ready.yml",
     "delete_control_plane": "tasks/delete_rosa_control_plane.yml",
     "wait_for_control_plane_deleted": "tasks/wait_for_rosa_control_plane_deleted.yml",
@@ -685,62 +685,162 @@ async def _execute_local_parallel(
 def _run_ansible_task_sync(
     project_root: str, task_file: str, extra_vars: dict, timeout: int
 ) -> dict:
-    """Synchronously run an Ansible task file and return the result."""
-    import subprocess
+    """Run an Ansible playbook or task file using playbook_executor.
 
-    task_path = os.path.join(project_root, task_file)
-    if not os.path.exists(task_path):
-        return {"success": False, "error": f"Task file not found: {task_file}"}
+    For playbook files (playbooks/*.yml): runs directly.
+    For task files (tasks/*.yml): wraps in a temporary playbook first.
+    Credentials are passed via environment variables, not command line.
+    """
+    import sys
+    sys.path.insert(0, project_root)
 
-    playbook_content = f"""---
+    file_path = os.path.join(project_root, task_file)
+    if not os.path.exists(file_path):
+        return {"success": False, "error": f"File not found: {task_file}"}
+
+    is_playbook = task_file.startswith("playbooks/")
+
+    if is_playbook:
+        playbook_path = file_path
+    else:
+        import tempfile
+        venv_bin = os.path.join(project_root, "ui", "backend", "venv", "bin")
+        name_prefix = extra_vars.get("name_prefix", "")
+        cluster_name = f"{name_prefix}-rosa-hcp" if name_prefix else extra_vars.get("cluster_name", "test-cluster")
+        az_count = int(extra_vars.get("availability_zone_count", "1"))
+        region = extra_vars.get("aws_region", "us-west-2")
+        az_suffixes = ["a", "b", "c"]
+        az_list = [f"{region}{az_suffixes[i]}" for i in range(min(az_count, 3))]
+        az_list_yaml = "[" + ", ".join(f'"{az}"' for az in az_list) + "]"
+        playbook_content = f"""---
 - hosts: localhost
   connection: local
-  gather_facts: false
+  gather_facts: true
+  vars:
+    ansible_python_interpreter: {venv_bin}/python
+    cluster_name: "{cluster_name}"
+    name_prefix: "{name_prefix}"
+    capi_namespace: "{extra_vars.get('capi_namespace', 'ns-rosa-hcp')}"
+    openshift_version: "{extra_vars.get('openshift_version', '4.20.10')}"
+    aws_region: "{region}"
+    rosa_role_prefix: "{cluster_name}"
+    rosa_role_config_name: "{cluster_name}-roles"
+    rosa_network_name: "{cluster_name}-network"
+    rosa_network_config_name: "{cluster_name}-network"
+    network_cidr: "{extra_vars.get('network_cidr', '10.0.0.0/16')}"
+    availability_zone_count: {az_count}
+    availability_zones_list: {az_list_yaml}
+    create_rosa_roles: {extra_vars.get('create_rosa_roles', 'true')}
+    create_rosa_network: {extra_vars.get('create_rosa_network', 'true')}
+    rcp_version: "{extra_vars.get('openshift_version', '4.20.10')}"
+    template_name: "rosa-controlplane-only"
+    template_category: "features"
+    channel: ""
+    channel_group: ""
+    fips: false
+    manual_subnets: []
+    cluster_description: ""
+    domain_prefix: "{name_prefix}"
+    cluster_name_prefix: "{name_prefix}"
+    machine_pool: {{}}
+    environment_tag: "test"
+    purpose_tag: "step-functions-testing"
+    log_forward_enabled: false
+    rosa_creds_secret: "rosa-creds-secret"
+    cluster_network:
+      machine_cidr: "10.0.0.0/16"
+      pod_cidr: "10.128.0.0/14"
+      service_cidr: "172.30.0.0/16"
+    aws_account_id: "{{{{ lookup('pipe', 'aws sts get-caller-identity --query Account --output text 2>/dev/null || echo unknown') }}}}"
+  environment:
+    PATH: "{venv_bin}:{{{{ ansible_env.PATH }}}}"
+    VIRTUAL_ENV: "{os.path.join(project_root, 'ui', 'backend', 'venv')}"
+  vars_files:
+    - {project_root}/vars/vars.yml
+    - {project_root}/vars/user_vars.yml
   tasks:
-    - name: Run {task_file}
-      include_tasks: {task_path}
+    - include_tasks: {file_path}
 """
+        playbooks_dir = os.path.join(project_root, "playbooks")
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False, dir=playbooks_dir)
+        tmp.write(playbook_content)
+        tmp.close()
+        playbook_path = tmp.name
 
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False, dir=project_root) as f:
-        f.write(playbook_content)
-        tmp_playbook = f.name
+    name_prefix = extra_vars.get("name_prefix", "")
+    derived_cluster_name = f"{name_prefix}-rosa-hcp" if name_prefix else extra_vars.get("cluster_name", "test-cluster")
+    region = extra_vars.get("aws_region", "us-west-2")
+    az_count = int(extra_vars.get("availability_zone_count", "1"))
+    az_suffixes = ["a", "b", "c"]
+    az_list = [f"{region}{az_suffixes[i]}" for i in range(min(az_count, 3))]
+
+    merged_vars = {
+        "skip_ansible_runner": "true",
+        "AUTOMATION_PATH": project_root,
+        "cluster_name": derived_cluster_name,
+        "capi_namespace": extra_vars.get("capi_namespace", "ns-rosa-hcp"),
+        "openshift_version": extra_vars.get("openshift_version", "4.20.10"),
+        "rcp_version": extra_vars.get("openshift_version", "4.20.10"),
+        "aws_region": region,
+        "rosa_role_prefix": derived_cluster_name,
+        "rosa_role_config_name": f"{derived_cluster_name}-roles",
+        "rosa_network_name": f"{derived_cluster_name}-network",
+        "rosa_network_config_name": f"{derived_cluster_name}-network",
+        "network_cidr": extra_vars.get("network_cidr", "10.0.0.0/16"),
+        "availability_zone_count": str(az_count),
+        "create_rosa_roles": extra_vars.get("create_rosa_roles", "true"),
+        "create_rosa_network": extra_vars.get("create_rosa_network", "true"),
+        "domain_prefix": name_prefix or derived_cluster_name,
+        "cluster_name_prefix": name_prefix or derived_cluster_name,
+        **{k: v for k, v in extra_vars.items() if v is not None and v != ""},
+    }
 
     try:
-        cmd = ["ansible-playbook", tmp_playbook, "-v"]
+        import subprocess as _sp
+        aws_account = _sp.run(
+            ["aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text"],
+            capture_output=True, text=True, timeout=10, env=os.environ.copy()
+        )
+        if aws_account.returncode == 0 and aws_account.stdout.strip():
+            merged_vars["aws_account_id"] = aws_account.stdout.strip()
+    except Exception:
+        pass
 
-        for k, v in extra_vars.items():
-            if v is not None and v != "":
+    try:
+        from playbook_executor import build_playbook_command, SENSITIVE_KEYS
+        cmd, env = build_playbook_command(playbook_path, merged_vars, verbosity=1)
+        cmd.extend(["-i", "localhost,"])
+        for k, v in merged_vars.items():
+            if str(k).lower() in SENSITIVE_KEYS and v:
                 cmd.extend(["-e", f"{k}={v}"])
 
-        env = os.environ.copy()
-        env["ANSIBLE_STDOUT_CALLBACK"] = "yaml"
-        env.setdefault("ANSIBLE_HOST_KEY_CHECKING", "False")
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=project_root,
-            env=env,
+        import subprocess
+        proc = subprocess.run(
+            cmd, cwd=project_root, capture_output=True,
+            text=True, timeout=timeout, env=env,
         )
 
-        return {
-            "success": result.returncode == 0,
-            "output": result.stdout[-2000:] if result.stdout else "",
-            "error": result.stderr[-1000:] if result.stderr and result.returncode != 0 else "",
+        combined_output = (proc.stdout or "") + (proc.stderr or "")
+        result = {
+            "success": proc.returncode == 0,
+            "stdout": proc.stdout or "",
+            "stderr": proc.stderr or "",
+            "error": combined_output[-3000:] if proc.returncode != 0 else "",
         }
 
-    except subprocess.TimeoutExpired:
-        return {"success": False, "error": f"Ansible task timed out after {timeout}s"}
+        return {
+            "success": result["success"],
+            "output": (result.get("stdout", "") or "")[-2000:],
+            "error": result.get("error", "") if not result["success"] else "",
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
     finally:
-        try:
-            os.unlink(tmp_playbook)
-        except OSError:
-            pass
+        if not is_playbook:
+            try:
+                os.unlink(playbook_path)
+            except OSError:
+                pass
 
 
 async def _run_aws_execution(execution: StateMachineExecution):
