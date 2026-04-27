@@ -423,11 +423,11 @@ TASK_RESOURCE_MAP = {
     "verify_oidc": "tasks/wait_for_rosa_roles.yml",
     "create_control_plane": "playbooks/create_rosa_hcp_automated.yaml",
     "wait_for_cluster_ready": "tasks/wait_for_rosa_control_plane_ready.yml",
-    "delete_control_plane": "tasks/delete_rosa_control_plane.yml",
-    "wait_for_control_plane_deleted": "tasks/wait_for_rosa_control_plane_deleted.yml",
-    "delete_rosa_network": "tasks/delete_rosa_network.yml",
-    "delete_rosa_role_config": "tasks/delete_rosa_role_config.yml",
-    "verify_cleanup": "tasks/verify_deletion_complete.yml",
+    "delete_control_plane": "tasks/delete_rosa_hcp_cluster.yml",
+    "wait_for_control_plane_deleted": "tasks/delete_rosa_hcp_resources.yml",
+    "delete_rosa_network": "tasks/delete_rosa_hcp_resources.yml",
+    "delete_rosa_role_config": "tasks/delete_rosa_hcp_resources.yml",
+    "verify_cleanup": "tasks/delete_rosa_hcp_resources.yml",
     "login_ocp": "tasks/login_ocp.yml",
     "enable_capi_capa": "tasks/enable_capi_capa.yml",
     "wait_for_capi_capa_ready": "tasks/wait-for-capi-capa-ready.yml",
@@ -777,6 +777,7 @@ def _run_ansible_task_sync(
     merged_vars = {
         "skip_ansible_runner": "true",
         "AUTOMATION_PATH": project_root,
+        "automation_path": project_root,
         "cluster_name": derived_cluster_name,
         "capi_namespace": extra_vars.get("capi_namespace", "ns-rosa-hcp"),
         "openshift_version": extra_vars.get("openshift_version", "4.20.10"),
@@ -792,6 +793,11 @@ def _run_ansible_task_sync(
         "create_rosa_network": extra_vars.get("create_rosa_network", "true"),
         "domain_prefix": name_prefix or derived_cluster_name,
         "cluster_name_prefix": name_prefix or derived_cluster_name,
+        "ocp_user": extra_vars.get("OCP_HUB_CLUSTER_USER", ""),
+        "ocp_password": extra_vars.get("OCP_HUB_CLUSTER_PASSWORD", ""),
+        "api_url": extra_vars.get("OCP_HUB_API_URL", ""),
+        "mce_namespace": extra_vars.get("MCE_NAMESPACE", "multicluster-engine"),
+        "MCE_NAMESPACE": extra_vars.get("MCE_NAMESPACE", "multicluster-engine"),
         **{k: v for k, v in extra_vars.items() if v is not None and v != ""},
     }
 
@@ -803,6 +809,16 @@ def _run_ansible_task_sync(
         )
         if aws_account.returncode == 0 and aws_account.stdout.strip():
             merged_vars["aws_account_id"] = aws_account.stdout.strip()
+    except Exception:
+        pass
+
+    try:
+        oc_ctx = _sp.run(
+            ["oc", "config", "current-context"],
+            capture_output=True, text=True, timeout=10
+        )
+        if oc_ctx.returncode == 0 and oc_ctx.stdout.strip():
+            merged_vars["ocp_context"] = oc_ctx.stdout.strip()
     except Exception:
         pass
 

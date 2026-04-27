@@ -68,40 +68,34 @@ function ExecutionGraph({ execution }) {
   const { steps, parallel_groups } = execution;
   const stepEntries = Object.entries(steps || {});
   const parallelStepNames = new Set((parallel_groups || []).flat());
+  const rendered = new Set();
 
-  const sequentialSteps = stepEntries.filter(([name]) => !parallelStepNames.has(name));
-  const parallelSteps = stepEntries.filter(([name]) => parallelStepNames.has(name));
+  const elements = [];
+  for (const [name, step] of stepEntries) {
+    if (rendered.has(name)) continue;
 
-  const smName = execution.state_machine || '';
-  const isProvision = smName.includes('provision');
-
-  return (
-    <div className="space-y-3">
-      {/* Pre-parallel sequential steps */}
-      {isProvision && sequentialSteps.length > 0 && sequentialSteps.slice(0, 1).map(([name, step]) => (
-        <StepCard key={name} step={step} isParallel={false} />
-      ))}
-
-      {/* Parallel group */}
-      {parallelSteps.length > 0 && (
-        <div className="border-2 border-dashed border-blue-300 rounded-lg p-3 bg-blue-50/30">
+    if (parallelStepNames.has(name)) {
+      const groupSteps = stepEntries.filter(([n]) => parallelStepNames.has(n) && !rendered.has(n));
+      groupSteps.forEach(([n]) => rendered.add(n));
+      elements.push(
+        <div key={`parallel-${name}`} className="border-2 border-dashed border-blue-300 rounded-lg p-3 bg-blue-50/30">
           <div className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-2">
             ⚡ Parallel Execution
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            {parallelSteps.map(([name, step]) => (
-              <StepCard key={name} step={step} isParallel={true} />
+          <div className={`grid grid-cols-1 ${groupSteps.length >= 3 ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-2`}>
+            {groupSteps.map(([n, s]) => (
+              <StepCard key={n} step={s} isParallel={true} />
             ))}
           </div>
         </div>
-      )}
+      );
+    } else {
+      rendered.add(name);
+      elements.push(<StepCard key={name} step={step} isParallel={false} />);
+    }
+  }
 
-      {/* Post-parallel sequential steps */}
-      {sequentialSteps.slice(isProvision ? 1 : 0).map(([name, step]) => (
-        <StepCard key={name} step={step} isParallel={false} />
-      ))}
-    </div>
-  );
+  return <div className="space-y-3">{elements}</div>;
 }
 
 function ExecutionHistoryRow({ exec, onSelect, isSelected }) {
