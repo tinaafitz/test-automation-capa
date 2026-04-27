@@ -132,8 +132,8 @@ spec:
   defaultMachinePoolSpec:
     instanceType: {{ machine_pool.instance_type | default('m5.xlarge') }}
     autoscaling:
-      maxReplicas: {{ machine_pool.max_replicas | default(3) }}
-      minReplicas: {{ machine_pool.min_replicas | default(2) }}
+      maxReplicas: {{ machine_pool.max_replicas | default(availability_zones_list | default(['us-west-2a']) | length * 2) }}
+      minReplicas: {{ machine_pool.min_replicas | default(availability_zones_list | default(['us-west-2a']) | length) }}
 
   additionalTags:
     env: {{ environment_tag | default('test') }}
@@ -196,7 +196,7 @@ metadata:
     automation.acm.redhat.com/pr-5786: "true"
 spec:
   clusterName: {{ cluster_name }}
-  replicas: {{ machine_pool.replicas | default(2) }}
+  replicas: {{ machine_pool.replicas | default(availability_zones_list | default(['us-west-2a']) | length) }}
   template:
     spec:
       clusterName: {{ cluster_name }}

@@ -288,10 +288,10 @@ spec:
   # Scaling Configuration
   {% if autoscaling_enabled | default(false) %}
   autoscaling:
-    minReplicas: {{ min_replicas | default(1) }}
-    maxReplicas: {{ max_replicas | default(3) }}
+    minReplicas: {{ min_replicas | default(availability_zones_list | default(['us-west-2a']) | length) }}
+    maxReplicas: {{ max_replicas | default(availability_zones_list | default(['us-west-2a']) | length * 2) }}
   {% else %}
-  replicas: {{ replicas | default(2) }}
+  replicas: {{ replicas | default(availability_zones_list | default(['us-west-2a']) | length) }}
   {% endif %}
 
   # Storage Configuration
@@ -360,9 +360,9 @@ metadata:
 spec:
   clusterName: {{ cluster_name }}
   {% if autoscaling_enabled | default(false) %}
-  replicas: {{ min_replicas | default(1) }}
+  replicas: {{ min_replicas | default(availability_zones_list | default(['us-west-2a']) | length) }}
   {% else %}
-  replicas: {{ replicas | default(2) }}
+  replicas: {{ replicas | default(availability_zones_list | default(['us-west-2a']) | length) }}
   {% endif %}
   template:
     spec:
