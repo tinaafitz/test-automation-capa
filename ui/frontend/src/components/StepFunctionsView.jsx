@@ -131,8 +131,58 @@ export default function StepFunctionsView() {
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState('');
   const [selectedSM, setSelectedSM] = useState('rosa-hcp-provision');
-  const [clusterName, setClusterName] = useState('');
+  const [credentials, setCredentials] = useState({});
+  const [credentialsLoaded, setCredentialsLoaded] = useState(false);
+  const [envName, setEnvName] = useState('');
+  const [vars, setVars] = useState({});
+  const [showVars, setShowVars] = useState(false);
   const pollingRef = useRef(null);
+
+  const extractEnvName = (apiUrl) => {
+    if (!apiUrl) return '';
+    try {
+      const hostname = new URL(apiUrl).hostname;
+      const parts = hostname.split('.');
+      return parts[0] === 'api' && parts.length > 1 ? parts[1] : parts[0];
+    } catch {
+      return '';
+    }
+  };
+
+  const buildDefaultVars = useCallback((creds) => {
+    const defaults = {};
+    defaults.name_prefix = '';
+    if (creds.AWS_ACCESS_KEY_ID) defaults.AWS_ACCESS_KEY_ID = creds.AWS_ACCESS_KEY_ID;
+    if (creds.AWS_SECRET_ACCESS_KEY) defaults.AWS_SECRET_ACCESS_KEY = creds.AWS_SECRET_ACCESS_KEY;
+    if (creds.AWS_REGION) defaults.aws_region = creds.AWS_REGION;
+    if (creds.OCM_CLIENT_ID) defaults.OCM_CLIENT_ID = creds.OCM_CLIENT_ID;
+    if (creds.OCM_CLIENT_SECRET) defaults.OCM_CLIENT_SECRET = creds.OCM_CLIENT_SECRET;
+    if (creds.OCP_HUB_API_URL) defaults.OCP_HUB_API_URL = creds.OCP_HUB_API_URL;
+    if (creds.OCP_HUB_CLUSTER_USER) defaults.OCP_HUB_CLUSTER_USER = creds.OCP_HUB_CLUSTER_USER;
+    if (creds.OCP_HUB_CLUSTER_PASSWORD) defaults.OCP_HUB_CLUSTER_PASSWORD = creds.OCP_HUB_CLUSTER_PASSWORD;
+    defaults.capi_namespace = 'ns-rosa-hcp';
+    defaults.openshift_version = '4.20.10';
+    defaults.create_rosa_roles = 'true';
+    defaults.create_rosa_network = 'true';
+    defaults.availability_zone_count = '1';
+    defaults.network_cidr = '10.0.0.0/16';
+    return defaults;
+  }, []);
+
+  const fetchCredentials = useCallback(async () => {
+    try {
+      const res = await fetch(buildApiUrl('/api/credentials'));
+      const data = await res.json();
+      if (data.success && data.credentials) {
+        setCredentials(data.credentials);
+        setEnvName(extractEnvName(data.credentials.OCP_HUB_API_URL));
+        setVars((prev) => Object.keys(prev).length === 0 ? buildDefaultVars(data.credentials) : prev);
+        setCredentialsLoaded(true);
+      }
+    } catch (e) {
+      console.error('Failed to fetch credentials:', e);
+    }
+  }, [buildDefaultVars]);
 
   const fetchStateMachines = useCallback(async () => {
     try {
@@ -172,7 +222,8 @@ export default function StepFunctionsView() {
   useEffect(() => {
     fetchStateMachines();
     fetchExecutions();
-  }, [fetchStateMachines, fetchExecutions]);
+    fetchCredentials();
+  }, [fetchStateMachines, fetchExecutions, fetchCredentials]);
 
   // Poll running executions
   useEffect(() => {
@@ -187,6 +238,42 @@ export default function StepFunctionsView() {
     };
   }, [liveExecution, fetchExecutionDetail, fetchExecutions]);
 
+  const buildInputParams = () => {
+    const params = {};
+    for (const [k, v] of Object.entries(vars)) {
+      if (v !== '') params[k] = v;
+    }
+    return params;
+  };
+
+  const handleVarChange = (key, value) => {
+    setVars((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleAddVar = () => {
+    const key = `custom_${Object.keys(vars).length}`;
+    setVars((prev) => ({ ...prev, [key]: '' }));
+  };
+
+  const handleRemoveVar = (key) => {
+    setVars((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const handleRenameVar = (oldKey, newKey) => {
+    if (oldKey === newKey || !newKey.trim()) return;
+    setVars((prev) => {
+      const next = {};
+      for (const [k, v] of Object.entries(prev)) {
+        next[k === oldKey ? newKey : k] = v;
+      }
+      return next;
+    });
+  };
+
   const handlePreview = async () => {
     setError('');
     try {
@@ -195,7 +282,7 @@ export default function StepFunctionsView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           state_machine: selectedSM,
-          input_params: { cluster_name: clusterName || 'preview-cluster' },
+          input_params: buildInputParams(),
         }),
       });
       const data = await res.json();
@@ -208,8 +295,8 @@ export default function StepFunctionsView() {
   };
 
   const handleLaunch = async () => {
-    if (!clusterName.trim()) {
-      setError('Cluster name is required');
+    if (!credentialsLoaded || !envName) {
+      setError('No active environment configured — set credentials first');
       return;
     }
     setError('');
@@ -220,7 +307,7 @@ export default function StepFunctionsView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           state_machine: selectedSM,
-          input_params: { cluster_name: clusterName },
+          input_params: buildInputParams(),
         }),
       });
       const data = await res.json();
@@ -265,7 +352,24 @@ export default function StepFunctionsView() {
 
       {/* Launch Panel */}
       <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Launch Execution</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-700">Launch Execution</h3>
+          {credentialsLoaded && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className={credentials.AWS_ACCESS_KEY_ID ? 'text-green-600' : 'text-red-500'}>
+                AWS {credentials.AWS_ACCESS_KEY_ID ? 'OK' : 'Missing'}
+              </span>
+              <span className="text-gray-300">|</span>
+              <span className={credentials.OCM_CLIENT_ID ? 'text-green-600' : 'text-red-500'}>
+                OCM {credentials.OCM_CLIENT_ID ? 'OK' : 'Missing'}
+              </span>
+              <span className="text-gray-300">|</span>
+              <span className={credentials.OCP_HUB_API_URL ? 'text-green-600' : 'text-red-500'}>
+                OCP {credentials.OCP_HUB_API_URL ? 'OK' : 'Missing'}
+              </span>
+            </div>
+          )}
+        </div>
         <div className="flex flex-wrap gap-3 items-end">
           <div>
             <label className="block text-xs text-gray-500 mb-1">State Machine</label>
@@ -280,16 +384,6 @@ export default function StepFunctionsView() {
               {stateMachines.length === 0 && <option value="rosa-hcp-provision">rosa-hcp-provision</option>}
             </select>
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Cluster Name</label>
-            <input
-              type="text"
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm w-48"
-              placeholder="e.g. my-rosa-cluster"
-              value={clusterName}
-              onChange={(e) => setClusterName(e.target.value)}
-            />
-          </div>
           <button
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md text-sm border border-gray-300 transition"
             onClick={handlePreview}
@@ -300,12 +394,65 @@ export default function StepFunctionsView() {
           <button
             className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition disabled:opacity-50"
             onClick={handleLaunch}
-            disabled={launching || !clusterName.trim()}
+            disabled={launching || !credentialsLoaded || !envName}
           >
             <PlayIcon className="h-4 w-4" />
             {launching ? 'Launching...' : 'Launch'}
           </button>
         </div>
+      </div>
+
+      {/* Variables Panel */}
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+        <button
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition"
+          onClick={() => setShowVars(!showVars)}
+        >
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
+            <span className="text-xs text-gray-400">{Object.keys(vars).length} configured</span>
+          </div>
+          <span className="text-gray-400 text-xs">{showVars ? 'Hide' : 'Show'}</span>
+        </button>
+        {showVars && (
+          <div className="px-4 pb-4 border-t border-gray-100">
+            <div className="space-y-1.5 mt-3">
+              {Object.entries(vars).map(([key, val]) => {
+                const isSecret = /secret|password|key/i.test(key) && !/region|namespace|version|cidr|count|prefix|name/i.test(key);
+                return (
+                  <div key={key} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      className="border border-gray-200 rounded px-2 py-1 text-xs font-mono w-48 bg-gray-50"
+                      defaultValue={key}
+                      onBlur={(e) => handleRenameVar(key, e.target.value)}
+                    />
+                    <span className="text-gray-300">=</span>
+                    <input
+                      type={isSecret ? 'password' : 'text'}
+                      className="border border-gray-200 rounded px-2 py-1 text-xs font-mono flex-1"
+                      value={val}
+                      onChange={(e) => handleVarChange(key, e.target.value)}
+                    />
+                    <button
+                      className="text-gray-300 hover:text-red-500 text-xs px-1 transition"
+                      onClick={() => handleRemoveVar(key)}
+                      title="Remove"
+                    >
+                      x
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              className="mt-2 text-xs text-blue-600 hover:text-blue-800"
+              onClick={handleAddVar}
+            >
+              + Add variable
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Execution Plan Preview */}

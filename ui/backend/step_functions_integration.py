@@ -176,9 +176,129 @@ DELETE_STATE_MACHINE = {
     },
 }
 
+CONFIGURE_STATE_MACHINE = {
+    "Comment": "Full MCE CAPI/CAPA Environment Setup",
+    "StartAt": "VerifyOCPLogin",
+    "States": {
+        "VerifyOCPLogin": {
+            "Type": "Task",
+            "Comment": "Login to OpenShift hub cluster and verify connectivity",
+            "Resource": "login_ocp",
+            "TimeoutSeconds": 60,
+            "Retry": [{"ErrorEquals": ["RetryableError"], "MaxAttempts": 2, "IntervalSeconds": 5, "BackoffRate": 2.0}],
+            "Next": "EnableCAPICAPAComponents",
+        },
+        "EnableCAPICAPAComponents": {
+            "Type": "Task",
+            "Comment": "Disable Hypershift and enable CAPI/CAPA components in MCE",
+            "Resource": "enable_capi_capa",
+            "TimeoutSeconds": 300,
+            "Retry": [{"ErrorEquals": ["RetryableError"], "MaxAttempts": 2, "IntervalSeconds": 15, "BackoffRate": 2.0}],
+            "Next": "WaitForControllers",
+        },
+        "WaitForControllers": {
+            "Type": "Task",
+            "Comment": "Wait for capi-controller-manager and capa-controller-manager to be ready",
+            "Resource": "wait_for_capi_capa_ready",
+            "TimeoutSeconds": 600,
+            "Retry": [{"ErrorEquals": ["RetryableError"], "MaxAttempts": 3, "IntervalSeconds": 30, "BackoffRate": 2.0}],
+            "Next": "CreateNamespace",
+        },
+        "CreateNamespace": {
+            "Type": "Task",
+            "Comment": "Create the CAPI namespace for cluster resources",
+            "Resource": "create_namespace",
+            "TimeoutSeconds": 60,
+            "Next": "ParallelConfigObjects",
+        },
+        "ParallelConfigObjects": {
+            "Type": "Parallel",
+            "Comment": "Create credentials, secrets, and identity objects concurrently",
+            "Branches": [
+                {
+                    "StartAt": "CreateAWSCredentials",
+                    "States": {
+                        "CreateAWSCredentials": {
+                            "Type": "Task",
+                            "Comment": "Create capa-manager-bootstrap-credentials secret",
+                            "Resource": "create_aws_credentials",
+                            "TimeoutSeconds": 60,
+                            "End": True,
+                        }
+                    },
+                },
+                {
+                    "StartAt": "CreateROSACredsSecret",
+                    "States": {
+                        "CreateROSACredsSecret": {
+                            "Type": "Task",
+                            "Comment": "Create rosa-creds-secret in multicluster-engine namespace",
+                            "Resource": "create_rosa_creds_secret",
+                            "TimeoutSeconds": 60,
+                            "End": True,
+                        }
+                    },
+                },
+                {
+                    "StartAt": "SetRegistrationConfig",
+                    "States": {
+                        "SetRegistrationConfig": {
+                            "Type": "Task",
+                            "Comment": "Set ClusterManager registration config and ClusterRoleBinding",
+                            "Resource": "set_registration_config",
+                            "TimeoutSeconds": 60,
+                            "End": True,
+                        }
+                    },
+                },
+            ],
+            "Next": "SetAWSIdentityAndRestart",
+        },
+        "SetAWSIdentityAndRestart": {
+            "Type": "Task",
+            "Comment": "Set AWSClusterControllerIdentity and restart capa-controller-manager",
+            "Resource": "set_aws_identity_restart",
+            "TimeoutSeconds": 120,
+            "Next": "VerifyEnvironment",
+        },
+        "VerifyEnvironment": {
+            "Type": "Task",
+            "Comment": "Validate CAPI/CAPA environment is fully configured and ready",
+            "Resource": "validate_capa_environment",
+            "TimeoutSeconds": 120,
+            "End": True,
+        },
+    },
+}
+
+UPGRADE_STATE_MACHINE = {
+    "Comment": "ROSA HCP Cluster Version Upgrade (Control Plane then Machine Pool)",
+    "StartAt": "UpgradeControlPlane",
+    "States": {
+        "UpgradeControlPlane": {
+            "Type": "Task",
+            "Comment": "Upgrade ROSAControlPlane to next available version (includes wait)",
+            "Resource": "upgrade_control_plane",
+            "TimeoutSeconds": 3900,
+            "Retry": [{"ErrorEquals": ["RetryableError"], "MaxAttempts": 1, "IntervalSeconds": 30}],
+            "Next": "UpgradeMachinePool",
+        },
+        "UpgradeMachinePool": {
+            "Type": "Task",
+            "Comment": "Upgrade ROSAMachinePool to match control plane version (includes wait)",
+            "Resource": "upgrade_machine_pool",
+            "TimeoutSeconds": 3900,
+            "Retry": [{"ErrorEquals": ["RetryableError"], "MaxAttempts": 1, "IntervalSeconds": 30}],
+            "End": True,
+        },
+    },
+}
+
 STATE_MACHINES = {
     "rosa-hcp-provision": PROVISION_STATE_MACHINE,
     "rosa-hcp-delete": DELETE_STATE_MACHINE,
+    "mce-configure": CONFIGURE_STATE_MACHINE,
+    "rosa-hcp-upgrade": UPGRADE_STATE_MACHINE,
 }
 
 
@@ -308,6 +428,17 @@ TASK_RESOURCE_MAP = {
     "delete_rosa_network": "tasks/delete_rosa_network.yml",
     "delete_rosa_role_config": "tasks/delete_rosa_role_config.yml",
     "verify_cleanup": "tasks/verify_deletion_complete.yml",
+    "login_ocp": "tasks/login_ocp.yml",
+    "enable_capi_capa": "tasks/enable_capi_capa.yml",
+    "wait_for_capi_capa_ready": "tasks/wait-for-capi-capa-ready.yml",
+    "create_namespace": "tasks/create_output_folder.yml",
+    "create_aws_credentials": "tasks/create_capa_manager_bootstrap_credentials.yml",
+    "create_rosa_creds_secret": "tasks/create_rosa_creds_secret.yml",
+    "set_registration_config": "tasks/set_registration_configuration.yml",
+    "set_aws_identity_restart": "tasks/set_aws_identity.yml",
+    "validate_capa_environment": "tasks/validate-capa-environment.yml",
+    "upgrade_control_plane": "playbooks/upgrade_rosa_control_plane.yml",
+    "upgrade_machine_pool": "playbooks/upgrade_rosa_machine_pool.yml",
 }
 
 
@@ -720,7 +851,7 @@ def get_execution_plan(state_machine_name: str, input_params: dict) -> dict:
     }
 
     sequential_total = 0
-    parallel_max = 0
+    parallel_total = 0
 
     states = definition.get("States", {})
     for state_name, state_def in states.items():
@@ -736,7 +867,7 @@ def get_execution_plan(state_machine_name: str, input_params: dict) -> dict:
                 "parallel": False,
             })
             sequential_total += timeout
-            parallel_max = max(parallel_max, timeout)
+            parallel_total += timeout
         elif state_def.get("Type") == "Parallel":
             group = []
             branch_max = 0
@@ -757,10 +888,10 @@ def get_execution_plan(state_machine_name: str, input_params: dict) -> dict:
                         sequential_total += timeout
                         branch_max = max(branch_max, timeout)
                         group.append(bname)
-            parallel_max += branch_max
+            parallel_total += branch_max
             plan["parallel_groups"].append({"name": state_name, "steps": group})
 
     plan["estimated_time_sequential_seconds"] = sequential_total
-    plan["estimated_time_parallel_seconds"] = parallel_max
+    plan["estimated_time_parallel_seconds"] = parallel_total
 
     return plan
