@@ -14,6 +14,8 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -21,6 +23,13 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+try:
+    from agents_service import init_ai_agents
+    from shared_state import jobs, ai_agent_sessions
+    AGENTS_AVAILABLE = True
+except ImportError:
+    AGENTS_AVAILABLE = False
 
 
 class ExecutionMode(str, Enum):
@@ -315,6 +324,7 @@ class StepExecution:
         self.error: Optional[str] = None
         self.timeout = timeout
         self.job_id: Optional[str] = None
+        self.agent_events: List[dict] = []
 
     def to_dict(self) -> dict:
         elapsed = None
@@ -333,6 +343,7 @@ class StepExecution:
             "output": self.output,
             "error": self.error,
             "job_id": self.job_id,
+            "agent_events": self.agent_events,
         }
 
 
@@ -353,6 +364,8 @@ class StateMachineExecution:
         self.completed_at: Optional[str] = None
         self.error: Optional[str] = None
         self._cancelled = False
+        self.agent_session: Optional[dict] = None
+        self.agent_events: List[dict] = []
 
         self._build_steps_from_definition()
 
@@ -409,7 +422,25 @@ class StateMachineExecution:
             "completed_at": self.completed_at,
             "elapsed_seconds": elapsed,
             "error": self.error,
+            "agent_events": self.agent_events,
+            "agent_stats": _get_execution_agent_stats(self),
         }
+
+
+def _get_execution_agent_stats(execution: 'StateMachineExecution') -> dict:
+    """Get AI agent statistics for a Step Functions execution."""
+    session = execution.agent_session
+    if not session:
+        return {"enabled": False}
+    monitor = session.get("monitor")
+    remediation = session.get("remediation")
+    events = execution.agent_events
+    return {
+        "enabled": True,
+        "issues_detected": len(events),
+        "interventions": len([e for e in events if e.get("remediation_result")]),
+        "total_patterns_checked": len(getattr(monitor, "patterns_detected", [])) if monitor else 0,
+    }
 
 
 # In-memory execution store (keyed by execution_id)
@@ -507,6 +538,20 @@ async def _run_local_execution(execution: StateMachineExecution):
     execution.status = StepStatus.RUNNING
     execution.started_at = datetime.utcnow().isoformat()
 
+    if AGENTS_AVAILABLE:
+        try:
+            jobs[execution.execution_id] = {
+                "id": execution.execution_id,
+                "status": "running",
+                "logs": [],
+                "agent_events": [],
+                "created_at": execution.created_at,
+            }
+            execution.agent_session = init_ai_agents(execution.execution_id)
+            logger.info(f"AI agents initialized for execution {execution.execution_id}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize AI agents: {e}")
+
     definition = STATE_MACHINES.get(execution.state_machine_name, {})
     states = definition.get("States", {})
     current_state = definition.get("StartAt")
@@ -551,6 +596,21 @@ async def _run_local_execution(execution: StateMachineExecution):
         execution.error = str(e)
         execution.completed_at = datetime.utcnow().isoformat()
         logger.error(f"Execution {execution.execution_id} failed: {e}")
+    finally:
+        _finalize_agents(execution)
+
+
+def _finalize_agents(execution: StateMachineExecution):
+    """Collect agent events and run learning summary."""
+    if not AGENTS_AVAILABLE:
+        return
+    try:
+        if execution.execution_id in jobs:
+            execution.agent_events = jobs[execution.execution_id].get("agent_events", [])
+        if execution.agent_session and execution.agent_session.get("learning"):
+            execution.agent_session["learning"].end_of_run_summary()
+    except Exception as e:
+        logger.warning(f"Agent finalization error: {e}")
 
 
 async def _execute_local_task(
@@ -583,11 +643,21 @@ async def _execute_local_task(
 
         extra_vars = {**execution.input_params}
 
+        pre_event_count = len(jobs.get(execution.execution_id, {}).get("agent_events", [])) if AGENTS_AVAILABLE else 0
+
         result = await asyncio.to_thread(
-            _run_ansible_task_sync, project_root, task_file, extra_vars, step.timeout
+            _run_ansible_task_sync, project_root, task_file, extra_vars, step.timeout,
+            execution.execution_id, state_name,
         )
 
         step.completed_at = datetime.utcnow().isoformat()
+
+        if AGENTS_AVAILABLE:
+            all_events = jobs.get(execution.execution_id, {}).get("agent_events", [])
+            new_events = all_events[pre_event_count:]
+            for evt in new_events:
+                evt["step_name"] = state_name
+            step.agent_events.extend(new_events)
 
         if result["success"]:
             step.status = StepStatus.SUCCEEDED
@@ -640,7 +710,8 @@ async def _handle_retry(
 
         step.status = StepStatus.RUNNING
         result = await asyncio.to_thread(
-            _run_ansible_task_sync, project_root, task_file, extra_vars, step.timeout
+            _run_ansible_task_sync, project_root, task_file, extra_vars, step.timeout,
+            execution.execution_id, step.name,
         )
 
         if result["success"]:
@@ -683,7 +754,8 @@ async def _execute_local_parallel(
 
 
 def _run_ansible_task_sync(
-    project_root: str, task_file: str, extra_vars: dict, timeout: int
+    project_root: str, task_file: str, extra_vars: dict, timeout: int,
+    execution_id: str = None, step_name: str = None,
 ) -> dict:
     """Run an Ansible playbook or task file using playbook_executor.
 
@@ -822,6 +894,42 @@ def _run_ansible_task_sync(
     except Exception:
         pass
 
+    agent_session = ai_agent_sessions.get(execution_id) if (AGENTS_AVAILABLE and execution_id) else None
+    agent_lock = threading.Lock()
+
+    is_deletion = "delete" in task_file.lower()
+    is_provisioning = "create" in task_file.lower() or "provision" in task_file.lower()
+    use_sidecar = (is_deletion or is_provisioning) and agent_session
+    sidecar_stop = threading.Event()
+    sidecar_thread = None
+
+    if use_sidecar:
+        cluster_name_for_sidecar = merged_vars.get("cluster_name", "unknown")
+        sidecar_logfile = f"/tmp/{'deletion' if is_deletion else 'provision'}-agent-{cluster_name_for_sidecar}.log"
+
+        def _tail_sidecar():
+            last_pos = 0
+            while not sidecar_stop.is_set():
+                try:
+                    if os.path.exists(sidecar_logfile):
+                        with open(sidecar_logfile, 'r') as f:
+                            f.seek(last_pos)
+                            for line in f:
+                                line = line.strip()
+                                if line and agent_session.get("monitor"):
+                                    try:
+                                        with agent_lock:
+                                            agent_session["monitor"].process_line(line)
+                                    except Exception:
+                                        pass
+                            last_pos = f.tell()
+                except Exception:
+                    pass
+                sidecar_stop.wait(2)
+
+        sidecar_thread = threading.Thread(target=_tail_sidecar, daemon=True)
+        sidecar_thread.start()
+
     try:
         from playbook_executor import build_playbook_command, SENSITIVE_KEYS
         cmd, env = build_playbook_command(playbook_path, merged_vars, verbosity=1)
@@ -830,28 +938,43 @@ def _run_ansible_task_sync(
             if str(k).lower() in SENSITIVE_KEYS and v:
                 cmd.extend(["-e", f"{k}={v}"])
 
-        import subprocess
-        proc = subprocess.run(
-            cmd, cwd=project_root, capture_output=True,
-            text=True, timeout=timeout, env=env,
+        env["PYTHONUNBUFFERED"] = "1"
+
+        proc = subprocess.Popen(
+            cmd, cwd=project_root,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, env=env,
         )
 
-        combined_output = (proc.stdout or "") + (proc.stderr or "")
-        result = {
-            "success": proc.returncode == 0,
-            "stdout": proc.stdout or "",
-            "stderr": proc.stderr or "",
-            "error": combined_output[-3000:] if proc.returncode != 0 else "",
-        }
+        output_lines = []
+        for line in proc.stdout:
+            line_stripped = line.rstrip()
+            output_lines.append(line_stripped)
+            if agent_session and agent_session.get("monitor"):
+                try:
+                    with agent_lock:
+                        agent_session["monitor"].process_line(line_stripped)
+                except Exception:
+                    pass
+
+        returncode = proc.wait(timeout=timeout)
+        combined_output = "\n".join(output_lines)
 
         return {
-            "success": result["success"],
-            "output": (result.get("stdout", "") or "")[-2000:],
-            "error": result.get("error", "") if not result["success"] else "",
+            "success": returncode == 0,
+            "output": combined_output[-2000:],
+            "error": combined_output[-3000:] if returncode != 0 else "",
         }
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        return {"success": False, "error": f"Timed out after {timeout}s"}
     except Exception as e:
         return {"success": False, "error": str(e)}
     finally:
+        sidecar_stop.set()
+        if sidecar_thread is not None:
+            sidecar_thread.join(timeout=5)
         if not is_playbook:
             try:
                 os.unlink(playbook_path)

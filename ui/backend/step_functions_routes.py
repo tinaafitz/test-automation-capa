@@ -97,3 +97,16 @@ async def api_cancel_execution(execution_id: str):
     if not cancelled:
         raise HTTPException(status_code=404, detail=f"Execution '{execution_id}' not found")
     return {"execution_id": execution_id, "status": "cancelled"}
+
+
+@router.get("/executions/{execution_id}/agent-stats")
+async def api_get_execution_agent_stats(execution_id: str):
+    from step_functions_integration import _get_execution_agent_stats
+    execution = await get_execution(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail=f"Execution '{execution_id}' not found")
+    return {
+        "success": True,
+        "agent_stats": _get_execution_agent_stats(execution),
+        "agent_events": execution.agent_events,
+    }

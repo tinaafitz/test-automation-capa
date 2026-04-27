@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import subprocess
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
@@ -211,21 +212,27 @@ class TestRunAnsibleTaskSync:
         assert not result["success"]
         assert "not found" in result["error"]
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     @patch("playbook_executor.build_playbook_command")
-    def test_successful_run(self, mock_build, mock_run):
+    def test_successful_run(self, mock_build, mock_popen):
         mock_build.return_value = (["ansible-playbook", "test.yml"], os.environ.copy())
-        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(["ok: [localhost]\n", "PLAY RECAP\n"])
+        mock_proc.wait.return_value = 0
+        mock_popen.return_value = mock_proc
         with patch("os.path.exists", return_value=True):
             result = _run_ansible_task_sync("/tmp", "playbooks/test.yml", {"cluster_name": "t"}, 30)
         assert result["success"]
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     @patch("playbook_executor.build_playbook_command")
-    def test_timeout(self, mock_build, mock_run):
-        import subprocess
+    def test_timeout(self, mock_build, mock_popen):
         mock_build.return_value = (["ansible-playbook", "test.yml"], os.environ.copy())
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=30)
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="test", timeout=30), 0]
+        mock_proc.kill = MagicMock()
+        mock_popen.return_value = mock_proc
         with patch("os.path.exists", return_value=True):
             result = _run_ansible_task_sync("/tmp", "playbooks/test.yml", {}, 30)
         assert not result["success"]
