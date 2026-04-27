@@ -125,11 +125,11 @@ PROVISION_STATE_MACHINE = {
 
 DELETE_STATE_MACHINE = {
     "Comment": "ROSA HCP Cluster Deletion with Parallel Cleanup",
-    "StartAt": "DeleteControlPlane",
+    "StartAt": "InitiateDeletion",
     "States": {
-        "DeleteControlPlane": {
+        "InitiateDeletion": {
             "Type": "Task",
-            "Comment": "Delete ROSAControlPlane resource",
+            "Comment": "Initiate deletion of ROSAControlPlane and cluster resources",
             "Resource": "delete_control_plane",
             "TimeoutSeconds": 300,
             "Next": "WaitForControlPlaneDeleted",
@@ -303,11 +303,57 @@ UPGRADE_STATE_MACHINE = {
     },
 }
 
+FULL_LIFECYCLE_STATE_MACHINE = {
+    "Comment": "Full ROSA HCP Lifecycle: Configure → Provision → Delete",
+    "StartAt": "Configure",
+    "States": {
+        "Configure": {
+            "Type": "StateMachine",
+            "Comment": "Set up MCE CAPI/CAPA environment",
+            "Resource": "mce-configure",
+            "Next": "Provision",
+        },
+        "Provision": {
+            "Type": "StateMachine",
+            "Comment": "Provision ROSA HCP cluster with parallel resource setup",
+            "Resource": "rosa-hcp-provision",
+            "Next": "Delete",
+        },
+        "Delete": {
+            "Type": "StateMachine",
+            "Comment": "Delete ROSA HCP cluster with parallel cleanup",
+            "Resource": "rosa-hcp-delete",
+            "End": True,
+        },
+    },
+}
+
+PROVISION_AND_DELETE_STATE_MACHINE = {
+    "Comment": "Provision then Delete ROSA HCP Cluster (E2E test)",
+    "StartAt": "Provision",
+    "States": {
+        "Provision": {
+            "Type": "StateMachine",
+            "Comment": "Provision ROSA HCP cluster with parallel resource setup",
+            "Resource": "rosa-hcp-provision",
+            "Next": "Delete",
+        },
+        "Delete": {
+            "Type": "StateMachine",
+            "Comment": "Delete ROSA HCP cluster with parallel cleanup",
+            "Resource": "rosa-hcp-delete",
+            "End": True,
+        },
+    },
+}
+
 STATE_MACHINES = {
     "rosa-hcp-provision": PROVISION_STATE_MACHINE,
     "rosa-hcp-delete": DELETE_STATE_MACHINE,
     "mce-configure": CONFIGURE_STATE_MACHINE,
     "rosa-hcp-upgrade": UPGRADE_STATE_MACHINE,
+    "full-lifecycle": FULL_LIFECYCLE_STATE_MACHINE,
+    "provision-and-delete": PROVISION_AND_DELETE_STATE_MACHINE,
 }
 
 
@@ -344,6 +390,7 @@ class StepExecution:
             "error": self.error,
             "job_id": self.job_id,
             "agent_events": self.agent_events,
+            "sub_execution_id": getattr(self, 'sub_execution_id', None),
         }
 
 
@@ -374,14 +421,30 @@ class StateMachineExecution:
         states = definition.get("States", {})
 
         for state_name, state_def in states.items():
-            if state_def.get("Type") == "Task":
+            state_type = state_def.get("Type")
+            if state_type == "Task":
                 timeout = state_def.get("TimeoutSeconds", 300)
                 self.steps[state_name] = StepExecution(
                     name=state_name,
                     resource=state_def.get("Resource", state_name),
                     timeout=timeout,
                 )
-            elif state_def.get("Type") == "Parallel":
+            elif state_type == "StateMachine":
+                nested_name = state_def.get("Resource", state_name)
+                nested_def = STATE_MACHINES.get(nested_name, {})
+                total_timeout = sum(
+                    s.get("TimeoutSeconds", 300)
+                    for s in nested_def.get("States", {}).values()
+                    if s.get("Type") == "Task"
+                )
+                step = StepExecution(
+                    name=state_name,
+                    resource=nested_name,
+                    timeout=total_timeout or 3600,
+                )
+                step.sub_execution_id = None
+                self.steps[state_name] = step
+            elif state_type == "Parallel":
                 group = []
                 for branch in state_def.get("Branches", []):
                     for bstate_name, bstate_def in branch.get("States", {}).items():
@@ -572,6 +635,14 @@ async def _run_local_execution(execution: StateMachineExecution):
                     execution.completed_at = datetime.utcnow().isoformat()
                     return
 
+            elif state_type == "StateMachine":
+                success = await _execute_nested_state_machine(execution, current_state, state_def)
+                if not success:
+                    execution.status = StepStatus.FAILED
+                    execution.error = f"Nested state machine '{current_state}' failed"
+                    execution.completed_at = datetime.utcnow().isoformat()
+                    return
+
             elif state_type == "Parallel":
                 success = await _execute_local_parallel(execution, current_state, state_def)
                 if not success:
@@ -751,6 +822,58 @@ async def _execute_local_parallel(
             all_ok = False
 
     return all_ok
+
+
+async def _execute_nested_state_machine(
+    execution: StateMachineExecution, state_name: str, state_def: dict
+) -> bool:
+    """Execute a nested state machine as a sub-execution."""
+    step = execution.steps.get(state_name)
+    if not step:
+        return False
+
+    step.status = StepStatus.RUNNING
+    step.started_at = datetime.utcnow().isoformat()
+
+    nested_sm_name = state_def.get("Resource", "")
+    if nested_sm_name not in STATE_MACHINES:
+        step.status = StepStatus.FAILED
+        step.error = f"Unknown state machine: {nested_sm_name}"
+        step.completed_at = datetime.utcnow().isoformat()
+        return False
+
+    try:
+        sub_execution = await start_execution(
+            nested_sm_name, execution.input_params, execution.mode
+        )
+        step.sub_execution_id = sub_execution.execution_id
+
+        while not execution._cancelled:
+            await asyncio.sleep(3)
+            sub = await get_execution(sub_execution.execution_id)
+            if not sub:
+                break
+            if sub.status == StepStatus.SUCCEEDED:
+                step.status = StepStatus.SUCCEEDED
+                step.completed_at = datetime.utcnow().isoformat()
+                step.agent_events.extend(sub.agent_events)
+                return True
+            elif sub.status in (StepStatus.FAILED, StepStatus.TIMED_OUT, StepStatus.CANCELLED):
+                step.status = sub.status
+                step.error = sub.error or f"Nested state machine '{nested_sm_name}' {sub.status.value}"
+                step.completed_at = datetime.utcnow().isoformat()
+                step.agent_events.extend(sub.agent_events)
+                return False
+
+        step.status = StepStatus.CANCELLED
+        step.completed_at = datetime.utcnow().isoformat()
+        return False
+
+    except Exception as e:
+        step.status = StepStatus.FAILED
+        step.error = str(e)
+        step.completed_at = datetime.utcnow().isoformat()
+        return False
 
 
 def _run_ansible_task_sync(
@@ -1107,6 +1230,23 @@ def get_execution_plan(state_machine_name: str, input_params: dict) -> dict:
             })
             sequential_total += timeout
             parallel_total += timeout
+        elif state_def.get("Type") == "StateMachine":
+            nested_name = state_def.get("Resource", state_name)
+            nested_plan = get_execution_plan(nested_name, input_params)
+            nested_seq = nested_plan.get("estimated_time_sequential_seconds", 0)
+            nested_par = nested_plan.get("estimated_time_parallel_seconds", 0)
+            plan["steps"].append({
+                "name": state_name,
+                "resource": nested_name,
+                "task_file": f"state-machine:{nested_name}",
+                "timeout_seconds": nested_seq,
+                "retry": [],
+                "parallel": False,
+                "nested": True,
+                "nested_steps": nested_plan.get("steps", []),
+            })
+            sequential_total += nested_seq
+            parallel_total += nested_par
         elif state_def.get("Type") == "Parallel":
             group = []
             branch_max = 0

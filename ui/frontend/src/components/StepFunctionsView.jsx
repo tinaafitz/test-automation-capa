@@ -57,6 +57,11 @@ function StepCard({ step, isParallel }) {
             {step.error}
           </div>
         )}
+        {step.sub_execution_id && (
+          <div className="mt-1 text-xs text-blue-500">
+            Sub-execution: {step.sub_execution_id}
+          </div>
+        )}
       </div>
     </div>
   );

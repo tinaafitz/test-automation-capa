@@ -68,7 +68,7 @@ class TestStateMachineExecution:
 
     def test_delete_execution_builds_steps(self):
         exec_ = StateMachineExecution("test-2", "rosa-hcp-delete", {})
-        assert "DeleteControlPlane" in exec_.steps
+        assert "InitiateDeletion" in exec_.steps
         assert "WaitForControlPlaneDeleted" in exec_.steps
         assert "DeleteROSANetwork" in exec_.steps
         assert "DeleteRosaRoleConfig" in exec_.steps
