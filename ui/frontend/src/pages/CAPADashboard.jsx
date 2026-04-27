@@ -14,6 +14,7 @@ import ResourcesViewer from '../components/ResourcesViewer';
 import NotificationSettingsInline from '../components/NotificationSettingsInline';
 import WorkflowBuilder from '../components/WorkflowBuilder';
 import ClusterActions from '../components/ClusterActions';
+import StepFunctionsView from '../components/StepFunctionsView';
 import {
   useApiStatusContext,
   useRecentOperationsContext,
@@ -1054,6 +1055,7 @@ const CAPADashboardContent = () => {
     onAgentDashboardClick: () => navigate('/agents'),
     onWorkflowsClick: () => setActiveSection('workflows'),
     onClusterActionsClick: () => setActiveSection('cluster-actions'),
+    onStepFunctionsClick: () => setActiveSection('step-functions'),
   };
 
   // ============================================================================
@@ -1736,6 +1738,11 @@ const CAPADashboardContent = () => {
       case 'cluster-actions':
         return (
           <ClusterActions />
+        );
+
+      case 'step-functions':
+        return (
+          <StepFunctionsView />
         );
 
       case 'terminal':
