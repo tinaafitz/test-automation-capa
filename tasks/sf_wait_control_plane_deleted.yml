@@ -1,0 +1,41 @@
+---
+# Step Functions: Wait for ROSAControlPlane to be fully deleted
+
+- name: Set deletion wait variables
+  set_fact:
+    agent_sidecar_log: "/tmp/deletion-agent-{{ cluster_name }}.log"
+    deletion_timeout: "{{ rosacontrolplane_timeout | default(2400) }}"
+
+- name: Wait for ROSAControlPlane deletion
+  shell: |
+    LOGFILE="{{ agent_sidecar_log }}"
+    TIMEOUT={{ deletion_timeout }}
+    START=$(date +%s)
+    echo "#AGENT_CONTEXT: resource_name={{ cluster_name }} namespace={{ capi_namespace }} resource_type=rosacontrolplane" | tee -a "$LOGFILE"
+    while true; do
+      ELAPSED=$(( $(date +%s) - START ))
+      if [ $ELAPSED -gt $TIMEOUT ]; then
+        echo "Timed out waiting for ROSAControlPlane deletion after ${TIMEOUT}s" | tee -a "$LOGFILE"
+        exit 1
+      fi
+      OUTPUT=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} 2>&1)
+      RC=$?
+      if [ $RC -ne 0 ]; then
+        if echo "$OUTPUT" | grep -qi "not found\|NotFound"; then
+          echo "ROSAControlPlane {{ cluster_name }} deleted successfully (${ELAPSED}s)" | tee -a "$LOGFILE"
+          exit 0
+        fi
+      fi
+      MINS=$((ELAPSED / 60))
+      SECS=$((ELAPSED % 60))
+      echo "FAILED - RETRYING: [localhost]: Wait for rosacontrolplane {{ cluster_name }} deletion (${MINS}m${SECS}s elapsed)." | tee -a "$LOGFILE"
+      sleep 10
+    done
+  args:
+    executable: /bin/bash
+  register: wait_rcp
+  failed_when: wait_rcp.rc != 0
+
+- name: ROSAControlPlane deleted
+  debug:
+    msg: "ROSAControlPlane {{ cluster_name }} successfully deleted"
