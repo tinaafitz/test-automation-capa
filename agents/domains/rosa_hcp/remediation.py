@@ -35,6 +35,7 @@ class RosaHcpRemediationAgent(RemediationAgent):
             "install_capi_capa": self._fix_install_capi,
             "increase_timeout_and_monitor": self._fix_increase_timeout,
             "create_and_link_ocm_role": self._fix_create_and_link_ocm_role,
+            "fix_replica_az_mismatch": self._fix_replica_az_mismatch,
         }
         method = rosa_methods.get(fix_name)
         if method:
@@ -494,3 +495,76 @@ class RosaHcpRemediationAgent(RemediationAgent):
 
         self.log(f"Timeout issue detected - suggest increasing timeout by {suggested_increase}", "warning")
         return True, f"Recommend increasing timeout by {suggested_increase} for this operation"
+
+    def _fix_replica_az_mismatch(self, params: Dict) -> Tuple[bool, str]:
+        """Fix replica/AZ mismatch by patching MachinePool and RosaControlPlane replicas to match AZ count."""
+        cluster_name = params.get("resource_name") or params.get("cluster_name", "")
+        namespace = params.get("namespace", "default")
+
+        if not cluster_name:
+            return False, "Cluster name required to fix replica/AZ mismatch"
+
+        self.log(f"Fixing replica/AZ mismatch for {cluster_name}", "info")
+
+        try:
+            az_cmd = [
+                "oc", "get", "rosacontrolplane", cluster_name, "-n", namespace,
+                "-o", "jsonpath={.spec.availabilityZones}",
+            ]
+            result = subprocess.run(az_cmd, capture_output=True, text=True, timeout=15)
+            if result.returncode != 0:
+                return False, f"Could not read AZ config: {result.stderr}"
+
+            import json as _json
+            try:
+                az_list = _json.loads(result.stdout)
+                az_count = len(az_list)
+            except (ValueError, TypeError):
+                az_raw = result.stdout.strip().strip("[]")
+                az_count = len([a for a in az_raw.split(",") if a.strip()]) if az_raw else 1
+
+            if az_count < 1:
+                az_count = 1
+
+            self.log(f"Detected {az_count} AZs, setting replicas accordingly", "info")
+
+            if self.dry_run:
+                return True, f"[DRY RUN] Would patch replicas to {az_count} (AZ count) for {cluster_name}"
+
+            rcp_patch = _json.dumps({
+                "spec": {
+                    "defaultMachinePoolSpec": {
+                        "autoscaling": {
+                            "minReplicas": az_count,
+                            "maxReplicas": az_count * 2,
+                        }
+                    }
+                }
+            })
+            rcp_cmd = [
+                "oc", "patch", "rosacontrolplane", cluster_name, "-n", namespace,
+                "--type=merge", "-p", rcp_patch,
+            ]
+            rcp_result = subprocess.run(rcp_cmd, capture_output=True, text=True, timeout=15)
+
+            mp_patch = _json.dumps({"spec": {"replicas": az_count}})
+            mp_cmd = [
+                "oc", "patch", "machinepool", cluster_name, "-n", namespace,
+                "--type=merge", "-p", mp_patch,
+            ]
+            mp_result = subprocess.run(mp_cmd, capture_output=True, text=True, timeout=15)
+
+            patched = []
+            if rcp_result.returncode == 0:
+                patched.append(f"RosaControlPlane minReplicas={az_count}")
+            if mp_result.returncode == 0:
+                patched.append(f"MachinePool replicas={az_count}")
+
+            if patched:
+                return True, f"Fixed replica/AZ mismatch: {', '.join(patched)}"
+            return False, f"Patch failed: RCP={rcp_result.stderr}, MP={mp_result.stderr}"
+
+        except subprocess.TimeoutExpired:
+            return False, "Timed out patching replicas"
+        except Exception as e:
+            return False, f"Error fixing replica/AZ mismatch: {e}"

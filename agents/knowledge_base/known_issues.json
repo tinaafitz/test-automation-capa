@@ -229,6 +229,30 @@
       ]
     },
     {
+      "type": "replica_az_mismatch",
+      "pattern": "(?i)(?:Invalid number of min replicas.*multiple of the private subnets|CLUSTERS-MGMT-400.*replicas.*subnets|compute nodes.*multiple of.*subnets)",
+      "severity": "critical",
+      "auto_fix": true,
+      "description": "MachinePool replica count is not a multiple of the number of availability zones (private subnets). ROSA requires replicas to be evenly distributed across AZs.",
+      "symptoms": [
+        "CLUSTERS-MGMT-400 error during provisioning",
+        "ROSAControlPlane stuck in ReconciliationFailed",
+        "Invalid number of min replicas error",
+        "Cluster retrying for 30+ minutes then timing out"
+      ],
+      "common_causes": [
+        "Template hardcodes minReplicas=1 or replicas=2 but cluster has 2 or 3 AZs",
+        "Availability zone count changed without updating replica count",
+        "MachinePool spec doesn't derive replicas from AZ count"
+      ],
+      "resolution_steps": [
+        "1. Check AZ count: oc get rosacontrolplane <name> -n <ns> -o jsonpath='{.spec.availabilityZones}'",
+        "2. Patch MachinePool replicas to match AZ count: oc patch machinepool <name> -n <ns> --type=merge -p '{\"spec\":{\"replicas\":<az_count>}}'",
+        "3. Patch autoscaling minReplicas: oc patch rosacontrolplane <name> -n <ns> --type=merge -p '{\"spec\":{\"defaultMachinePoolSpec\":{\"autoscaling\":{\"minReplicas\":<az_count>}}}}'",
+        "4. For future provisions, ensure templates derive replicas from availability_zones_list | length"
+      ]
+    },
+    {
       "type": "iam_permission_error",
       "pattern": "(?i)(?:access denied|not authorized|AccessDenied|UnauthorizedAccess|iam.*(?:error|fail|denied))",
       "severity": "high",
