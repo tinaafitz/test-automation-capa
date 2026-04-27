@@ -51,6 +51,7 @@ const CapaSidebar = ({
   onAgentDashboardClick,
   onWorkflowsClick,
   onClusterActionsClick,
+  onStepFunctionsClick,
   activeSection = 'credentials',
   environment = 'mce' // 'mce' or 'minikube'
 }) => {
@@ -167,6 +168,13 @@ const CapaSidebar = ({
           label: 'Cluster Actions',
           icon: <BoltIcon className="h-5 w-5" />,
           onClick: onClusterActionsClick,
+          showInEnvironments: ['mce']
+        },
+        {
+          id: 'step-functions',
+          label: 'Step Functions',
+          icon: <BoltIcon className="h-5 w-5" />,
+          onClick: onStepFunctionsClick,
           showInEnvironments: ['mce']
         },
       ],
