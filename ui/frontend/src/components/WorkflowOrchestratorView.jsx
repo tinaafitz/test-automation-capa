@@ -504,10 +504,10 @@ export default function WorkflowOrchestratorView() {
           <div className="space-y-2">
             {(plan.steps || []).map((step, i) => (
               <div key={i} className={`flex items-center gap-3 text-xs p-2 rounded ${step.parallel ? 'bg-blue-50 ml-4 border-l-2 border-blue-300' : 'bg-gray-50'}`}>
-                <span className="font-medium w-48">{step.name}</span>
-                <span className="font-mono text-gray-500 w-64">{step.task_file}</span>
-                <span className="text-gray-400">timeout: {formatElapsed(step.timeout_seconds)}</span>
-                {step.parallel && <span className="text-blue-600 text-xs font-medium">PARALLEL</span>}
+                <span className="font-medium w-48 shrink-0">{step.name}</span>
+                <span className="font-mono text-gray-500 flex-1 truncate">{step.task_file}</span>
+                <span className="text-gray-400 shrink-0">timeout: {formatElapsed(step.timeout_seconds)}</span>
+                {step.parallel && <span className="text-blue-600 text-xs font-medium shrink-0">PARALLEL</span>}
               </div>
             ))}
           </div>

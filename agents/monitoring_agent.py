@@ -101,6 +101,10 @@ class MonitoringAgent(BaseAgent):
         self.current_task = None
         self.waiting_for_resource = None
 
+        # Time-based stuck detection for deletion wait loops
+        self._deletion_retry_start: Dict[str, float] = {}
+        self._stuck_threshold = 900  # 15 minutes
+
         # Per-resource issue tracking (replaces simple debounce)
         # Key: "{issue_type}:{resource_key}", Value: TrackedIssue
         self._tracked_issues: Dict[str, TrackedIssue] = {}
@@ -151,6 +155,8 @@ class MonitoringAgent(BaseAgent):
 
             # Detect issues using knowledge base patterns only
             issue = self._detect_issue(line)
+            if not issue:
+                issue = self._detect_stuck_deletion(line)
             if issue:
                 return self._handle_detected_issue(issue, line)
 
@@ -335,6 +341,46 @@ class MonitoringAgent(BaseAgent):
         """
         patterns = self.known_issues.get("patterns", [])
         return self.match_pattern(line, patterns)
+
+    def _detect_stuck_deletion(self, line: str) -> Optional[Dict]:
+        """Detect deletion wait loops stuck for >15 minutes.
+
+        Parses elapsed time from retry lines like:
+          FAILED - RETRYING: ... deletion. Reason: ... (15m30s elapsed).
+        If elapsed exceeds threshold, synthesizes a cloudformation_deletion_failure.
+        """
+        if "FAILED - RETRYING" not in line or "deletion" not in line:
+            return None
+
+        import re
+        elapsed_match = re.search(r'\((\d+)m(\d+)s elapsed\)', line)
+        if not elapsed_match:
+            return None
+
+        elapsed_secs = int(elapsed_match.group(1)) * 60 + int(elapsed_match.group(2))
+        if elapsed_secs < self._stuck_threshold:
+            return None
+
+        resource_name = self._structured_context.get("resource_name", "")
+        resource_type = self._structured_context.get("resource_type", "")
+
+        tracking_key = f"cloudformation_deletion_failure:{resource_type}:{resource_name}"
+        if tracking_key in self._deletion_retry_start:
+            return None
+        self._deletion_retry_start[tracking_key] = time.time()
+
+        self.log(
+            f"Deletion stuck for {elapsed_secs}s (>{self._stuck_threshold}s) — "
+            f"triggering cloudformation_deletion_failure for {resource_name}",
+            "warning",
+        )
+        return {
+            "type": "cloudformation_deletion_failure",
+            "pattern": "time-based stuck detection",
+            "severity": "high",
+            "auto_fix": True,
+            "description": f"Deletion wait loop stuck for >{self._stuck_threshold // 60} minutes",
+        }
 
     def get_statistics(self) -> Dict:
         """Get monitoring statistics."""
