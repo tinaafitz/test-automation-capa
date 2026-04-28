@@ -341,6 +341,24 @@ export default function WorkflowOrchestratorView() {
     }
   };
 
+  const handleResume = async (id) => {
+    setError('');
+    try {
+      const res = await fetch(buildApiUrl(`/api/orchestrator/executions/${id}/resume`), { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.detail || 'Failed to resume');
+        return;
+      }
+      const data = await res.json();
+      setSelectedExecution(data);
+      setLiveExecution(data);
+      fetchExecutions();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -511,15 +529,26 @@ export default function WorkflowOrchestratorView() {
                 </span>
               </div>
             </div>
-            {selectedExecution.status === 'running' && (
-              <button
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-md text-sm transition"
-                onClick={() => handleCancel(selectedExecution.execution_id)}
-              >
-                <StopIcon className="h-4 w-4" />
-                Cancel
-              </button>
-            )}
+            <div className="flex gap-2">
+              {selectedExecution.status === 'running' && (
+                <button
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-md text-sm transition"
+                  onClick={() => handleCancel(selectedExecution.execution_id)}
+                >
+                  <StopIcon className="h-4 w-4" />
+                  Cancel
+                </button>
+              )}
+              {(selectedExecution.status === 'failed' || selectedExecution.status === 'cancelled') && (
+                <button
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-md text-sm transition"
+                  onClick={() => handleResume(selectedExecution.execution_id)}
+                >
+                  <ArrowPathIcon className="h-4 w-4" />
+                  Resume
+                </button>
+              )}
+            </div>
           </div>
           <ExecutionGraph execution={selectedExecution} />
           {selectedExecution.error && (

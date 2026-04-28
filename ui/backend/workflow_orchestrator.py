@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import sqlite3
 import subprocess
 import threading
 import time
@@ -456,6 +457,40 @@ class StateMachineExecution:
                             group.append(bstate_name)
                 self.parallel_groups.append(group)
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'StateMachineExecution':
+        exec_ = cls.__new__(cls)
+        exec_.execution_id = data["execution_id"]
+        exec_.state_machine_name = data["state_machine"]
+        exec_.input_params = data.get("input", {})
+        exec_.mode = ExecutionMode(data.get("mode", "local"))
+        exec_.status = StepStatus(data.get("status", "pending"))
+        exec_.parallel_groups = data.get("parallel_groups", [])
+        exec_.created_at = data.get("created_at", datetime.utcnow().isoformat())
+        exec_.started_at = data.get("started_at")
+        exec_.completed_at = data.get("completed_at")
+        exec_.error = data.get("error")
+        exec_._cancelled = False
+        exec_.agent_session = None
+        exec_.agent_events = data.get("agent_events", [])
+        exec_.steps = {}
+        for name, step_data in data.get("steps", {}).items():
+            step = StepExecution(
+                name=step_data["name"],
+                resource=step_data.get("resource", ""),
+                timeout=step_data.get("timeout_seconds", 300),
+            )
+            step.status = StepStatus(step_data.get("status", "pending"))
+            step.started_at = step_data.get("started_at")
+            step.completed_at = step_data.get("completed_at")
+            step.output = step_data.get("output")
+            step.error = step_data.get("error")
+            step.job_id = step_data.get("job_id")
+            step.agent_events = step_data.get("agent_events", [])
+            step.sub_execution_id = step_data.get("sub_execution_id")
+            exec_.steps[name] = step
+        return exec_
+
     def cancel(self):
         self._cancelled = True
         for step in self.steps.values():
@@ -504,8 +539,107 @@ def _get_execution_agent_stats(execution: 'StateMachineExecution') -> dict:
     }
 
 
-# In-memory execution store (keyed by execution_id)
-_executions: Dict[str, StateMachineExecution] = {}
+_EXEC_DB_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "vars",
+)
+_EXEC_DB_PATH = os.path.join(_EXEC_DB_DIR, "executions.db")
+_EXEC_SCHEMA = """
+CREATE TABLE IF NOT EXISTS executions (
+    execution_id TEXT PRIMARY KEY,
+    data         TEXT NOT NULL,
+    created      TEXT NOT NULL,
+    updated      TEXT NOT NULL
+);
+"""
+_MAX_HISTORY = 200
+
+
+class ExecutionStore:
+    """Persists completed workflow executions to SQLite for post-mortem analysis."""
+
+    def __init__(self, db_path: str = _EXEC_DB_PATH):
+        self._db_path = db_path
+        self._lock = threading.Lock()
+        self._live: Dict[str, StateMachineExecution] = {}
+        self._history: Dict[str, dict] = {}
+        self._init_db()
+        self._load_history()
+
+    def _init_db(self):
+        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(_EXEC_SCHEMA)
+            conn.commit()
+
+    def _load_history(self):
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                rows = conn.execute(
+                    "SELECT execution_id, data FROM executions ORDER BY created DESC LIMIT ?",
+                    (_MAX_HISTORY,),
+                ).fetchall()
+            for eid, data_json in rows:
+                self._history[eid] = json.loads(data_json)
+            logger.info(f"Loaded {len(self._history)} execution(s) from history")
+        except Exception as e:
+            logger.warning(f"Failed to load execution history: {e}")
+
+    def register(self, execution: StateMachineExecution):
+        self._live[execution.execution_id] = execution
+
+    def get(self, execution_id: str) -> Optional[StateMachineExecution]:
+        return self._live.get(execution_id)
+
+    def get_dict(self, execution_id: str) -> Optional[dict]:
+        live = self._live.get(execution_id)
+        if live:
+            return live.to_dict()
+        return self._history.get(execution_id)
+
+    def persist(self, execution: StateMachineExecution):
+        data = execution.to_dict()
+        self._history[execution.execution_id] = data
+        now = datetime.now().isoformat()
+        try:
+            data_json = json.dumps(data)
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO executions (execution_id, data, created, updated) "
+                    "VALUES (?, ?, COALESCE((SELECT created FROM executions WHERE execution_id = ?), ?), ?)",
+                    (execution.execution_id, data_json, execution.execution_id, now, now),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Failed to persist execution {execution.execution_id}: {e}")
+        self._evict_old()
+
+    def _evict_old(self):
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute(
+                    "DELETE FROM executions WHERE execution_id NOT IN "
+                    "(SELECT execution_id FROM executions ORDER BY created DESC LIMIT ?)",
+                    (_MAX_HISTORY,),
+                )
+                conn.commit()
+            while len(self._history) > _MAX_HISTORY:
+                oldest = min(self._history, key=lambda k: self._history[k].get("created_at", ""))
+                del self._history[oldest]
+        except Exception:
+            pass
+
+    def list_all(self, limit: int = 20) -> List[dict]:
+        combined: Dict[str, dict] = {}
+        for eid, data in self._history.items():
+            combined[eid] = data
+        for eid, execution in self._live.items():
+            combined[eid] = execution.to_dict()
+        sorted_execs = sorted(combined.values(), key=lambda e: e.get("created_at", ""), reverse=True)
+        return sorted_execs[:limit]
+
+
+_execution_store = ExecutionStore()
 _executions_lock = asyncio.Lock()
 
 TASK_RESOURCE_MAP = {
@@ -567,7 +701,7 @@ async def start_execution(
     execution = StateMachineExecution(execution_id, state_machine_name, input_params, mode)
 
     async with _executions_lock:
-        _executions[execution_id] = execution
+        _execution_store.register(execution)
 
     if mode == ExecutionMode.LOCAL:
         asyncio.create_task(_run_local_execution(execution))
@@ -578,20 +712,52 @@ async def start_execution(
 
 
 async def get_execution(execution_id: str) -> Optional[StateMachineExecution]:
-    return _executions.get(execution_id)
+    return _execution_store.get(execution_id)
+
+
+async def get_execution_dict(execution_id: str) -> Optional[dict]:
+    return _execution_store.get_dict(execution_id)
 
 
 async def list_executions(limit: int = 20) -> List[dict]:
-    execs = sorted(_executions.values(), key=lambda e: e.created_at, reverse=True)
-    return [e.to_dict() for e in execs[:limit]]
+    return _execution_store.list_all(limit)
 
 
 async def cancel_execution(execution_id: str) -> bool:
-    execution = _executions.get(execution_id)
+    execution = _execution_store.get(execution_id)
     if not execution:
         return False
     execution.cancel()
+    _execution_store.persist(execution)
     return True
+
+
+async def resume_execution(execution_id: str) -> Optional[StateMachineExecution]:
+    """Resume a failed/crashed execution from its last checkpoint."""
+    data = _execution_store.get_dict(execution_id)
+    if not data:
+        return None
+
+    if data.get("status") not in ("failed", "cancelled"):
+        return None
+
+    execution = StateMachineExecution.from_dict(data)
+
+    for step in execution.steps.values():
+        if step.status in (StepStatus.FAILED, StepStatus.CANCELLED, StepStatus.RUNNING):
+            step.status = StepStatus.PENDING
+            step.error = None
+            step.completed_at = None
+
+    execution.status = StepStatus.RUNNING
+    execution.error = None
+    execution.completed_at = None
+
+    async with _executions_lock:
+        _execution_store.register(execution)
+
+    asyncio.create_task(_run_local_execution(execution))
+    return execution
 
 
 async def _run_local_execution(execution: StateMachineExecution):
@@ -623,6 +789,14 @@ async def _run_local_execution(execution: StateMachineExecution):
             if not state_def:
                 raise RuntimeError(f"State '{current_state}' not found in definition")
 
+            step = execution.steps.get(current_state)
+            if step and step.status == StepStatus.SUCCEEDED:
+                logger.info(f"Skipping completed step '{current_state}'")
+                if state_def.get("End"):
+                    break
+                current_state = state_def.get("Next")
+                continue
+
             state_type = state_def.get("Type")
 
             if state_type == "Task":
@@ -649,6 +823,8 @@ async def _run_local_execution(execution: StateMachineExecution):
                     execution.completed_at = datetime.utcnow().isoformat()
                     return
 
+            _execution_store.persist(execution)
+
             if state_def.get("End"):
                 break
             current_state = state_def.get("Next")
@@ -667,6 +843,7 @@ async def _run_local_execution(execution: StateMachineExecution):
         logger.error(f"Execution {execution.execution_id} failed: {e}")
     finally:
         _finalize_agents(execution)
+        _execution_store.persist(execution)
 
 
 def _finalize_agents(execution: StateMachineExecution):

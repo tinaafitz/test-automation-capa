@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import sqlite3
 import subprocess
 import sys
 import pytest
@@ -14,6 +15,8 @@ from workflow_orchestrator import (
     StepExecution,
     StepStatus,
     ExecutionMode,
+    ExecutionStore,
+    _execution_store,
     STATE_MACHINES,
     TASK_RESOURCE_MAP,
     list_state_machines,
@@ -21,6 +24,7 @@ from workflow_orchestrator import (
     get_execution_plan,
     start_execution,
     get_execution,
+    get_execution_dict,
     list_executions,
     cancel_execution,
     _run_ansible_task_sync,
@@ -204,6 +208,149 @@ class TestExecutionMode:
         with patch.dict(os.environ, {"ORCHESTRATOR_MODE": "aws"}):
             from workflow_orchestrator import get_execution_mode
             assert get_execution_mode() == ExecutionMode.AWS
+
+
+class TestExecutionStore:
+    def test_persist_and_load(self, tmp_path):
+        db_path = str(tmp_path / "test_executions.db")
+        store = ExecutionStore(db_path=db_path)
+        exec_ = StateMachineExecution("test-persist-1", "rosa-hcp-provision", {"cluster_name": "test"})
+        exec_.status = StepStatus.SUCCEEDED
+        exec_.completed_at = "2026-04-28T12:00:00"
+        store.register(exec_)
+        store.persist(exec_)
+
+        store2 = ExecutionStore(db_path=db_path)
+        data = store2.get_dict("test-persist-1")
+        assert data is not None
+        assert data["execution_id"] == "test-persist-1"
+        assert data["status"] == "succeeded"
+
+    def test_list_all_combines_live_and_history(self, tmp_path):
+        db_path = str(tmp_path / "test_executions.db")
+        store = ExecutionStore(db_path=db_path)
+        exec1 = StateMachineExecution("test-live", "rosa-hcp-provision", {})
+        store.register(exec1)
+        exec2 = StateMachineExecution("test-done", "rosa-hcp-delete", {})
+        exec2.status = StepStatus.SUCCEEDED
+        store.persist(exec2)
+        results = store.list_all(limit=10)
+        ids = [r["execution_id"] for r in results]
+        assert "test-live" in ids
+        assert "test-done" in ids
+
+    def test_history_survives_restart(self, tmp_path):
+        db_path = str(tmp_path / "test_executions.db")
+        store = ExecutionStore(db_path=db_path)
+        exec_ = StateMachineExecution("test-restart", "mce-configure", {"key": "val"})
+        exec_.status = StepStatus.FAILED
+        exec_.error = "something broke"
+        store.persist(exec_)
+        del store
+
+        store2 = ExecutionStore(db_path=db_path)
+        data = store2.get_dict("test-restart")
+        assert data is not None
+        assert data["status"] == "failed"
+        assert data["error"] == "something broke"
+
+    def test_get_returns_none_for_unknown(self, tmp_path):
+        db_path = str(tmp_path / "test_executions.db")
+        store = ExecutionStore(db_path=db_path)
+        assert store.get("nonexistent") is None
+        assert store.get_dict("nonexistent") is None
+
+    def test_eviction_caps_at_max(self, tmp_path):
+        db_path = str(tmp_path / "test_executions.db")
+        store = ExecutionStore(db_path=db_path)
+        for i in range(210):
+            exec_ = StateMachineExecution(f"test-evict-{i}", "rosa-hcp-provision", {})
+            exec_.status = StepStatus.SUCCEEDED
+            exec_.created_at = f"2026-01-01T{i:05d}"
+            store.persist(exec_)
+        with sqlite3.connect(db_path) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM executions").fetchone()[0]
+        assert count <= 200
+
+
+class TestFromDict:
+    def test_roundtrip(self):
+        exec_ = StateMachineExecution("test-rt", "rosa-hcp-provision", {"cluster_name": "test"})
+        exec_.status = StepStatus.FAILED
+        exec_.error = "step failed"
+        exec_.started_at = "2026-04-28T10:00:00"
+        exec_.completed_at = "2026-04-28T10:30:00"
+        for step in exec_.steps.values():
+            step.status = StepStatus.SUCCEEDED
+            step.started_at = "2026-04-28T10:00:00"
+            step.completed_at = "2026-04-28T10:01:00"
+        data = exec_.to_dict()
+        rebuilt = StateMachineExecution.from_dict(data)
+        assert rebuilt.execution_id == "test-rt"
+        assert rebuilt.state_machine_name == "rosa-hcp-provision"
+        assert rebuilt.status == StepStatus.FAILED
+        assert rebuilt.input_params == {"cluster_name": "test"}
+        assert len(rebuilt.steps) == len(exec_.steps)
+        for step in rebuilt.steps.values():
+            assert step.status == StepStatus.SUCCEEDED
+
+    def test_from_dict_preserves_step_status(self):
+        exec_ = StateMachineExecution("test-ps", "mce-configure", {})
+        steps_list = list(exec_.steps.values())
+        steps_list[0].status = StepStatus.SUCCEEDED
+        steps_list[1].status = StepStatus.SUCCEEDED
+        steps_list[2].status = StepStatus.FAILED
+        steps_list[2].error = "boom"
+        data = exec_.to_dict()
+        rebuilt = StateMachineExecution.from_dict(data)
+        rebuilt_steps = list(rebuilt.steps.values())
+        assert rebuilt_steps[0].status == StepStatus.SUCCEEDED
+        assert rebuilt_steps[1].status == StepStatus.SUCCEEDED
+        assert rebuilt_steps[2].status == StepStatus.FAILED
+        assert rebuilt_steps[2].error == "boom"
+
+
+class TestResumeExecution:
+    @pytest.mark.asyncio
+    async def test_resume_resets_failed_steps(self):
+        exec_ = StateMachineExecution("test-resume", "mce-configure", {})
+        steps = list(exec_.steps.values())
+        steps[0].status = StepStatus.SUCCEEDED
+        steps[0].started_at = "2026-04-28T10:00:00"
+        steps[0].completed_at = "2026-04-28T10:01:00"
+        steps[1].status = StepStatus.FAILED
+        steps[1].error = "some error"
+        exec_.status = StepStatus.FAILED
+        exec_.error = "step failed"
+        _execution_store.register(exec_)
+        _execution_store.persist(exec_)
+
+        from workflow_orchestrator import resume_execution
+        with patch("workflow_orchestrator._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
+            resumed = await resume_execution("test-resume")
+        assert resumed is not None
+        assert resumed.status == StepStatus.RUNNING
+        assert resumed.error is None
+        resumed_steps = list(resumed.steps.values())
+        assert resumed_steps[0].status == StepStatus.SUCCEEDED
+        assert resumed_steps[1].status == StepStatus.PENDING
+        assert resumed_steps[1].error is None
+
+    @pytest.mark.asyncio
+    async def test_resume_nonexistent_returns_none(self):
+        from workflow_orchestrator import resume_execution
+        result = await resume_execution("nonexistent-id")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resume_running_returns_none(self):
+        exec_ = StateMachineExecution("test-running", "rosa-hcp-provision", {})
+        exec_.status = StepStatus.RUNNING
+        _execution_store.register(exec_)
+        _execution_store.persist(exec_)
+        from workflow_orchestrator import resume_execution
+        result = await resume_execution("test-running")
+        assert result is None
 
 
 class TestRunAnsibleTaskSync:
