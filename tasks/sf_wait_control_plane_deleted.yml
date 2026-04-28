@@ -1,5 +1,5 @@
 ---
-# Step Functions: Wait for ROSAControlPlane to be fully deleted
+# Workflow Orchestrator: Wait for ROSAControlPlane to be fully deleted
 
 - name: Set deletion wait variables
   set_fact:

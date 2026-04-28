@@ -1,5 +1,5 @@
 ---
-# Step Functions: Delete ROSANetwork and wait for completion + CF verification
+# Workflow Orchestrator: Delete ROSANetwork and wait for completion + CF verification
 
 - name: Set deletion variables
   set_fact:

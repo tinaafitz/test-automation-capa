@@ -1,5 +1,5 @@
 ---
-# Step Functions: Delete ROSARoleConfig and wait for completion
+# Workflow Orchestrator: Delete ROSARoleConfig and wait for completion
 
 - name: Set deletion variables
   set_fact:

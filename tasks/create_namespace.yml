@@ -1,0 +1,21 @@
+- name: Create output folder
+  file:
+    path: "{{ output_dir }}"
+    state: "{{ item }}"
+    mode: '0755'
+  with_items:
+    - absent
+    - directory
+
+- name: print output folder
+  debug:
+    msg: "output_dir: {{ output_dir }} "
+
+- name: Create CAPI namespace {{ capi_namespace | default('ns-rosa-hcp') }}
+  shell: |
+    oc create namespace {{ capi_namespace | default('ns-rosa-hcp') }} --dry-run=client -o yaml | oc apply -f -
+  register: ns_result
+
+- name: Print namespace result
+  debug:
+    msg: "Namespace {{ capi_namespace | default('ns-rosa-hcp') }}: {{ ns_result.stdout }}"

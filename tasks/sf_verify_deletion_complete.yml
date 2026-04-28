@@ -1,5 +1,5 @@
 ---
-# Step Functions: Verify all cluster resources are fully deleted
+# Workflow Orchestrator: Verify all cluster resources are fully deleted
 
 - name: Check for remaining resources
   shell: |

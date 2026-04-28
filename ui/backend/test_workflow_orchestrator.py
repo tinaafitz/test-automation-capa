@@ -1,4 +1,4 @@
-"""Tests for Step Functions integration module."""
+"""Tests for Workflow Orchestrator module."""
 
 import asyncio
 import os
@@ -9,7 +9,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from step_functions_integration import (
+from workflow_orchestrator import (
     StateMachineExecution,
     StepExecution,
     StepStatus,
@@ -197,12 +197,12 @@ class TestGetExecutionPlan:
 class TestExecutionMode:
     def test_default_is_local(self):
         with patch.dict(os.environ, {}, clear=True):
-            from step_functions_integration import get_execution_mode
+            from workflow_orchestrator import get_execution_mode
             assert get_execution_mode() == ExecutionMode.LOCAL
 
     def test_aws_mode(self):
-        with patch.dict(os.environ, {"STEP_FUNCTIONS_MODE": "aws"}):
-            from step_functions_integration import get_execution_mode
+        with patch.dict(os.environ, {"ORCHESTRATOR_MODE": "aws"}):
+            from workflow_orchestrator import get_execution_mode
             assert get_execution_mode() == ExecutionMode.AWS
 
 
@@ -242,7 +242,7 @@ class TestRunAnsibleTaskSync:
 @pytest.mark.asyncio
 class TestAsyncExecution:
     async def test_start_and_get_execution(self):
-        with patch("step_functions_integration._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
+        with patch("workflow_orchestrator._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
             exec_ = await start_execution("rosa-hcp-provision", {"cluster_name": "test"}, ExecutionMode.LOCAL)
             assert exec_.execution_id.startswith("sf-")
             assert exec_.state_machine_name == "rosa-hcp-provision"
@@ -264,38 +264,38 @@ class TestAsyncExecution:
             await start_execution("nonexistent", {})
 
 
-class TestStepFunctionsRoutes:
+class TestOrchestratorRoutes:
     """Test the FastAPI routes (requires test client)."""
 
     @pytest.fixture
     def client(self):
         from fastapi.testclient import TestClient
-        from step_functions_routes import router
+        from workflow_orchestrator_routes import router
         from fastapi import FastAPI
         app = FastAPI()
         app.include_router(router)
         return TestClient(app)
 
     def test_list_state_machines(self, client):
-        resp = client.get("/api/stepfunctions/state-machines")
+        resp = client.get("/api/orchestrator/state-machines")
         assert resp.status_code == 200
         data = resp.json()
         assert "state_machines" in data
         assert len(data["state_machines"]) >= 2
 
     def test_get_state_machine(self, client):
-        resp = client.get("/api/stepfunctions/state-machines/rosa-hcp-provision")
+        resp = client.get("/api/orchestrator/state-machines/rosa-hcp-provision")
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "rosa-hcp-provision"
         assert "definition" in data
 
     def test_get_missing_state_machine(self, client):
-        resp = client.get("/api/stepfunctions/state-machines/nonexistent")
+        resp = client.get("/api/orchestrator/state-machines/nonexistent")
         assert resp.status_code == 404
 
     def test_plan(self, client):
-        resp = client.post("/api/stepfunctions/plan", json={
+        resp = client.post("/api/orchestrator/plan", json={
             "state_machine": "rosa-hcp-provision",
             "input_params": {"cluster_name": "test"},
         })
@@ -305,15 +305,15 @@ class TestStepFunctionsRoutes:
         assert len(data["steps"]) > 0
 
     def test_plan_unknown_machine(self, client):
-        resp = client.post("/api/stepfunctions/plan", json={
+        resp = client.post("/api/orchestrator/plan", json={
             "state_machine": "nonexistent",
             "input_params": {},
         })
         assert resp.status_code == 400
 
     def test_execute(self, client):
-        with patch("step_functions_integration._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
-            resp = client.post("/api/stepfunctions/execute", json={
+        with patch("workflow_orchestrator._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
+            resp = client.post("/api/orchestrator/execute", json={
                 "state_machine": "rosa-hcp-provision",
                 "input_params": {"cluster_name": "test"},
             })
@@ -322,22 +322,22 @@ class TestStepFunctionsRoutes:
             assert "execution_id" in data
 
     def test_execute_unknown_machine(self, client):
-        resp = client.post("/api/stepfunctions/execute", json={
+        resp = client.post("/api/orchestrator/execute", json={
             "state_machine": "nonexistent",
             "input_params": {},
         })
         assert resp.status_code == 400
 
     def test_list_executions(self, client):
-        resp = client.get("/api/stepfunctions/executions")
+        resp = client.get("/api/orchestrator/executions")
         assert resp.status_code == 200
         data = resp.json()
         assert "executions" in data
 
     def test_get_missing_execution(self, client):
-        resp = client.get("/api/stepfunctions/executions/nonexistent")
+        resp = client.get("/api/orchestrator/executions/nonexistent")
         assert resp.status_code == 404
 
     def test_cancel_missing_execution(self, client):
-        resp = client.post("/api/stepfunctions/executions/nonexistent/cancel")
+        resp = client.post("/api/orchestrator/executions/nonexistent/cancel")
         assert resp.status_code == 404

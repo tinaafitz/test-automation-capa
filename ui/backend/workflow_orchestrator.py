@@ -1,13 +1,11 @@
 """
-AWS Step Functions Integration for ROSA HCP Cluster Orchestration
+Workflow Orchestrator for ROSA HCP Cluster Orchestration
 
 Replaces sequential Ansible provisioning with parallel state machine execution.
 Network, IAM roles, and OIDC setup run concurrently, then converge for
 ROSAControlPlane creation — cutting provisioning from ~45 min to ~15-20 min.
 
-Supports two modes:
-  - AWS mode: real Step Functions execution via boto3
-  - Local mode: simulates parallel execution using asyncio (for dev/testing)
+Uses asyncio for parallel task execution, designed for local and Jenkins CI use.
 """
 
 import asyncio
@@ -491,7 +489,7 @@ class StateMachineExecution:
 
 
 def _get_execution_agent_stats(execution: 'StateMachineExecution') -> dict:
-    """Get AI agent statistics for a Step Functions execution."""
+    """Get AI agent statistics for a workflow execution."""
     session = execution.agent_session
     if not session:
         return {"enabled": False}
@@ -525,7 +523,7 @@ TASK_RESOURCE_MAP = {
     "login_ocp": "tasks/login_ocp.yml",
     "enable_capi_capa": "tasks/enable_capi_capa.yml",
     "wait_for_capi_capa_ready": "tasks/wait-for-capi-capa-ready.yml",
-    "create_namespace": "tasks/create_output_folder.yml",
+    "create_namespace": "tasks/create_namespace.yml",
     "create_aws_credentials": "tasks/create_capa_manager_bootstrap_credentials.yml",
     "create_rosa_creds_secret": "tasks/create_rosa_creds_secret.yml",
     "set_registration_config": "tasks/set_registration_configuration.yml",
@@ -537,7 +535,7 @@ TASK_RESOURCE_MAP = {
 
 
 def get_execution_mode() -> ExecutionMode:
-    mode = os.environ.get("STEP_FUNCTIONS_MODE", "local").lower()
+    mode = os.environ.get("ORCHESTRATOR_MODE", "local").lower()
     if mode == "aws":
         return ExecutionMode.AWS
     return ExecutionMode.LOCAL
@@ -597,7 +595,7 @@ async def cancel_execution(execution_id: str) -> bool:
 
 
 async def _run_local_execution(execution: StateMachineExecution):
-    """Simulate Step Functions execution locally using asyncio for parallelism."""
+    """Execute workflow locally using asyncio for parallelism."""
     execution.status = StepStatus.RUNNING
     execution.started_at = datetime.utcnow().isoformat()
 
@@ -939,7 +937,7 @@ def _run_ansible_task_sync(
     cluster_name_prefix: "{name_prefix}"
     machine_pool: {{}}
     environment_tag: "test"
-    purpose_tag: "step-functions-testing"
+    purpose_tag: "orchestrator-testing"
     log_forward_enabled: false
     rosa_creds_secret: "rosa-creds-secret"
     cluster_network:
@@ -1106,15 +1104,15 @@ def _run_ansible_task_sync(
 
 
 async def _run_aws_execution(execution: StateMachineExecution):
-    """Run via real AWS Step Functions. Requires boto3 and deployed state machine."""
+    """Run via real AWS Step Functions (optional). Requires boto3 and deployed state machine."""
     try:
         import boto3
 
         sfn = boto3.client("stepfunctions", region_name=execution.input_params.get("aws_region", "us-west-2"))
 
-        state_machine_arn = os.environ.get("STEP_FUNCTIONS_ARN", "")
+        state_machine_arn = os.environ.get("ORCHESTRATOR_ARN", "")
         if not state_machine_arn:
-            raise RuntimeError("STEP_FUNCTIONS_ARN environment variable not set")
+            raise RuntimeError("ORCHESTRATOR_ARN environment variable not set")
 
         execution.status = StepStatus.RUNNING
         execution.started_at = datetime.utcnow().isoformat()
@@ -1169,7 +1167,7 @@ async def _run_aws_execution(execution: StateMachineExecution):
 
 
 def _sync_aws_history_to_steps(execution: StateMachineExecution, events: list):
-    """Map AWS Step Functions history events to our step tracking."""
+    """Map AWS execution history events to our step tracking."""
     for event in events:
         event_type = event.get("type", "")
         details = event.get("stateEnteredEventDetails") or event.get("stateExitedEventDetails") or {}

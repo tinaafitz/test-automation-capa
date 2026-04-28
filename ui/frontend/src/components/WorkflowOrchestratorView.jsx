@@ -38,12 +38,19 @@ function formatElapsed(seconds) {
   return `${m}m ${s}s`;
 }
 
-function StepCard({ step, isParallel }) {
+function StepCard({ step, isParallel, clusterName }) {
   const style = STATUS_STYLES[step.status] || STATUS_STYLES.pending;
+  const isNested = step.sub_execution_id || (step.resource && step.resource.includes('-'));
+  const showCluster = clusterName && (step.resource || '').match(/provision|delete|upgrade/i);
   return (
     <div className={`border-l-4 ${style.border} rounded-lg p-3 ${style.bg} transition-all duration-300`}>
       <div className="flex items-center justify-between mb-1">
-        <span className="font-medium text-sm text-gray-800">{step.name}</span>
+        <div>
+          <span className="font-medium text-sm text-gray-800">{step.name}</span>
+          {showCluster && (
+            <span className="ml-2 text-xs text-gray-400 font-mono">{clusterName}</span>
+          )}
+        </div>
         <StatusBadge status={step.status} />
       </div>
       <div className="text-xs text-gray-500 space-y-0.5">
@@ -70,10 +77,12 @@ function StepCard({ step, isParallel }) {
 function ExecutionGraph({ execution }) {
   if (!execution) return null;
 
-  const { steps, parallel_groups } = execution;
+  const { steps, parallel_groups, input } = execution;
   const stepEntries = Object.entries(steps || {});
   const parallelStepNames = new Set((parallel_groups || []).flat());
   const rendered = new Set();
+  const prefix = (input || {}).name_prefix || '';
+  const clusterName = prefix ? `${prefix}-rosa-hcp` : (input || {}).cluster_name || '';
 
   const elements = [];
   for (const [name, step] of stepEntries) {
@@ -89,14 +98,14 @@ function ExecutionGraph({ execution }) {
           </div>
           <div className={`grid grid-cols-1 ${groupSteps.length >= 3 ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-2`}>
             {groupSteps.map(([n, s]) => (
-              <StepCard key={n} step={s} isParallel={true} />
+              <StepCard key={n} step={s} isParallel={true} clusterName={clusterName} />
             ))}
           </div>
         </div>
       );
     } else {
       rendered.add(name);
-      elements.push(<StepCard key={name} step={step} isParallel={false} />);
+      elements.push(<StepCard key={name} step={step} isParallel={false} clusterName={clusterName} />);
     }
   }
 
@@ -120,7 +129,7 @@ function ExecutionHistoryRow({ exec, onSelect, isSelected }) {
   );
 }
 
-export default function StepFunctionsView() {
+export default function WorkflowOrchestratorView() {
   const [stateMachines, setStateMachines] = useState([]);
   const [executions, setExecutions] = useState([]);
   const [selectedExecution, setSelectedExecution] = useState(null);
@@ -185,7 +194,7 @@ export default function StepFunctionsView() {
 
   const fetchStateMachines = useCallback(async () => {
     try {
-      const res = await fetch(buildApiUrl('/api/stepfunctions/state-machines'));
+      const res = await fetch(buildApiUrl('/api/orchestrator/state-machines'));
       const data = await res.json();
       setStateMachines(data.state_machines || []);
     } catch (e) {
@@ -195,7 +204,7 @@ export default function StepFunctionsView() {
 
   const fetchExecutions = useCallback(async () => {
     try {
-      const res = await fetch(buildApiUrl('/api/stepfunctions/executions'));
+      const res = await fetch(buildApiUrl('/api/orchestrator/executions'));
       const data = await res.json();
       setExecutions(data.executions || []);
     } catch (e) {
@@ -205,7 +214,7 @@ export default function StepFunctionsView() {
 
   const fetchExecutionDetail = useCallback(async (id) => {
     try {
-      const res = await fetch(buildApiUrl(`/api/stepfunctions/executions/${id}`));
+      const res = await fetch(buildApiUrl(`/api/orchestrator/executions/${id}`));
       const data = await res.json();
       setSelectedExecution(data);
       if (data.status === 'running') {
@@ -276,7 +285,7 @@ export default function StepFunctionsView() {
   const handlePreview = async () => {
     setError('');
     try {
-      const res = await fetch(buildApiUrl('/api/stepfunctions/plan'), {
+      const res = await fetch(buildApiUrl('/api/orchestrator/plan'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -301,7 +310,7 @@ export default function StepFunctionsView() {
     setError('');
     setLaunching(true);
     try {
-      const res = await fetch(buildApiUrl('/api/stepfunctions/execute'), {
+      const res = await fetch(buildApiUrl('/api/orchestrator/execute'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -324,7 +333,7 @@ export default function StepFunctionsView() {
 
   const handleCancel = async (id) => {
     try {
-      await fetch(buildApiUrl(`/api/stepfunctions/executions/${id}/cancel`), { method: 'POST' });
+      await fetch(buildApiUrl(`/api/orchestrator/executions/${id}/cancel`), { method: 'POST' });
       fetchExecutionDetail(id);
       fetchExecutions();
     } catch (e) {
@@ -336,7 +345,7 @@ export default function StepFunctionsView() {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div>
-        <h2 className="text-xl font-bold text-gray-900">Step Functions Orchestration</h2>
+        <h2 className="text-xl font-bold text-gray-900">Workflow Orchestrator</h2>
         <p className="text-sm text-gray-500 mt-1">
           Parallel execution of provisioning steps — network, IAM roles, and OIDC run concurrently.
         </p>

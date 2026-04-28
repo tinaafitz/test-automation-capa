@@ -177,9 +177,9 @@ from ansible_routes import (
 )
 app.include_router(ansible_router)
 
-# Step Functions orchestration routes
-from step_functions_routes import router as step_functions_router
-app.include_router(step_functions_router)
+# Workflow orchestration routes
+from workflow_orchestrator_routes import router as orchestrator_router
+app.include_router(orchestrator_router)
 
 # ROSA cluster lifecycle routes
 from rosa_cluster_routes import (

@@ -1,5 +1,5 @@
 ---
-# Step Functions: Delete ROSAControlPlane, Cluster, and MachinePool resources
+# Workflow Orchestrator: Delete ROSAControlPlane, Cluster, and MachinePool resources
 # Initiates deletion with --wait=false, does not wait for completion
 
 - name: Check if ROSAControlPlane exists
