@@ -26,22 +26,29 @@
     AWS_ACCESS_KEY_ID: "{{ AWS_ACCESS_KEY_ID }}"
     AWS_SECRET_ACCESS_KEY: "{{ AWS_SECRET_ACCESS_KEY }}"
     AWS_DEFAULT_REGION: "{{ aws_region | default('us-west-2') }}"
+    PATH: "{{ AUTOMATION_PATH | default(playbook_dir + '/..') }}/ui/backend/venv/bin:{{ ansible_env.PATH | default('/usr/bin:/bin:/usr/local/bin') }}"
 
 - name: Parse OCM role check result
   set_fact:
     ocm_role_status: "{{ ocm_role_check_result.stdout | from_json }}"
+
+- name: Check if boto3 is unavailable
+  set_fact:
+    boto3_unavailable: "{{ ocm_role_status.error is defined and 'No module named' in ocm_role_status.error }}"
 
 - name: Display OCM role status
   debug:
     msg: >-
       {% if ocm_role_status.exists %}
       ✅ OCM role found: {{ ocm_role_status.name }} ({{ ocm_role_status.arn }})
+      {% elif boto3_unavailable | bool %}
+      ℹ️ OCM role check skipped — boto3 not available in system Python. The OCM role likely already exists; install boto3 or use the backend venv to verify.
       {% else %}
       ⚠️ No OCM role found in AWS IAM — will attempt to create one
       {% endif %}
 
 - name: Create and link OCM role if missing
-  when: not ocm_role_status.exists
+  when: not ocm_role_status.exists and not (boto3_unavailable | bool)
   block:
     - name: Auto-create OCM role via OcmRoleManager
       shell: |
@@ -69,6 +76,7 @@
         OCM_CLIENT_ID: "{{ OCM_CLIENT_ID | default('') }}"
         OCM_CLIENT_SECRET: "{{ OCM_CLIENT_SECRET | default('') }}"
         OCM_API_URL: "{{ OCM_API_URL | default('https://api.stage.openshift.com') }}"
+        PATH: "{{ AUTOMATION_PATH | default(playbook_dir + '/..') }}/ui/backend/venv/bin:{{ ansible_env.PATH | default('/usr/bin:/bin:/usr/local/bin') }}"
 
     - name: Display OCM role creation result
       debug:

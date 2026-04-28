@@ -1,18 +1,22 @@
-"""Tests for Step Functions integration module."""
+"""Tests for Workflow Orchestrator module."""
 
 import asyncio
 import os
+import sqlite3
+import subprocess
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from step_functions_integration import (
+from workflow_orchestrator import (
     StateMachineExecution,
     StepExecution,
     StepStatus,
     ExecutionMode,
+    ExecutionStore,
+    _execution_store,
     STATE_MACHINES,
     TASK_RESOURCE_MAP,
     list_state_machines,
@@ -20,6 +24,7 @@ from step_functions_integration import (
     get_execution_plan,
     start_execution,
     get_execution,
+    get_execution_dict,
     list_executions,
     cancel_execution,
     _run_ansible_task_sync,
@@ -67,7 +72,7 @@ class TestStateMachineExecution:
 
     def test_delete_execution_builds_steps(self):
         exec_ = StateMachineExecution("test-2", "rosa-hcp-delete", {})
-        assert "DeleteControlPlane" in exec_.steps
+        assert "InitiateDeletion" in exec_.steps
         assert "WaitForControlPlaneDeleted" in exec_.steps
         assert "DeleteROSANetwork" in exec_.steps
         assert "DeleteRosaRoleConfig" in exec_.steps
@@ -196,13 +201,156 @@ class TestGetExecutionPlan:
 class TestExecutionMode:
     def test_default_is_local(self):
         with patch.dict(os.environ, {}, clear=True):
-            from step_functions_integration import get_execution_mode
+            from workflow_orchestrator import get_execution_mode
             assert get_execution_mode() == ExecutionMode.LOCAL
 
     def test_aws_mode(self):
-        with patch.dict(os.environ, {"STEP_FUNCTIONS_MODE": "aws"}):
-            from step_functions_integration import get_execution_mode
+        with patch.dict(os.environ, {"ORCHESTRATOR_MODE": "aws"}):
+            from workflow_orchestrator import get_execution_mode
             assert get_execution_mode() == ExecutionMode.AWS
+
+
+class TestExecutionStore:
+    def test_persist_and_load(self, tmp_path):
+        db_path = str(tmp_path / "test_executions.db")
+        store = ExecutionStore(db_path=db_path)
+        exec_ = StateMachineExecution("test-persist-1", "rosa-hcp-provision", {"cluster_name": "test"})
+        exec_.status = StepStatus.SUCCEEDED
+        exec_.completed_at = "2026-04-28T12:00:00"
+        store.register(exec_)
+        store.persist(exec_)
+
+        store2 = ExecutionStore(db_path=db_path)
+        data = store2.get_dict("test-persist-1")
+        assert data is not None
+        assert data["execution_id"] == "test-persist-1"
+        assert data["status"] == "succeeded"
+
+    def test_list_all_combines_live_and_history(self, tmp_path):
+        db_path = str(tmp_path / "test_executions.db")
+        store = ExecutionStore(db_path=db_path)
+        exec1 = StateMachineExecution("test-live", "rosa-hcp-provision", {})
+        store.register(exec1)
+        exec2 = StateMachineExecution("test-done", "rosa-hcp-delete", {})
+        exec2.status = StepStatus.SUCCEEDED
+        store.persist(exec2)
+        results = store.list_all(limit=10)
+        ids = [r["execution_id"] for r in results]
+        assert "test-live" in ids
+        assert "test-done" in ids
+
+    def test_history_survives_restart(self, tmp_path):
+        db_path = str(tmp_path / "test_executions.db")
+        store = ExecutionStore(db_path=db_path)
+        exec_ = StateMachineExecution("test-restart", "mce-configure", {"key": "val"})
+        exec_.status = StepStatus.FAILED
+        exec_.error = "something broke"
+        store.persist(exec_)
+        del store
+
+        store2 = ExecutionStore(db_path=db_path)
+        data = store2.get_dict("test-restart")
+        assert data is not None
+        assert data["status"] == "failed"
+        assert data["error"] == "something broke"
+
+    def test_get_returns_none_for_unknown(self, tmp_path):
+        db_path = str(tmp_path / "test_executions.db")
+        store = ExecutionStore(db_path=db_path)
+        assert store.get("nonexistent") is None
+        assert store.get_dict("nonexistent") is None
+
+    def test_eviction_caps_at_max(self, tmp_path):
+        db_path = str(tmp_path / "test_executions.db")
+        store = ExecutionStore(db_path=db_path)
+        for i in range(210):
+            exec_ = StateMachineExecution(f"test-evict-{i}", "rosa-hcp-provision", {})
+            exec_.status = StepStatus.SUCCEEDED
+            exec_.created_at = f"2026-01-01T{i:05d}"
+            store.persist(exec_)
+        with sqlite3.connect(db_path) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM executions").fetchone()[0]
+        assert count <= 200
+
+
+class TestFromDict:
+    def test_roundtrip(self):
+        exec_ = StateMachineExecution("test-rt", "rosa-hcp-provision", {"cluster_name": "test"})
+        exec_.status = StepStatus.FAILED
+        exec_.error = "step failed"
+        exec_.started_at = "2026-04-28T10:00:00"
+        exec_.completed_at = "2026-04-28T10:30:00"
+        for step in exec_.steps.values():
+            step.status = StepStatus.SUCCEEDED
+            step.started_at = "2026-04-28T10:00:00"
+            step.completed_at = "2026-04-28T10:01:00"
+        data = exec_.to_dict()
+        rebuilt = StateMachineExecution.from_dict(data)
+        assert rebuilt.execution_id == "test-rt"
+        assert rebuilt.state_machine_name == "rosa-hcp-provision"
+        assert rebuilt.status == StepStatus.FAILED
+        assert rebuilt.input_params == {"cluster_name": "test"}
+        assert len(rebuilt.steps) == len(exec_.steps)
+        for step in rebuilt.steps.values():
+            assert step.status == StepStatus.SUCCEEDED
+
+    def test_from_dict_preserves_step_status(self):
+        exec_ = StateMachineExecution("test-ps", "mce-configure", {})
+        steps_list = list(exec_.steps.values())
+        steps_list[0].status = StepStatus.SUCCEEDED
+        steps_list[1].status = StepStatus.SUCCEEDED
+        steps_list[2].status = StepStatus.FAILED
+        steps_list[2].error = "boom"
+        data = exec_.to_dict()
+        rebuilt = StateMachineExecution.from_dict(data)
+        rebuilt_steps = list(rebuilt.steps.values())
+        assert rebuilt_steps[0].status == StepStatus.SUCCEEDED
+        assert rebuilt_steps[1].status == StepStatus.SUCCEEDED
+        assert rebuilt_steps[2].status == StepStatus.FAILED
+        assert rebuilt_steps[2].error == "boom"
+
+
+class TestResumeExecution:
+    @pytest.mark.asyncio
+    async def test_resume_resets_failed_steps(self):
+        exec_ = StateMachineExecution("test-resume", "mce-configure", {})
+        steps = list(exec_.steps.values())
+        steps[0].status = StepStatus.SUCCEEDED
+        steps[0].started_at = "2026-04-28T10:00:00"
+        steps[0].completed_at = "2026-04-28T10:01:00"
+        steps[1].status = StepStatus.FAILED
+        steps[1].error = "some error"
+        exec_.status = StepStatus.FAILED
+        exec_.error = "step failed"
+        _execution_store.register(exec_)
+        _execution_store.persist(exec_)
+
+        from workflow_orchestrator import resume_execution
+        with patch("workflow_orchestrator._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
+            resumed = await resume_execution("test-resume")
+        assert resumed is not None
+        assert resumed.status == StepStatus.RUNNING
+        assert resumed.error is None
+        resumed_steps = list(resumed.steps.values())
+        assert resumed_steps[0].status == StepStatus.SUCCEEDED
+        assert resumed_steps[1].status == StepStatus.PENDING
+        assert resumed_steps[1].error is None
+
+    @pytest.mark.asyncio
+    async def test_resume_nonexistent_returns_none(self):
+        from workflow_orchestrator import resume_execution
+        result = await resume_execution("nonexistent-id")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resume_running_returns_none(self):
+        exec_ = StateMachineExecution("test-running", "rosa-hcp-provision", {})
+        exec_.status = StepStatus.RUNNING
+        _execution_store.register(exec_)
+        _execution_store.persist(exec_)
+        from workflow_orchestrator import resume_execution
+        result = await resume_execution("test-running")
+        assert result is None
 
 
 class TestRunAnsibleTaskSync:
@@ -211,33 +359,37 @@ class TestRunAnsibleTaskSync:
         assert not result["success"]
         assert "not found" in result["error"]
 
-    @patch("subprocess.run")
-    def test_successful_run(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+    @patch("subprocess.Popen")
+    @patch("playbook_executor.build_playbook_command")
+    def test_successful_run(self, mock_build, mock_popen):
+        mock_build.return_value = (["ansible-playbook", "test.yml"], os.environ.copy())
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(["ok: [localhost]\n", "PLAY RECAP\n"])
+        mock_proc.wait.return_value = 0
+        mock_popen.return_value = mock_proc
         with patch("os.path.exists", return_value=True):
-            with patch("tempfile.NamedTemporaryFile") as mock_tmp:
-                mock_tmp.return_value.__enter__ = lambda s: MagicMock(name="/tmp/test.yml")
-                mock_tmp.return_value.__exit__ = MagicMock(return_value=False)
-                result = _run_ansible_task_sync("/tmp", "test.yml", {"cluster_name": "t"}, 30)
+            result = _run_ansible_task_sync("/tmp", "playbooks/test.yml", {"cluster_name": "t"}, 30)
         assert result["success"]
 
-    @patch("subprocess.run", side_effect=TimeoutError("timed out"))
-    def test_timeout(self, mock_run):
-        import subprocess
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=30)
+    @patch("subprocess.Popen")
+    @patch("playbook_executor.build_playbook_command")
+    def test_timeout(self, mock_build, mock_popen):
+        mock_build.return_value = (["ansible-playbook", "test.yml"], os.environ.copy())
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="test", timeout=30), 0]
+        mock_proc.kill = MagicMock()
+        mock_popen.return_value = mock_proc
         with patch("os.path.exists", return_value=True):
-            with patch("tempfile.NamedTemporaryFile") as mock_tmp:
-                mock_tmp.return_value.__enter__ = lambda s: MagicMock(name="/tmp/test.yml")
-                mock_tmp.return_value.__exit__ = MagicMock(return_value=False)
-                result = _run_ansible_task_sync("/tmp", "test.yml", {}, 30)
+            result = _run_ansible_task_sync("/tmp", "playbooks/test.yml", {}, 30)
         assert not result["success"]
-        assert "timed out" in result["error"].lower()
+        assert "timed out" in result["error"].lower() or "timeout" in result["error"].lower()
 
 
 @pytest.mark.asyncio
 class TestAsyncExecution:
     async def test_start_and_get_execution(self):
-        with patch("step_functions_integration._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
+        with patch("workflow_orchestrator._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
             exec_ = await start_execution("rosa-hcp-provision", {"cluster_name": "test"}, ExecutionMode.LOCAL)
             assert exec_.execution_id.startswith("sf-")
             assert exec_.state_machine_name == "rosa-hcp-provision"
@@ -259,38 +411,38 @@ class TestAsyncExecution:
             await start_execution("nonexistent", {})
 
 
-class TestStepFunctionsRoutes:
+class TestOrchestratorRoutes:
     """Test the FastAPI routes (requires test client)."""
 
     @pytest.fixture
     def client(self):
         from fastapi.testclient import TestClient
-        from step_functions_routes import router
+        from workflow_orchestrator_routes import router
         from fastapi import FastAPI
         app = FastAPI()
         app.include_router(router)
         return TestClient(app)
 
     def test_list_state_machines(self, client):
-        resp = client.get("/api/stepfunctions/state-machines")
+        resp = client.get("/api/orchestrator/state-machines")
         assert resp.status_code == 200
         data = resp.json()
         assert "state_machines" in data
         assert len(data["state_machines"]) >= 2
 
     def test_get_state_machine(self, client):
-        resp = client.get("/api/stepfunctions/state-machines/rosa-hcp-provision")
+        resp = client.get("/api/orchestrator/state-machines/rosa-hcp-provision")
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "rosa-hcp-provision"
         assert "definition" in data
 
     def test_get_missing_state_machine(self, client):
-        resp = client.get("/api/stepfunctions/state-machines/nonexistent")
+        resp = client.get("/api/orchestrator/state-machines/nonexistent")
         assert resp.status_code == 404
 
     def test_plan(self, client):
-        resp = client.post("/api/stepfunctions/plan", json={
+        resp = client.post("/api/orchestrator/plan", json={
             "state_machine": "rosa-hcp-provision",
             "input_params": {"cluster_name": "test"},
         })
@@ -300,15 +452,15 @@ class TestStepFunctionsRoutes:
         assert len(data["steps"]) > 0
 
     def test_plan_unknown_machine(self, client):
-        resp = client.post("/api/stepfunctions/plan", json={
+        resp = client.post("/api/orchestrator/plan", json={
             "state_machine": "nonexistent",
             "input_params": {},
         })
         assert resp.status_code == 400
 
     def test_execute(self, client):
-        with patch("step_functions_integration._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
-            resp = client.post("/api/stepfunctions/execute", json={
+        with patch("workflow_orchestrator._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
+            resp = client.post("/api/orchestrator/execute", json={
                 "state_machine": "rosa-hcp-provision",
                 "input_params": {"cluster_name": "test"},
             })
@@ -317,22 +469,22 @@ class TestStepFunctionsRoutes:
             assert "execution_id" in data
 
     def test_execute_unknown_machine(self, client):
-        resp = client.post("/api/stepfunctions/execute", json={
+        resp = client.post("/api/orchestrator/execute", json={
             "state_machine": "nonexistent",
             "input_params": {},
         })
         assert resp.status_code == 400
 
     def test_list_executions(self, client):
-        resp = client.get("/api/stepfunctions/executions")
+        resp = client.get("/api/orchestrator/executions")
         assert resp.status_code == 200
         data = resp.json()
         assert "executions" in data
 
     def test_get_missing_execution(self, client):
-        resp = client.get("/api/stepfunctions/executions/nonexistent")
+        resp = client.get("/api/orchestrator/executions/nonexistent")
         assert resp.status_code == 404
 
     def test_cancel_missing_execution(self, client):
-        resp = client.post("/api/stepfunctions/executions/nonexistent/cancel")
+        resp = client.post("/api/orchestrator/executions/nonexistent/cancel")
         assert resp.status_code == 404

@@ -1,0 +1,40 @@
+---
+# Workflow Orchestrator: Delete ROSAControlPlane, Cluster, and MachinePool resources
+# Initiates deletion with --wait=false, does not wait for completion
+
+- name: Check if ROSAControlPlane exists
+  shell: |
+    oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} -o name 2>/dev/null || echo "not-found"
+  register: rcp_exists
+  changed_when: false
+
+- name: Check if Cluster exists
+  shell: |
+    oc get cluster {{ cluster_name }} -n {{ capi_namespace }} -o name 2>/dev/null || echo "not-found"
+  register: cluster_exists
+  changed_when: false
+
+- name: Delete ROSAControlPlane
+  shell: |
+    oc delete rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} --wait=false
+  when: "'not-found' not in rcp_exists.stdout"
+  failed_when: false
+
+- name: Delete Cluster
+  shell: |
+    oc delete cluster {{ cluster_name }} -n {{ capi_namespace }} --wait=false
+  when: "'not-found' not in cluster_exists.stdout"
+  failed_when: false
+
+- name: Delete ManagedCluster
+  shell: |
+    oc delete managedcluster {{ cluster_name }} --wait=false
+  failed_when: false
+  ignore_errors: true
+
+- name: Display deletion initiated
+  debug:
+    msg: |
+      Deletion initiated for cluster {{ cluster_name }}:
+      • ROSAControlPlane: {{ 'Deleting' if 'not-found' not in rcp_exists.stdout else 'Not found' }}
+      • Cluster: {{ 'Deleting' if 'not-found' not in cluster_exists.stdout else 'Not found' }}

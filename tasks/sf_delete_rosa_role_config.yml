@@ -1,0 +1,67 @@
+---
+# Workflow Orchestrator: Delete ROSARoleConfig and wait for completion
+
+- name: Set deletion variables
+  set_fact:
+    agent_sidecar_log: "/tmp/deletion-agent-{{ cluster_name }}.log"
+    rosa_role_config_name: "{{ rosa_role_config_name | default(cluster_name + '-roles') }}"
+
+- name: Check if ROSARoleConfig exists
+  shell: |
+    oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} -o name 2>/dev/null || echo "not-found"
+  register: rrc_exists
+  changed_when: false
+
+- name: Skip if ROSARoleConfig not found
+  debug:
+    msg: "ROSARoleConfig {{ rosa_role_config_name }} not found — skipping"
+  when: "'not-found' in rrc_exists.stdout"
+
+- name: Delete ROSARoleConfig
+  shell: |
+    oc delete rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} --wait=false
+  when: "'not-found' not in rrc_exists.stdout"
+  failed_when: false
+
+- name: Wait for ROSARoleConfig deletion
+  shell: |
+    LOGFILE="{{ agent_sidecar_log }}"
+    TIMEOUT={{ rosaroleconfig_timeout | default(600) }}
+    START=$(date +%s)
+    echo "#AGENT_CONTEXT: resource_name={{ rosa_role_config_name }} namespace={{ capi_namespace }} resource_type=rosaroleconfig" | tee -a "$LOGFILE"
+    while true; do
+      ELAPSED=$(( $(date +%s) - START ))
+      if [ $ELAPSED -gt $TIMEOUT ]; then
+        echo "Timed out waiting for ROSARoleConfig deletion after ${TIMEOUT}s" | tee -a "$LOGFILE"
+        exit 1
+      fi
+      OUTPUT=$(oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} 2>&1)
+      RC=$?
+      if [ $RC -ne 0 ]; then
+        if echo "$OUTPUT" | grep -qi "not found\|NotFound"; then
+          echo "ROSARoleConfig {{ rosa_role_config_name }} deleted successfully (${ELAPSED}s)" | tee -a "$LOGFILE"
+          exit 0
+        fi
+      fi
+      MINS=$((ELAPSED / 60))
+      SECS=$((ELAPSED % 60))
+      RRC_REASON=$(oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} \
+        -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}' 2>/dev/null || echo "unknown")
+      RRC_MSG=$(oc get rosaroleconfig {{ rosa_role_config_name }} -n {{ capi_namespace }} \
+        -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || echo "")
+      echo "FAILED - RETRYING: [localhost]: Wait for rosaroleconfig {{ rosa_role_config_name }} deletion. Reason: ${RRC_REASON} (${MINS}m${SECS}s elapsed)." | tee -a "$LOGFILE"
+      if [ -n "$RRC_MSG" ]; then
+        echo "  Message: ${RRC_MSG}" | tee -a "$LOGFILE"
+      fi
+      sleep 10
+    done
+  args:
+    executable: /bin/bash
+  register: wait_rrc
+  failed_when: wait_rrc.rc != 0
+  when: "'not-found' not in rrc_exists.stdout"
+
+- name: ROSARoleConfig deleted
+  debug:
+    msg: "ROSARoleConfig {{ rosa_role_config_name }} successfully deleted"
+  when: "'not-found' not in rrc_exists.stdout"

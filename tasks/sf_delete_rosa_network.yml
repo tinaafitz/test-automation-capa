@@ -1,0 +1,72 @@
+---
+# Workflow Orchestrator: Delete ROSANetwork and wait for completion + CF verification
+
+- name: Set deletion variables
+  set_fact:
+    agent_sidecar_log: "/tmp/deletion-agent-{{ cluster_name }}.log"
+    rosa_network_name: "{{ rosa_network_name | default(cluster_name + '-network') }}"
+
+- name: Check if ROSANetwork exists
+  shell: |
+    oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} -o name 2>/dev/null || echo "not-found"
+  register: rn_exists
+  changed_when: false
+
+- name: Skip if ROSANetwork not found
+  debug:
+    msg: "ROSANetwork {{ rosa_network_name }} not found — skipping"
+  when: "'not-found' in rn_exists.stdout"
+
+- name: Delete ROSANetwork
+  shell: |
+    oc delete rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} --wait=false
+  when: "'not-found' not in rn_exists.stdout"
+  failed_when: false
+
+- name: Wait for ROSANetwork deletion
+  shell: |
+    LOGFILE="{{ agent_sidecar_log }}"
+    TIMEOUT={{ rosanetwork_timeout | default(1800) }}
+    START=$(date +%s)
+    echo "#AGENT_CONTEXT: resource_name={{ rosa_network_name }} namespace={{ capi_namespace }} resource_type=rosanetwork" | tee -a "$LOGFILE"
+    while true; do
+      ELAPSED=$(( $(date +%s) - START ))
+      if [ $ELAPSED -gt $TIMEOUT ]; then
+        echo "Timed out waiting for ROSANetwork deletion after ${TIMEOUT}s" | tee -a "$LOGFILE"
+        exit 1
+      fi
+      OUTPUT=$(oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} 2>&1)
+      RC=$?
+      if [ $RC -ne 0 ]; then
+        if echo "$OUTPUT" | grep -qi "not found\|NotFound"; then
+          echo "ROSANetwork {{ rosa_network_name }} deleted successfully (${ELAPSED}s)" | tee -a "$LOGFILE"
+          exit 0
+        fi
+      fi
+      MINS=$((ELAPSED / 60))
+      SECS=$((ELAPSED % 60))
+      STACK_STATUS=$(oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} \
+        -o jsonpath='{.status.stackStatus}' 2>/dev/null || echo "unknown")
+      NET_REASON=$(oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} \
+        -o jsonpath='{.status.conditions[?(@.type=="ROSANetworkReady")].reason}' 2>/dev/null || echo "unknown")
+      NET_MSG=$(oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} \
+        -o jsonpath='{.status.conditions[?(@.type=="ROSANetworkReady")].message}' 2>/dev/null || echo "")
+      echo "FAILED - RETRYING: [localhost]: Wait for rosanetwork {{ rosa_network_name }} deletion. Reason: ${NET_REASON} stackStatus: ${STACK_STATUS} (${MINS}m${SECS}s elapsed)." | tee -a "$LOGFILE"
+      if [ -n "$NET_MSG" ]; then
+        echo "  Message: ${NET_MSG}" | tee -a "$LOGFILE"
+      fi
+      if [ "$STACK_STATUS" = "DELETE_FAILED" ]; then
+        echo "CloudFormation stack DELETE_FAILED: {{ rosa_network_name }} — orphaned AWS resources detected" | tee -a "$LOGFILE"
+      fi
+      sleep 10
+    done
+  args:
+    executable: /bin/bash
+  register: wait_rn
+  failed_when: wait_rn.rc != 0
+  when: "'not-found' not in rn_exists.stdout"
+
+- name: ROSANetwork deleted
+  debug:
+    msg: "ROSANetwork {{ rosa_network_name }} successfully deleted"
+  when: "'not-found' not in rn_exists.stdout"

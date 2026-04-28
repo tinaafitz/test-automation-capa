@@ -1,0 +1,33 @@
+---
+# Workflow Orchestrator: Verify all cluster resources are fully deleted
+
+- name: Check for remaining resources
+  shell: |
+    FOUND=""
+    oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} 2>/dev/null && FOUND="${FOUND}rosacontrolplane "
+    oc get cluster {{ cluster_name }} -n {{ capi_namespace }} 2>/dev/null && FOUND="${FOUND}cluster "
+    oc get rosanetwork {{ rosa_network_name | default(cluster_name + '-network') }} -n {{ capi_namespace }} 2>/dev/null && FOUND="${FOUND}rosanetwork "
+    oc get rosaroleconfig {{ rosa_role_config_name | default(cluster_name + '-roles') }} -n {{ capi_namespace }} 2>/dev/null && FOUND="${FOUND}rosaroleconfig "
+    if [ -n "$FOUND" ]; then
+      echo "Resources still exist: $FOUND"
+      exit 1
+    fi
+    echo "All resources deleted successfully"
+    exit 0
+  register: verify_result
+  failed_when: false
+  changed_when: false
+
+- name: Display verification result
+  debug:
+    msg: |
+      {% if verify_result.rc == 0 %}
+      All ROSA HCP resources for {{ cluster_name }} have been deleted.
+      {% else %}
+      Some resources still exist: {{ verify_result.stdout }}
+      {% endif %}
+
+- name: Fail if resources remain
+  fail:
+    msg: "{{ verify_result.stdout }}"
+  when: verify_result.rc != 0
