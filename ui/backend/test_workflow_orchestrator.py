@@ -370,21 +370,19 @@ class TestRunAnsibleTaskSync:
         assert "not found" in result["error"]
 
     @patch("subprocess.Popen")
-    @patch("playbook_executor.build_playbook_command")
-    def test_successful_run(self, mock_build, mock_popen):
-        mock_build.return_value = (["ansible-playbook", "test.yml"], os.environ.copy())
+    def test_successful_run(self, mock_popen):
         mock_proc = MagicMock()
         mock_proc.stdout = iter(["ok: [localhost]\n", "PLAY RECAP\n"])
         mock_proc.wait.return_value = 0
         mock_popen.return_value = mock_proc
+        # For playbook paths, the code writes a JSON vars file to /tmp and
+        # builds the command directly (no build_playbook_command call).
         with patch("os.path.exists", return_value=True):
             result = _run_ansible_task_sync("/tmp", "playbooks/test.yml", {"cluster_name": "t"}, 30)
         assert result["success"]
 
     @patch("subprocess.Popen")
-    @patch("playbook_executor.build_playbook_command")
-    def test_timeout(self, mock_build, mock_popen):
-        mock_build.return_value = (["ansible-playbook", "test.yml"], os.environ.copy())
+    def test_timeout(self, mock_popen):
         mock_proc = MagicMock()
         mock_proc.stdout = iter([])
         mock_proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="test", timeout=30), 0]
