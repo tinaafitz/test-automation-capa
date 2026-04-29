@@ -115,13 +115,6 @@ const CapaSidebar = ({
           showInEnvironments: ['mce']
         },
         {
-          id: 'verify',
-          label: 'Verify',
-          icon: <CheckCircleIcon className="h-5 w-5" />,
-          onClick: onVerifyClick,
-          showInEnvironments: ['mce']
-        },
-        {
           id: 'configure',
           label: 'Configure',
           icon: <Cog6ToothIcon className="h-5 w-5" />,
@@ -146,6 +139,13 @@ const CapaSidebar = ({
           onClick: onWorkflowsClick
         },
         {
+          id: 'orchestrator',
+          label: 'Workflow Orchestrator',
+          icon: <BoltIcon className="h-5 w-5" />,
+          onClick: onOrchestratorClick,
+          showInEnvironments: ['mce']
+        },
+        {
           id: 'rosa-hcp-clusters',
           label: 'ROSA HCP Clusters',
           icon: <CloudIcon className="h-5 w-5" />,
@@ -158,23 +158,10 @@ const CapaSidebar = ({
           onClick: onProvisionClick
         },
         {
-          id: 'resources',
-          label: 'CAPA Resources',
-          icon: <DocumentTextIcon className="h-5 w-5" />,
-          onClick: onResourcesClick
-        },
-        {
           id: 'cluster-actions',
           label: 'Cluster Actions',
           icon: <BoltIcon className="h-5 w-5" />,
           onClick: onClusterActionsClick,
-          showInEnvironments: ['mce']
-        },
-        {
-          id: 'orchestrator',
-          label: 'Workflow Orchestrator',
-          icon: <BoltIcon className="h-5 w-5" />,
-          onClick: onOrchestratorClick,
           showInEnvironments: ['mce']
         },
       ],

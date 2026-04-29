@@ -1065,183 +1065,7 @@ const CAPADashboardContent = () => {
   const renderMainContent = () => {
     switch (activeSection) {
       case 'verify':
-        return (
-          <div className="space-y-6">
-            {/* Title */}
-            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Verify Environment</h2>
-
-            <p className="text-gray-500">
-              Run comprehensive verification checks on your MCE environment and CAPI/CAPA components.
-            </p>
-
-            <div className="flex items-center gap-4">
-              <button
-                onClick={handleMceVerification}
-                disabled={isVerifying}
-                className={`px-5 py-2.5 text-sm font-semibold text-white rounded-lg flex items-center gap-2 transition-all shadow-sm hover:shadow-md ${
-                  isVerifying
-                    ? 'bg-gray-400 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700'
-                }`}
-              >
-                {isVerifying ? (
-                  <>
-                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    Verifying...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircleIcon className="h-5 w-5" />
-                    Run Verification
-                  </>
-                )}
-              </button>
-
-              {/* Last Verification Info */}
-              {mceLastVerified && (
-                <div className="flex items-center gap-2 text-sm text-gray-500 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                  <CheckCircleIcon className="h-4 w-4 text-emerald-600" />
-                  <span>Last verified: {new Date(mceLastVerified).toLocaleString()}</span>
-                  <span className="text-emerald-600 font-semibold">Passed</span>
-                </div>
-              )}
-            </div>
-
-            {/* CAPI/CAPA Components Section */}
-            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Components</h3>
-                <button
-                  onClick={handleRefresh}
-                  disabled={apiLoading}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-lg flex items-center gap-1.5 transition-all ${
-                    apiLoading
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'text-blue-600 bg-blue-50 border border-blue-200 hover:bg-blue-100'
-                  }`}
-                >
-                  <ArrowPathIcon className={`h-4 w-4 ${apiLoading ? 'animate-spin' : ''}`} />
-                  Refresh
-                </button>
-              </div>
-
-              {/* Components Lists - Side by Side */}
-              <div className="grid grid-cols-2 gap-6">
-                {/* CAPI/CAPA Components List */}
-                <div>
-                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">CAPI/CAPA</h3>
-                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                    {(() => {
-                      const capiComponents = mceFeatures
-                        .filter(component =>
-                          component.name === 'cluster-api' ||
-                          component.name?.startsWith('cluster-api-provider-')
-                        )
-                        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-                      return capiComponents.length === 0 ? (
-                        <div className="text-center py-8 bg-gray-50 border border-dashed border-gray-200 rounded-lg">
-                          <p className="text-sm text-gray-500">No CAPI components configured</p>
-                        </div>
-                      ) : (
-                        capiComponents.map((component, index) => (
-                          <div
-                            key={index}
-                            className="flex items-center justify-between py-2 px-3 text-sm rounded-md hover:bg-gray-50 transition-colors"
-                          >
-                            <span className="truncate text-gray-700">{component.name}</span>
-                            <span className={`ml-2 flex-shrink-0 ${component.enabled ? 'text-emerald-500' : 'text-red-400'}`}>
-                              {component.enabled ? <CheckCircleIcon className="h-4 w-4" /> : <XCircleIcon className="h-4 w-4" />}
-                            </span>
-                          </div>
-                        ))
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                {/* Hypershift Components List */}
-                <div>
-                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Hypershift</h3>
-                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                    {(() => {
-                      const hypershiftComponents = mceFeatures
-                        .filter(component => component.name?.includes('hypershift'))
-                        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-                      return hypershiftComponents.length === 0 ? (
-                        <div className="text-center py-8 bg-gray-50 border border-dashed border-gray-200 rounded-lg">
-                          <p className="text-sm text-gray-500">No Hypershift components configured</p>
-                        </div>
-                      ) : (
-                        hypershiftComponents.map((component, index) => (
-                          <div
-                            key={index}
-                            className="flex items-center justify-between py-2 px-3 text-sm rounded-md hover:bg-gray-50 transition-colors"
-                          >
-                            <span className="truncate text-gray-700">{component.name}</span>
-                            <span className={`ml-2 flex-shrink-0 ${component.enabled ? 'text-emerald-500' : 'text-red-400'}`}>
-                              {component.enabled ? <CheckCircleIcon className="h-4 w-4" /> : <XCircleIcon className="h-4 w-4" />}
-                            </span>
-                          </div>
-                        ))
-                      );
-                    })()}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Verification Results */}
-            {(() => {
-              console.log('🔍 Rendering verify section, verificationResults:', verificationResults);
-              return verificationResults && (
-                <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    {verificationResults.success === true ? (
-                      <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
-                        <CheckCircleIcon className="h-5 w-5 text-emerald-600" />
-                      </div>
-                    ) : verificationResults.needsConfiguration ? (
-                      <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
-                        <span className="text-sm">🆕</span>
-                      </div>
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
-                        <XCircleIcon className="h-5 w-5 text-red-600" />
-                      </div>
-                    )}
-                    <h3 className="text-lg font-semibold text-gray-900">
-                      {verificationResults.success === true
-                        ? 'Verification Passed'
-                        : verificationResults.needsConfiguration
-                          ? 'Configuration Required'
-                          : 'Verification Failed'}
-                    </h3>
-                  </div>
-
-                  {/* Output Display */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Playbook Output</h4>
-                      <button
-                        onClick={() => handleCopyOutput(verificationResults.output || 'No output available')}
-                        className="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                      >
-                        {copySuccess || 'Copy'}
-                      </button>
-                    </div>
-                    <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto min-h-[100px] border border-gray-800">
-                      <pre className="whitespace-pre-wrap">
-                        {verificationResults.output || 'No output available'}
-                      </pre>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        );
+        return null;
 
       case 'configure':
         return (
@@ -1666,17 +1490,16 @@ const CAPADashboardContent = () => {
         );
 
       case 'rosa-hcp-clusters':
-        return <RosaHcpClustersSection />;
-
-      case 'resources':
         return (
           <div className="space-y-6">
-            {/* Title */}
+            <RosaHcpClustersSection />
             <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">CAPA Resources</h2>
-
             <ResourcesViewer theme="mce" />
           </div>
         );
+
+      case 'resources':
+        return null;
 
       case 'environments':
         return (
@@ -1689,8 +1512,9 @@ const CAPADashboardContent = () => {
         return (
           <div className="space-y-6">
             {/* Title */}
-            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Credentials</h2>
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Credentials & Environment</h2>
 
+            {/* Credentials Section */}
             <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
               <CredentialsModal
                 isOpen={true}
@@ -1700,8 +1524,151 @@ const CAPADashboardContent = () => {
                 onSave={() => {
                   refreshAllStatus();
                   setCredentialsRefreshKey(prev => prev + 1);
+                  handleMceVerification();
                 }}
               />
+            </div>
+
+            {/* Verification Section */}
+            <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Environment Verification</h3>
+                <div className="flex items-center gap-3">
+                  {mceLastVerified && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                      <CheckCircleIcon className="h-4 w-4 text-emerald-600" />
+                      <span>Last verified: {new Date(mceLastVerified).toLocaleString()}</span>
+                      <span className="text-emerald-600 font-semibold">Passed</span>
+                    </div>
+                  )}
+                  <button
+                    onClick={handleMceVerification}
+                    disabled={isVerifying}
+                    className={`px-4 py-2 text-sm font-semibold text-white rounded-lg flex items-center gap-2 transition-all shadow-sm hover:shadow-md ${
+                      isVerifying
+                        ? 'bg-gray-400 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700'
+                    }`}
+                  >
+                    {isVerifying ? (
+                      <>
+                        <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Verifying...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircleIcon className="h-4 w-4" />
+                        Run Verification
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Components Lists - Side by Side */}
+              <div className="grid grid-cols-2 gap-6">
+                {/* CAPI/CAPA Components List */}
+                <div>
+                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">CAPI/CAPA</h3>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {(() => {
+                      const capiComponents = mceFeatures
+                        .filter(component =>
+                          component.name === 'cluster-api' ||
+                          component.name?.startsWith('cluster-api-provider-')
+                        )
+                        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+                      return capiComponents.length === 0 ? (
+                        <div className="text-center py-8 bg-gray-50 border border-dashed border-gray-200 rounded-lg">
+                          <p className="text-sm text-gray-500">No CAPI components configured</p>
+                        </div>
+                      ) : (
+                        capiComponents.map((component, index) => (
+                          <div
+                            key={index}
+                            className="flex items-center justify-between py-2 px-3 text-sm rounded-md hover:bg-gray-50 transition-colors"
+                          >
+                            <span className="truncate text-gray-700">{component.name}</span>
+                            <span className={`ml-2 flex-shrink-0 ${component.enabled ? 'text-emerald-500' : 'text-red-400'}`}>
+                              {component.enabled ? <CheckCircleIcon className="h-4 w-4" /> : <XCircleIcon className="h-4 w-4" />}
+                            </span>
+                          </div>
+                        ))
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Hypershift Components List */}
+                <div>
+                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Hypershift</h3>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {(() => {
+                      const hypershiftComponents = mceFeatures
+                        .filter(component => component.name?.includes('hypershift'))
+                        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+                      return hypershiftComponents.length === 0 ? (
+                        <div className="text-center py-8 bg-gray-50 border border-dashed border-gray-200 rounded-lg">
+                          <p className="text-sm text-gray-500">No Hypershift components configured</p>
+                        </div>
+                      ) : (
+                        hypershiftComponents.map((component, index) => (
+                          <div
+                            key={index}
+                            className="flex items-center justify-between py-2 px-3 text-sm rounded-md hover:bg-gray-50 transition-colors"
+                          >
+                            <span className="truncate text-gray-700">{component.name}</span>
+                            <span className={`ml-2 flex-shrink-0 ${component.enabled ? 'text-emerald-500' : 'text-red-400'}`}>
+                              {component.enabled ? <CheckCircleIcon className="h-4 w-4" /> : <XCircleIcon className="h-4 w-4" />}
+                            </span>
+                          </div>
+                        ))
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Verification Results */}
+              {verificationResults && (
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    {verificationResults.success === true ? (
+                      <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
+                        <CheckCircleIcon className="h-4 w-4 text-emerald-600" />
+                      </div>
+                    ) : verificationResults.needsConfiguration ? (
+                      <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center">
+                        <span className="text-xs">!</span>
+                      </div>
+                    ) : (
+                      <div className="w-6 h-6 rounded-full bg-red-100 flex items-center justify-center">
+                        <XCircleIcon className="h-4 w-4 text-red-600" />
+                      </div>
+                    )}
+                    <span className="text-sm font-semibold text-gray-700">
+                      {verificationResults.success === true
+                        ? 'Verification Passed'
+                        : verificationResults.needsConfiguration
+                          ? 'Configuration Required'
+                          : 'Verification Failed'}
+                    </span>
+                    <button
+                      onClick={() => handleCopyOutput(verificationResults.output || 'No output available')}
+                      className="ml-auto px-3 py-1 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                    >
+                      {copySuccess || 'Copy Output'}
+                    </button>
+                  </div>
+                  <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-64 overflow-y-auto border border-gray-800">
+                    <pre className="whitespace-pre-wrap">
+                      {verificationResults.output || 'No output available'}
+                    </pre>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Environments - collapsible, closed by default */}

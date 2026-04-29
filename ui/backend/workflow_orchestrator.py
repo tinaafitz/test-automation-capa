@@ -579,11 +579,38 @@ class ExecutionStore:
                     "SELECT execution_id, data FROM executions ORDER BY created DESC LIMIT ?",
                     (_MAX_HISTORY,),
                 ).fetchall()
+            zombies = 0
             for eid, data_json in rows:
-                self._history[eid] = json.loads(data_json)
+                data = json.loads(data_json)
+                if data.get("status") == "running":
+                    data["status"] = "failed"
+                    data["error"] = "Backend restarted during execution"
+                    for step in data.get("steps", {}).values():
+                        if step.get("status") == "running":
+                            step["status"] = "failed"
+                            step["error"] = "Backend restarted during execution"
+                    self._persist_dict(eid, data)
+                    zombies += 1
+                self._history[eid] = data
+            if zombies:
+                logger.warning(f"Marked {zombies} zombie execution(s) as failed")
             logger.info(f"Loaded {len(self._history)} execution(s) from history")
         except Exception as e:
             logger.warning(f"Failed to load execution history: {e}")
+
+    def _persist_dict(self, execution_id: str, data: dict):
+        now = datetime.now().isoformat()
+        try:
+            data_json = json.dumps(data)
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO executions (execution_id, data, created, updated) "
+                    "VALUES (?, ?, COALESCE((SELECT created FROM executions WHERE execution_id = ?), ?), ?)",
+                    (execution_id, data_json, execution_id, now, now),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Failed to persist execution {execution_id}: {e}")
 
     def register(self, execution: StateMachineExecution):
         self._live[execution.execution_id] = execution
@@ -867,6 +894,10 @@ async def _execute_local_task(
     if not step:
         return False
 
+    if step.status == StepStatus.SUCCEEDED:
+        logger.info(f"Skipping completed task '{state_name}'")
+        return True
+
     step.status = StepStatus.RUNNING
     step.started_at = datetime.utcnow().isoformat()
 
@@ -974,8 +1005,16 @@ async def _execute_local_parallel(
 ) -> bool:
     """Execute parallel branches concurrently using asyncio.gather."""
     branches = state_def.get("Branches", [])
-    tasks = []
 
+    all_done = all(
+        execution.steps.get(b.get("StartAt"), StepExecution("", "")).status == StepStatus.SUCCEEDED
+        for b in branches if b.get("StartAt")
+    )
+    if all_done and branches:
+        logger.info(f"Skipping completed parallel group '{state_name}'")
+        return True
+
+    tasks = []
     for branch in branches:
         branch_start = branch.get("StartAt")
         branch_states = branch.get("States", {})
@@ -1023,8 +1062,14 @@ async def _execute_nested_state_machine(
         )
         step.sub_execution_id = sub_execution.execution_id
 
+        poll_start = time.time()
         while not execution._cancelled:
             await asyncio.sleep(3)
+            if time.time() - poll_start > step.timeout:
+                step.status = StepStatus.TIMED_OUT
+                step.error = f"Nested state machine '{nested_sm_name}' timed out after {step.timeout}s"
+                step.completed_at = datetime.utcnow().isoformat()
+                return False
             sub = await get_execution(sub_execution.execution_id)
             if not sub:
                 break
@@ -1158,7 +1203,7 @@ def _run_ansible_task_sync(
         "rosa_network_name": f"{derived_cluster_name}-network",
         "rosa_network_config_name": f"{derived_cluster_name}-network",
         "network_cidr": extra_vars.get("network_cidr", "10.0.0.0/16"),
-        "availability_zone_count": str(az_count),
+        "availability_zone_count": az_count,
         "create_rosa_roles": extra_vars.get("create_rosa_roles", "true"),
         "create_rosa_network": extra_vars.get("create_rosa_network", "true"),
         "domain_prefix": name_prefix or derived_cluster_name,
@@ -1168,6 +1213,28 @@ def _run_ansible_task_sync(
         "api_url": extra_vars.get("OCP_HUB_API_URL", ""),
         "mce_namespace": extra_vars.get("MCE_NAMESPACE", "multicluster-engine"),
         "MCE_NAMESPACE": extra_vars.get("MCE_NAMESPACE", "multicluster-engine"),
+        "template_name": "rosa-controlplane-only",
+        "template_category": "features",
+        "channel": "",
+        "channel_group": "",
+        "fips": False,
+        "cluster_description": "",
+        "rosa_creds_secret": "rosa-creds-secret",
+        "environment_tag": "test",
+        "purpose_tag": "orchestrator-testing",
+        "log_forward_enabled": False,
+        "log_forward_cloudwatch_role_arn": "",
+        "log_forward_cloudwatch_log_group": "",
+        "log_forward_s3_bucket": "",
+        "log_forward_s3_prefix": "",
+        "availability_zones_list": az_list,
+        "machine_pool": {},
+        "manual_subnets": [],
+        "cluster_network": {
+            "machine_cidr": "10.0.0.0/16",
+            "pod_cidr": "10.128.0.0/14",
+            "service_cidr": "172.30.0.0/16",
+        },
         **{k: v for k, v in extra_vars.items() if v is not None and v != ""},
     }
 
@@ -1228,13 +1295,43 @@ def _run_ansible_task_sync(
         sidecar_thread = threading.Thread(target=_tail_sidecar, daemon=True)
         sidecar_thread.start()
 
+    vars_file_path = None
     try:
+        import tempfile as _tmpmod
         from playbook_executor import build_playbook_command, SENSITIVE_KEYS
-        cmd, env = build_playbook_command(playbook_path, merged_vars, verbosity=1)
-        cmd.extend(["-i", "localhost,"])
-        for k, v in merged_vars.items():
-            if str(k).lower() in SENSITIVE_KEYS and v:
-                cmd.extend(["-e", f"{k}={v}"])
+
+        if is_playbook:
+            # For full playbooks, write vars to a JSON file and use @file
+            # syntax. This preserves dicts/lists/booleans that -e mangles.
+            env = os.environ.copy()
+            cmd = ["ansible-playbook", playbook_path, "-v", "-i", "localhost,"]
+
+            # Separate credentials into env vars (not on command line)
+            file_vars = {}
+            for k, v in merged_vars.items():
+                if str(k).lower() in SENSITIVE_KEYS:
+                    env[str(k).upper()] = str(v).strip() if v is not None else ""
+                    # Also pass via -e so the playbook can use them as Ansible vars
+                    cmd.extend(["-e", f"{k}={v}"])
+                else:
+                    file_vars[k] = v
+
+            vars_tmp = _tmpmod.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False,
+                prefix="orchestrator_vars_",
+            )
+            json.dump(file_vars, vars_tmp, default=str)
+            vars_tmp.close()
+            vars_file_path = vars_tmp.name
+            cmd.extend(["-e", f"@{vars_file_path}"])
+        else:
+            # For task wrappers, keep existing -e approach (vars are in
+            # the generated playbook's vars: block already)
+            cmd, env = build_playbook_command(playbook_path, merged_vars, verbosity=1)
+            cmd.extend(["-i", "localhost,"])
+            for k, v in merged_vars.items():
+                if str(k).lower() in SENSITIVE_KEYS and v:
+                    cmd.extend(["-e", f"{k}={v}"])
 
         env["PYTHONUNBUFFERED"] = "1"
 
@@ -1276,6 +1373,11 @@ def _run_ansible_task_sync(
         if not is_playbook:
             try:
                 os.unlink(playbook_path)
+            except OSError:
+                pass
+        if vars_file_path:
+            try:
+                os.unlink(vars_file_path)
             except OSError:
                 pass
 

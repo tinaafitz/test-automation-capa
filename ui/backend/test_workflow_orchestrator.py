@@ -312,29 +312,34 @@ class TestFromDict:
 
 class TestResumeExecution:
     @pytest.mark.asyncio
-    async def test_resume_resets_failed_steps(self):
-        exec_ = StateMachineExecution("test-resume", "mce-configure", {})
-        steps = list(exec_.steps.values())
-        steps[0].status = StepStatus.SUCCEEDED
-        steps[0].started_at = "2026-04-28T10:00:00"
-        steps[0].completed_at = "2026-04-28T10:01:00"
-        steps[1].status = StepStatus.FAILED
-        steps[1].error = "some error"
-        exec_.status = StepStatus.FAILED
-        exec_.error = "step failed"
-        _execution_store.register(exec_)
-        _execution_store.persist(exec_)
+    async def test_resume_resets_failed_steps(self, tmp_path):
+        import workflow_orchestrator as wo
+        orig_store = wo._execution_store
+        wo._execution_store = ExecutionStore(db_path=str(tmp_path / "resume.db"))
+        try:
+            exec_ = StateMachineExecution("test-resume", "mce-configure", {})
+            steps = list(exec_.steps.values())
+            steps[0].status = StepStatus.SUCCEEDED
+            steps[0].started_at = "2026-04-28T10:00:00"
+            steps[0].completed_at = "2026-04-28T10:01:00"
+            steps[1].status = StepStatus.FAILED
+            steps[1].error = "some error"
+            exec_.status = StepStatus.FAILED
+            exec_.error = "step failed"
+            wo._execution_store.register(exec_)
+            wo._execution_store.persist(exec_)
 
-        from workflow_orchestrator import resume_execution
-        with patch("workflow_orchestrator._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
-            resumed = await resume_execution("test-resume")
-        assert resumed is not None
-        assert resumed.status == StepStatus.RUNNING
-        assert resumed.error is None
-        resumed_steps = list(resumed.steps.values())
-        assert resumed_steps[0].status == StepStatus.SUCCEEDED
-        assert resumed_steps[1].status == StepStatus.PENDING
-        assert resumed_steps[1].error is None
+            with patch("workflow_orchestrator._run_local_execution", new=MagicMock(return_value=asyncio.sleep(0))):
+                resumed = await wo.resume_execution("test-resume")
+            assert resumed is not None
+            assert resumed.status == StepStatus.RUNNING
+            assert resumed.error is None
+            resumed_steps = list(resumed.steps.values())
+            assert resumed_steps[0].status == StepStatus.SUCCEEDED
+            assert resumed_steps[1].status == StepStatus.PENDING
+            assert resumed_steps[1].error is None
+        finally:
+            wo._execution_store = orig_store
 
     @pytest.mark.asyncio
     async def test_resume_nonexistent_returns_none(self):
@@ -343,14 +348,19 @@ class TestResumeExecution:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_resume_running_returns_none(self):
-        exec_ = StateMachineExecution("test-running", "rosa-hcp-provision", {})
-        exec_.status = StepStatus.RUNNING
-        _execution_store.register(exec_)
-        _execution_store.persist(exec_)
-        from workflow_orchestrator import resume_execution
-        result = await resume_execution("test-running")
-        assert result is None
+    async def test_resume_running_returns_none(self, tmp_path):
+        import workflow_orchestrator as wo
+        orig_store = wo._execution_store
+        wo._execution_store = ExecutionStore(db_path=str(tmp_path / "resume_running.db"))
+        try:
+            exec_ = StateMachineExecution("test-running", "rosa-hcp-provision", {})
+            exec_.status = StepStatus.RUNNING
+            wo._execution_store.register(exec_)
+            wo._execution_store.persist(exec_)
+            result = await wo.resume_execution("test-running")
+            assert result is None
+        finally:
+            wo._execution_store = orig_store
 
 
 class TestRunAnsibleTaskSync:
@@ -360,21 +370,19 @@ class TestRunAnsibleTaskSync:
         assert "not found" in result["error"]
 
     @patch("subprocess.Popen")
-    @patch("playbook_executor.build_playbook_command")
-    def test_successful_run(self, mock_build, mock_popen):
-        mock_build.return_value = (["ansible-playbook", "test.yml"], os.environ.copy())
+    def test_successful_run(self, mock_popen):
         mock_proc = MagicMock()
         mock_proc.stdout = iter(["ok: [localhost]\n", "PLAY RECAP\n"])
         mock_proc.wait.return_value = 0
         mock_popen.return_value = mock_proc
+        # For playbook paths, the code writes a JSON vars file to /tmp and
+        # builds the command directly (no build_playbook_command call).
         with patch("os.path.exists", return_value=True):
             result = _run_ansible_task_sync("/tmp", "playbooks/test.yml", {"cluster_name": "t"}, 30)
         assert result["success"]
 
     @patch("subprocess.Popen")
-    @patch("playbook_executor.build_playbook_command")
-    def test_timeout(self, mock_build, mock_popen):
-        mock_build.return_value = (["ansible-playbook", "test.yml"], os.environ.copy())
+    def test_timeout(self, mock_popen):
         mock_proc = MagicMock()
         mock_proc.stdout = iter([])
         mock_proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="test", timeout=30), 0]

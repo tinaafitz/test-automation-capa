@@ -38,18 +38,7 @@
         -o jsonpath='{.status.id}' 2>/dev/null || echo "")
       if [ -n "$ROSA_STATE" ]; then
         OCM_STATUS=$(oc get rosacontrolplane {{ cluster_name }} -n {{ capi_namespace }} \
-          -o json 2>/dev/null | python3 -c "
-import sys,json
-try:
-    d=json.load(sys.stdin)
-    conds=d.get('status',{}).get('conditions',[])
-    for c in conds:
-        if c.get('type')=='ROSAControlPlaneReady' and 'CLUSTERS-MGMT' in c.get('message',''):
-            print(c['message'])
-            sys.exit(0)
-    print('')
-except: print('')
-" 2>/dev/null)
+          -o jsonpath='{.status.conditions[?(@.type=="ROSAControlPlaneReady")].message}' 2>/dev/null | grep "CLUSTERS-MGMT" || echo "")
         if [ -n "$OCM_STATUS" ]; then
           echo "Message: $OCM_STATUS" | tee -a "$LOGFILE"
         fi
