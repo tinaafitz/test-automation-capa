@@ -81,9 +81,10 @@ def run_ansible_task_background(
             if kube_context:
                 cmd.extend(["-e", f"KUBE_CONTEXT={kube_context}"])
 
-            # Add extra vars if provided
+            # Add extra vars if provided (skip empty values so vars_files defaults are used)
             for key, value in extra_vars.items():
-                cmd.extend(["-e", f"{key}={value}"])
+                if value != '':
+                    cmd.extend(["-e", f"{key}={value}"])
 
             print(f"Running ansible playbook: {' '.join(cmd)}")
 
@@ -242,9 +243,10 @@ def run_ansible_task_background(
             if kube_context:
                 cmd.extend(["-e", f"KUBE_CONTEXT={kube_context}"])
 
-            # Add extra vars if provided
+            # Add extra vars if provided (skip empty values so vars_files defaults are used)
             for key, value in extra_vars.items():
-                cmd.extend(["-e", f"{key}={value}"])
+                if value != '':
+                    cmd.extend(["-e", f"{key}={value}"])
 
             print(f"Running ansible task: {' '.join(cmd)}")
 
@@ -523,9 +525,10 @@ async def run_ansible_role(request: dict):
                 "-v",  # Verbose output
             ]
 
-            # Add extra vars if provided
+            # Add extra vars if provided (skip empty values so vars_files defaults are used)
             for key, value in extra_vars.items():
-                cmd.extend(["-e", f"{key}={value}"])
+                if value != '':
+                    cmd.extend(["-e", f"{key}={value}"])
 
             print(f"Running ansible role: {' '.join(cmd)}")
 
