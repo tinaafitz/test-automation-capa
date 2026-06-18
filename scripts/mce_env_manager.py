@@ -79,6 +79,32 @@ class MCEEnvManager:
                 return True
         return False
 
+    def update_credentials(self, cluster_name, credentials):
+        """Save credentials (OCP, AWS, OCM) to the environment record"""
+        for env in self.environments.get('environments', []):
+            if env.get('cluster_name') == cluster_name:
+                if 'saved_credentials' not in env:
+                    env['saved_credentials'] = {}
+                env['saved_credentials'].update(credentials)
+                env['last_accessed'] = datetime.now().isoformat()
+                cluster_data = env.get('data', {}).get('cluster', {})
+                if credentials.get('OCP_HUB_CLUSTER_PASSWORD'):
+                    cluster_data['password'] = credentials['OCP_HUB_CLUSTER_PASSWORD']
+                if credentials.get('OCP_HUB_CLUSTER_USER'):
+                    cluster_data['username'] = credentials['OCP_HUB_CLUSTER_USER']
+                if credentials.get('OCP_HUB_API_URL'):
+                    cluster_data['api_url'] = credentials['OCP_HUB_API_URL']
+                self.save_db()
+                return True
+        return False
+
+    def get_credentials(self, cluster_name):
+        """Get saved credentials for an environment"""
+        for env in self.environments.get('environments', []):
+            if env.get('cluster_name') == cluster_name:
+                return env.get('saved_credentials', {})
+        return {}
+
     def get_environment(self, cluster_name):
         """Get environment by cluster name"""
         for env in self.environments.get('environments', []):

@@ -335,13 +335,11 @@ const MCEEnvironmentSelector = ({
       let credentials;
 
       if (environmentType === 'minikube') {
-        // For Minikube clusters, use the cluster name directly
         credentials = {
           clusterName: selectedEnv.clusterName || selectedEnv.name,
           minikubeCluster: selectedEnv.clusterName || selectedEnv.name,
         };
       } else {
-        // For MCE/OpenShift clusters, extract API URL from console URL
         const apiUrl = `https://api.${selectedEnv.consoleUrl.split('apps.')[1].replace(/\/$/, '')}:6443`;
         credentials = {
           OCP_HUB_API_URL: apiUrl,
@@ -349,12 +347,23 @@ const MCEEnvironmentSelector = ({
           OCP_HUB_CLUSTER_PASSWORD: selectedEnv.password,
           clusterName: selectedEnv.clusterName,
         };
+
+        // Load previously saved credentials (AWS, OCM, etc.) for this environment
+        try {
+          const clusterName = selectedEnv.clusterName || selectedEnv.name;
+          const resp = await fetch(`http://localhost:8000/api/mce-environments/${clusterName}/credentials`);
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.success && data.credentials) {
+              credentials = { ...data.credentials, ...credentials };
+            }
+          }
+        } catch (err) {
+          console.warn('Could not load saved credentials for environment:', err);
+        }
       }
 
-      // Call the parent handler and wait for it to complete
       await onUseCredentials(credentials);
-
-      // Return to the environments list after saving
       setSelectedEnv(null);
     }
   };

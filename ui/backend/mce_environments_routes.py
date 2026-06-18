@@ -246,6 +246,26 @@ async def save_mce_environment(request: Request):
         return {"success": False, "message": f"Error saving environment: {str(e)}"}
 
 
+@router.get("/api/mce-environments/{cluster_name}/credentials")
+async def get_mce_environment_credentials(cluster_name: str):
+    """Get saved credentials for an MCE environment."""
+    try:
+        scripts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "scripts")
+        sys.path.insert(0, scripts_dir)
+
+        from mce_env_manager import MCEEnvManager
+
+        manager = MCEEnvManager()
+        credentials = manager.get_credentials(cluster_name)
+
+        return {"success": True, "credentials": credentials}
+
+    except Exception as e:
+        print(f"Error getting credentials for {cluster_name}: {str(e)}")
+        return {"success": False, "credentials": {}}
+
+
+
 @router.post("/api/mce-environments/{cluster_name}/status")
 async def update_mce_environment_status(cluster_name: str, request: Request):
     """

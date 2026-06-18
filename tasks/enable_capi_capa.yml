@@ -1,3 +1,22 @@
+# Verify MCE version supports CAPI components (requires 2.8+)
+- name: Get MCE version
+  shell: |
+    oc get mce multiclusterengine -n {{ mce_namespace | default('multicluster-engine') }} -ojsonpath='{.status.currentVersion}'
+  register: mce_version_result
+
+- name: Parse MCE major.minor version
+  set_fact:
+    mce_major: "{{ mce_version_result.stdout.split('.')[0] | int }}"
+    mce_minor: "{{ mce_version_result.stdout.split('.')[1] | int }}"
+
+- name: Fail if MCE version does not support CAPI components
+  fail:
+    msg: >-
+      MCE version {{ mce_version_result.stdout }} does not support cluster-api components.
+      CAPI/CAPA components require MCE 2.8 or later.
+      Please upgrade MCE on this cluster before running this playbook.
+  when: mce_major | int < 2 or (mce_major | int == 2 and mce_minor | int < 8)
+
 # Check if CAPI and CAPA are already enabled
 - set_fact:
     component: "cluster-api"

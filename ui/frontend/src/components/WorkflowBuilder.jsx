@@ -1898,37 +1898,12 @@ const WorkflowBuilder = () => {
                 </button>
               </div>
 
-              {/* Common variable presets */}
+              {/* Common variable presets (credentials come from Credentials page / user_vars.yml automatically) */}
               {Object.keys(globalVars).length === 0 && (
                 <div className="flex flex-wrap gap-1.5 py-1">
-                  <button
-                    onClick={() => setGlobalVars({
-                      name_prefix: '',
-                      OCP_HUB_API_URL: '',
-                      OCP_HUB_CLUSTER_USER: '',
-                      OCP_HUB_CLUSTER_PASSWORD: '',
-                      MCE_NAMESPACE: 'multicluster-engine',
-                      AWS_ACCESS_KEY_ID: '',
-                      AWS_SECRET_ACCESS_KEY: '',
-                      AWS_ACCOUNT_ID: '',
-                      OCM_CLIENT_ID: '',
-                      OCM_CLIENT_SECRET: '',
-                    })}
-                    className="text-xs px-2.5 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-md transition-colors border border-blue-200 font-medium"
-                  >
-                    + Add All Credentials
-                  </button>
                   {[
                     { key: 'name_prefix', label: 'name_prefix' },
-                    { key: 'OCP_HUB_API_URL', label: 'OCP API URL' },
-                    { key: 'OCP_HUB_CLUSTER_USER', label: 'OCP User' },
-                    { key: 'OCP_HUB_CLUSTER_PASSWORD', label: 'OCP Password' },
                     { key: 'MCE_NAMESPACE', label: 'MCE Namespace' },
-                    { key: 'AWS_ACCESS_KEY_ID', label: 'AWS Key ID' },
-                    { key: 'AWS_SECRET_ACCESS_KEY', label: 'AWS Secret' },
-                    { key: 'AWS_ACCOUNT_ID', label: 'AWS Account ID' },
-                    { key: 'OCM_CLIENT_ID', label: 'OCM Client ID' },
-                    { key: 'OCM_CLIENT_SECRET', label: 'OCM Client Secret' },
                   ].map((preset) => (
                     <button
                       key={preset.key}

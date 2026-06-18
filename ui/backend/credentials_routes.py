@@ -20,6 +20,7 @@ Also contains:
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -293,6 +294,38 @@ def _get_ocp_connection_status_sync():
                     cluster_info["current_user"] = whoami_result.stdout.strip()
                 if cluster_result.returncode == 0:
                     cluster_info["cluster_info"] = cluster_result.stdout.strip()
+
+                # Detect MCE version
+                mce_version = ""
+                try:
+                    mce_result = subprocess.run(
+                        ["oc", "get", "mce", "-ojsonpath={.items[0].status.currentVersion}"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if mce_result.returncode == 0 and mce_result.stdout.strip():
+                        mce_version = mce_result.stdout.strip()
+                        cluster_info["mce_version"] = mce_version
+                except Exception:
+                    pass
+
+                # Save MCE version to the environment record
+                if mce_version:
+                    try:
+                        match = re.search(r"api\.([^.]+)", ocp_api_url)
+                        if match:
+                            cluster_name = match.group(1)
+                            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                            scripts_dir = os.path.join(project_root, "scripts")
+                            sys.path.insert(0, scripts_dir)
+                            from mce_env_manager import MCEEnvManager
+                            manager = MCEEnvManager()
+                            env = manager.get_environment(cluster_name)
+                            if env:
+                                env_cluster = env.get("data", {}).get("cluster", {})
+                                env_cluster["mce_version"] = mce_version
+                                manager.save_db()
+                    except Exception as env_err:
+                        print(f"Warning: could not save MCE version to environment: {env_err}")
 
                 response_data = {
                     "success": True,
@@ -612,7 +645,7 @@ async def get_credentials():
 
 @router.post("/api/credentials")
 async def save_credentials(update: CredentialsUpdate):
-    """Save credentials to vars/user_vars.yml"""
+    """Save credentials to vars/user_vars.yml and to the active MCE environment record"""
     try:
         # Path to user_vars.yml
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -632,6 +665,23 @@ async def save_credentials(update: CredentialsUpdate):
         # Write back to file with proper formatting
         with open(config_path, "w") as file:
             yaml.dump(config, file, default_flow_style=False, sort_keys=False)
+
+        # Also save credentials to the active MCE environment record
+        api_url = update.credentials.get("OCP_HUB_API_URL", config.get("OCP_HUB_API_URL", ""))
+        if api_url:
+            try:
+                match = re.search(r"api\.([^.]+)", api_url)
+                if match:
+                    cluster_name = match.group(1)
+                    scripts_dir = os.path.join(project_root, "scripts")
+                    sys.path.insert(0, scripts_dir)
+                    from mce_env_manager import MCEEnvManager
+                    manager = MCEEnvManager()
+                    env = manager.get_environment(cluster_name)
+                    if env:
+                        manager.update_credentials(cluster_name, update.credentials)
+            except Exception as env_err:
+                print(f"Warning: could not save credentials to environment record: {env_err}")
 
         return {"success": True, "message": "Credentials saved successfully"}
 

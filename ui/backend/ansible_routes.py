@@ -16,6 +16,7 @@ Also contains:
 import asyncio
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -30,6 +31,30 @@ from agents_service import init_ai_agents
 from playbook_executor import build_playbook_command
 
 router = APIRouter()
+
+_active_job_processes: dict[str, subprocess.Popen] = {}
+
+
+def _kill_job_process_tree(proc: subprocess.Popen) -> None:
+    """Kill a subprocess and its entire process group."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        proc.kill()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def kill_job_subprocess(job_id: str) -> bool:
+    """Kill the subprocess for a job. Called by cancel_job."""
+    proc = _active_job_processes.pop(job_id, None)
+    if proc and proc.poll() is None:
+        print(f"[Playbook] Killing subprocess for cancelled job {job_id} (pid={proc.pid})")
+        _kill_job_process_tree(proc)
+        return True
+    return False
 
 
 def _resolve(name: str):
@@ -81,9 +106,10 @@ def run_ansible_task_background(
             if kube_context:
                 cmd.extend(["-e", f"KUBE_CONTEXT={kube_context}"])
 
-            # Add extra vars if provided
+            # Add extra vars if provided (skip empty values so vars_files defaults are used)
             for key, value in extra_vars.items():
-                cmd.extend(["-e", f"{key}={value}"])
+                if value != '':
+                    cmd.extend(["-e", f"{key}={value}"])
 
             print(f"Running ansible playbook: {' '.join(cmd)}")
 
@@ -93,6 +119,7 @@ def run_ansible_task_background(
                 capture_output=True,
                 text=True,
                 cwd=project_root,
+                timeout=5400,
             )
 
             # Extract detailed error messages
@@ -242,9 +269,10 @@ def run_ansible_task_background(
             if kube_context:
                 cmd.extend(["-e", f"KUBE_CONTEXT={kube_context}"])
 
-            # Add extra vars if provided
+            # Add extra vars if provided (skip empty values so vars_files defaults are used)
             for key, value in extra_vars.items():
-                cmd.extend(["-e", f"{key}={value}"])
+                if value != '':
+                    cmd.extend(["-e", f"{key}={value}"])
 
             print(f"Running ansible task: {' '.join(cmd)}")
 
@@ -523,9 +551,10 @@ async def run_ansible_role(request: dict):
                 "-v",  # Verbose output
             ]
 
-            # Add extra vars if provided
+            # Add extra vars if provided (skip empty values so vars_files defaults are used)
             for key, value in extra_vars.items():
-                cmd.extend(["-e", f"{key}={value}"])
+                if value != '':
+                    cmd.extend(["-e", f"{key}={value}"])
 
             print(f"Running ansible role: {' '.join(cmd)}")
 
@@ -625,7 +654,6 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
 
             def _tail_sidecar():
                 """Tail the sidecar log file and feed lines to the AI agent in real-time."""
-                import time as _sidecar_time
                 last_pos = 0
                 while not sidecar_stop.is_set():
                     try:
@@ -651,7 +679,7 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
                                 last_pos = f.tell()
                     except Exception:
                         pass
-                    _sidecar_time.sleep(2)  # Poll every 2 seconds
+                    sidecar_stop.wait(2)
 
             sidecar_thread = threading.Thread(target=_tail_sidecar, daemon=True)
             sidecar_thread.start()
@@ -720,11 +748,17 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             cmd, cwd=project_root,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, env=env,
+            start_new_session=True,
         )
+        _active_job_processes[job_id] = process
 
         import time as _time
         line_count = 0
         for line in process.stdout:
+            if jobs[job_id].get("status") == "failed":
+                _kill_job_process_tree(process)
+                break
+
             line_stripped = line.rstrip()
             jobs[job_id]["logs"].append(line_stripped)
 
@@ -762,11 +796,61 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             jobs[job_id]["message"] = f"Playbook failed with return code {returncode}"
 
         jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
+
+        if jobs[job_id]["status"] == "failed":
+            agent_stats = jobs[job_id].get("agent_stats", {})
+            if agent_stats.get("enabled") and agent_stats.get("interventions", 0) > 0:
+                agent_events = jobs[job_id].get("agent_events", [])
+                min_confidence = min(
+                    (e.get("confidence", 0) for e in agent_events if e.get("confidence", 0) > 0),
+                    default=0,
+                )
+                all_resolved = all(
+                    d.get("status") == "resolved"
+                    for d in agent_stats.get("resource_details", [])
+                    if d.get("issue_type")
+                )
+                if min_confidence >= 0.97 and all_resolved:
+                    resources_gone = True
+                    if is_deletion:
+                        ns = extra_vars.get("capi_namespace", "ns-rosa-hcp")
+                        cname = extra_vars.get(
+                            "cluster_name",
+                            extra_vars.get("clusterName", extra_vars.get("name_prefix", "")),
+                        )
+                        for rtype in ("rosacontrolplane", "rosanetwork", "rosaroleconfig"):
+                            try:
+                                check = subprocess.run(
+                                    ["oc", "get", rtype, "-n", ns, "--no-headers"],
+                                    capture_output=True, text=True, timeout=15,
+                                )
+                                if cname and cname in check.stdout:
+                                    resources_gone = False
+                                    print(
+                                        f"[AI Agent] {rtype} for {cname} still exists in {ns} "
+                                        f"— will not override failure"
+                                    )
+                                    break
+                            except Exception:
+                                resources_gone = False
+                                break
+
+                    if resources_gone:
+                        jobs[job_id]["status"] = "completed"
+                        jobs[job_id]["message"] = (
+                            "Deletion completed (agent-assisted: "
+                            f"{agent_stats['interventions']} fix(es) applied, "
+                            f"confidence {min_confidence:.0%})"
+                        )
+                        print(
+                            f"[AI Agent] Overrode failed status for job {job_id} — "
+                            f"all issues resolved with confidence >= 0.97, "
+                            f"K8s resources verified gone"
+                        )
         jobs[job_id]["completed_at"] = datetime.now().isoformat()
 
     except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
+        _kill_job_process_tree(process)
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["progress"] = 100
         jobs[job_id]["return_code"] = 1
@@ -783,6 +867,7 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
         jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
         jobs[job_id]["completed_at"] = datetime.now().isoformat()
     finally:
+        _active_job_processes.pop(job_id, None)
         # Stop the sidecar tailer thread
         if sidecar_stop is not None:
             sidecar_stop.set()
