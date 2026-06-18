@@ -406,6 +406,14 @@
     - "'not-found' not in rn_exists.stdout"
     - cfn_verify is defined
 
+- name: Clear ROSANetwork failure if CloudFormation stack confirmed deleted
+  set_fact:
+    rosanetwork_deletion_failed: false
+  when:
+    - rosanetwork_deletion_failed | default(false) | bool
+    - cfn_verify is defined
+    - cfn_verify.rc == 0
+
 - name: Emit agent context for ROSARoleConfig deletion wait
   shell: |
     echo "#AGENT_CONTEXT: resource_name={{ rosa_role_config_name }} namespace={{ capi_namespace }} resource_type=rosaroleconfig" | tee -a "{{ agent_sidecar_log }}"
@@ -495,7 +503,7 @@
       • ROSAMachinePool: ✅ Auto-deleted (cascade)
       {% endif %}
       {% if delete_network | bool and 'not-found' not in rn_exists.stdout %}
-      • ROSANetwork: {{ '✅ Deleted' if (wait_for_deletion and (wait_rn.rc == 0 or (final_rn_check.rc | default(1)) == 0)) else '⏳ Deletion initiated' }}
+      • ROSANetwork: {{ '✅ Deleted' if (wait_for_deletion and (wait_rn.rc == 0 or (final_rn_check.rc | default(1)) == 0 or (cfn_verify is defined and cfn_verify.rc == 0))) else '⏳ Deletion initiated' }}
       {% endif %}
       {% if delete_roles | bool and 'not-found' not in rrc_exists.stdout %}
       • ROSARoleConfig: {{ '✅ Deleted' if (wait_for_deletion and (wait_rrc.rc == 0 or (final_rrc_check.rc | default(1)) == 0)) else '⏳ Deletion initiated' }}

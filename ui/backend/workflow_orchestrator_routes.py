@@ -9,6 +9,9 @@ Endpoints:
   GET    /api/orchestrator/executions               — list recent executions
   GET    /api/orchestrator/executions/{id}          — get execution status
   POST   /api/orchestrator/executions/{id}/cancel   — cancel a running execution
+  GET    /api/orchestrator/workers                    — Celery worker status
+  GET    /api/orchestrator/redis-status               — Redis connectivity
+  GET    /api/orchestrator/executions/{id}/events     — Redis event history
 """
 
 from fastapi import APIRouter, HTTPException
@@ -70,7 +73,7 @@ async def api_start_execution(req: ExecuteRequest):
         try:
             mode = ExecutionMode(req.mode)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid mode: {req.mode}. Use 'local' or 'aws'.")
+            raise HTTPException(status_code=400, detail=f"Invalid mode: {req.mode}. Use 'local', 'celery', or 'aws'.")
 
     try:
         execution = await start_execution(req.state_machine, req.input_params, mode)
@@ -123,3 +126,38 @@ async def api_get_execution_agent_stats(execution_id: str):
         "agent_stats": _get_execution_agent_stats(execution),
         "agent_events": execution.agent_events,
     }
+
+
+@router.get("/workers")
+async def api_get_workers():
+    try:
+        from celery_app import get_worker_stats
+        return get_worker_stats()
+    except ImportError:
+        return {"available": False, "error": "Celery not installed"}
+
+
+@router.get("/redis-status")
+async def api_get_redis_status():
+    try:
+        from urllib.parse import urlparse
+        from celery_app import is_redis_available, REDIS_URL
+        available = is_redis_available()
+        parsed = urlparse(REDIS_URL)
+        safe_url = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 6379}/{parsed.path.lstrip('/')}"
+        return {
+            "available": available,
+            "url": safe_url,
+        }
+    except ImportError:
+        return {"available": False, "error": "Redis not installed"}
+
+
+@router.get("/executions/{execution_id}/events")
+async def api_get_execution_events(execution_id: str):
+    try:
+        from redis_events import get_event_history
+        events = get_event_history(execution_id)
+        return {"execution_id": execution_id, "events": events, "count": len(events)}
+    except ImportError:
+        return {"execution_id": execution_id, "events": [], "count": 0, "error": "Redis not available"}

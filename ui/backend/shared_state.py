@@ -31,3 +31,21 @@ ocp_status_cache = {
 
 # ── Last used YAML path for ROSA HCP provisioning ───────────────────────
 last_rosa_yaml_path = {"path": None}
+
+# ── Redis client (lazy init, optional) ──────────────────────────────
+_redis_client = None
+
+
+def get_redis_client():
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    try:
+        import os
+        import redis
+        url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        _redis_client = redis.Redis.from_url(url, socket_connect_timeout=2, decode_responses=True)
+        _redis_client.ping()
+        return _redis_client
+    except Exception:
+        return None

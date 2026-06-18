@@ -33,3 +33,7 @@ croniter>=2.0.0
 # Monitoring
 psutil==5.9.6
 sentry-sdk[fastapi]==1.45.1
+
+# Distributed task queue (Celery + Redis)
+celery[redis]>=5.3.0
+redis>=5.0.0

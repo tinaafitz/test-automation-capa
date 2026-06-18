@@ -9,9 +9,11 @@ Uses asyncio for parallel task execution, designed for local and Jenkins CI use.
 """
 
 import asyncio
+import io
 import json
 import logging
 import os
+import signal
 import sqlite3
 import subprocess
 import threading
@@ -34,6 +36,7 @@ except ImportError:
 class ExecutionMode(str, Enum):
     AWS = "aws"
     LOCAL = "local"
+    CELERY = "celery"
 
 
 class StepStatus(str, Enum):
@@ -668,6 +671,7 @@ class ExecutionStore:
 
 _execution_store = ExecutionStore()
 _executions_lock = asyncio.Lock()
+_active_subprocesses: dict[str, subprocess.Popen] = {}
 
 TASK_RESOURCE_MAP = {
     "preflight_check": "tasks/preflight_check_ocm_role.yml",
@@ -699,6 +703,8 @@ def get_execution_mode() -> ExecutionMode:
     mode = os.environ.get("ORCHESTRATOR_MODE", "local").lower()
     if mode == "aws":
         return ExecutionMode.AWS
+    if mode == "celery":
+        return ExecutionMode.CELERY
     return ExecutionMode.LOCAL
 
 
@@ -730,7 +736,9 @@ async def start_execution(
     async with _executions_lock:
         _execution_store.register(execution)
 
-    if mode == ExecutionMode.LOCAL:
+    if mode == ExecutionMode.CELERY:
+        asyncio.create_task(_run_celery_execution(execution))
+    elif mode == ExecutionMode.LOCAL:
         asyncio.create_task(_run_local_execution(execution))
     else:
         asyncio.create_task(_run_aws_execution(execution))
@@ -755,6 +763,12 @@ async def cancel_execution(execution_id: str) -> bool:
     if not execution:
         return False
     execution.cancel()
+    for key in list(_active_subprocesses.keys()):
+        if key.startswith(f"{execution_id}:"):
+            proc = _active_subprocesses.pop(key, None)
+            if proc and proc.poll() is None:
+                logger.warning(f"Killing subprocess for cancelled execution {key} (pid={proc.pid})")
+                _kill_process_tree(proc)
     _execution_store.persist(execution)
     return True
 
@@ -873,6 +887,291 @@ async def _run_local_execution(execution: StateMachineExecution):
         _execution_store.persist(execution)
 
 
+async def _run_celery_execution(execution: StateMachineExecution):
+    """Execute workflow via Celery distributed task queue."""
+    from celery_tasks import execute_ansible_step
+    from redis_events import publish_step_event
+
+    execution.status = StepStatus.RUNNING
+    execution.started_at = datetime.utcnow().isoformat()
+
+    definition = STATE_MACHINES.get(execution.state_machine_name, {})
+    states = definition.get("States", {})
+    current_state = definition.get("StartAt")
+
+    try:
+        while current_state and not execution._cancelled:
+            state_def = states.get(current_state)
+            if not state_def:
+                raise RuntimeError(f"State '{current_state}' not found in definition")
+
+            step = execution.steps.get(current_state)
+            if step and step.status == StepStatus.SUCCEEDED:
+                logger.info(f"[celery] Skipping completed step '{current_state}'")
+                if state_def.get("End"):
+                    break
+                current_state = state_def.get("Next")
+                continue
+
+            state_type = state_def.get("Type")
+
+            if state_type == "Task":
+                success = await _execute_celery_task(execution, current_state, state_def)
+                if not success:
+                    execution.status = StepStatus.FAILED
+                    execution.error = f"Step '{current_state}' failed"
+                    execution.completed_at = datetime.utcnow().isoformat()
+                    return
+
+            elif state_type == "StateMachine":
+                success = await _execute_nested_state_machine(execution, current_state, state_def)
+                if not success:
+                    execution.status = StepStatus.FAILED
+                    execution.error = f"Nested state machine '{current_state}' failed"
+                    execution.completed_at = datetime.utcnow().isoformat()
+                    return
+
+            elif state_type == "Parallel":
+                success = await _execute_celery_parallel(execution, current_state, state_def)
+                if not success:
+                    execution.status = StepStatus.FAILED
+                    execution.error = f"Parallel group '{current_state}' had failures"
+                    execution.completed_at = datetime.utcnow().isoformat()
+                    return
+
+            _execution_store.persist(execution)
+
+            if state_def.get("End"):
+                break
+            current_state = state_def.get("Next")
+
+        if execution._cancelled:
+            return
+
+        execution.status = StepStatus.SUCCEEDED
+        execution.completed_at = datetime.utcnow().isoformat()
+        logger.info(f"[celery] Execution {execution.execution_id} completed successfully")
+
+    except Exception as e:
+        execution.status = StepStatus.FAILED
+        execution.error = str(e)
+        execution.completed_at = datetime.utcnow().isoformat()
+        logger.error(f"[celery] Execution {execution.execution_id} failed: {e}")
+    finally:
+        _finalize_agents(execution)
+        _execution_store.persist(execution)
+
+
+async def _execute_celery_task(
+    execution: StateMachineExecution, state_name: str, state_def: dict
+) -> bool:
+    """Dispatch a single task step to a Celery worker and poll for completion."""
+    from celery_tasks import execute_ansible_step
+
+    step = execution.steps.get(state_name)
+    if not step:
+        return False
+
+    if step.status == StepStatus.SUCCEEDED:
+        return True
+
+    step.status = StepStatus.RUNNING
+    step.started_at = datetime.utcnow().isoformat()
+
+    resource = state_def.get("Resource", state_name)
+    task_file = TASK_RESOURCE_MAP.get(resource)
+    if not task_file:
+        step.status = StepStatus.FAILED
+        step.error = f"No task file mapped for resource '{resource}'"
+        step.completed_at = datetime.utcnow().isoformat()
+        return False
+
+    from celery_tasks import _strip_sensitive
+
+    extra_vars = {**execution.input_params}
+    _TEMPLATE_OVERRIDE_TASKS = {"create_rosa_role_config", "create_rosa_network"}
+    if resource in _TEMPLATE_OVERRIDE_TASKS:
+        extra_vars.pop("template_name", None)
+        extra_vars.pop("template_category", None)
+
+    safe_vars = _strip_sensitive(extra_vars)
+
+    retry_config = None
+    if state_def.get("Retry"):
+        rc = state_def["Retry"][0]
+        retry_config = {
+            "max_attempts": rc.get("MaxAttempts", 0),
+            "interval": rc.get("IntervalSeconds", 10),
+            "backoff_rate": rc.get("BackoffRate", 2.0),
+        }
+
+    try:
+        async_result = execute_ansible_step.apply_async(
+            kwargs={
+                "execution_id": execution.execution_id,
+                "step_name": state_name,
+                "resource": resource,
+                "task_file": task_file,
+                "extra_vars": safe_vars,
+                "timeout": step.timeout,
+                "retry_config": retry_config,
+            },
+            soft_time_limit=step.timeout,
+            time_limit=step.timeout + 60,
+        )
+        step.job_id = async_result.id
+
+        while not execution._cancelled:
+            await asyncio.sleep(3)
+            if async_result.ready():
+                break
+
+        if execution._cancelled:
+            try:
+                async_result.revoke(terminate=True)
+            except Exception:
+                pass
+            step.status = StepStatus.CANCELLED
+            step.completed_at = datetime.utcnow().isoformat()
+            return False
+
+        try:
+            result = async_result.result
+        except Exception as e:
+            step.status = StepStatus.FAILED
+            step.error = f"Failed to retrieve task result: {e}"
+            step.completed_at = datetime.utcnow().isoformat()
+            return False
+
+        step.completed_at = datetime.utcnow().isoformat()
+
+        if isinstance(result, dict) and result.get("success"):
+            step.status = StepStatus.SUCCEEDED
+            step.output = result.get("output", "")
+            return True
+        else:
+            step.status = StepStatus.FAILED
+            step.error = result.get("error", "Task failed") if isinstance(result, dict) else str(result)
+            return False
+
+    except Exception as e:
+        step.status = StepStatus.FAILED
+        step.error = str(e)
+        step.completed_at = datetime.utcnow().isoformat()
+        return False
+
+
+async def _execute_celery_parallel(
+    execution: StateMachineExecution, state_name: str, state_def: dict
+) -> bool:
+    """Dispatch parallel branches to Celery workers using celery.group."""
+    from celery import group as celery_group
+    from celery_tasks import execute_ansible_step
+
+    branches = state_def.get("Branches", [])
+
+    all_done = all(
+        execution.steps.get(b.get("StartAt"), StepExecution("", "")).status == StepStatus.SUCCEEDED
+        for b in branches if b.get("StartAt")
+    )
+    if all_done and branches:
+        return True
+
+    tasks = []
+    step_names = []
+    for branch in branches:
+        branch_start = branch.get("StartAt")
+        branch_states = branch.get("States", {})
+        if not branch_start or branch_start not in branch_states:
+            continue
+
+        task_def = branch_states[branch_start]
+        resource = task_def.get("Resource", branch_start)
+        task_file = TASK_RESOURCE_MAP.get(resource)
+        if not task_file:
+            continue
+
+        step = execution.steps.get(branch_start)
+        if step and step.status == StepStatus.SUCCEEDED:
+            continue
+
+        if step:
+            step.status = StepStatus.RUNNING
+            step.started_at = datetime.utcnow().isoformat()
+
+        from celery_tasks import _strip_sensitive
+
+        extra_vars = {**execution.input_params}
+        _TEMPLATE_OVERRIDE_TASKS = {"create_rosa_role_config", "create_rosa_network"}
+        if resource in _TEMPLATE_OVERRIDE_TASKS:
+            extra_vars.pop("template_name", None)
+            extra_vars.pop("template_category", None)
+
+        safe_vars = _strip_sensitive(extra_vars)
+
+        retry_config = None
+        if task_def.get("Retry"):
+            rc = task_def["Retry"][0]
+            retry_config = {
+                "max_attempts": rc.get("MaxAttempts", 0),
+                "interval": rc.get("IntervalSeconds", 10),
+                "backoff_rate": rc.get("BackoffRate", 2.0),
+            }
+
+        timeout = task_def.get("TimeoutSeconds", 300)
+        tasks.append(execute_ansible_step.s(
+            execution_id=execution.execution_id,
+            step_name=branch_start,
+            resource=resource,
+            task_file=task_file,
+            extra_vars=safe_vars,
+            timeout=timeout,
+            retry_config=retry_config,
+        ))
+        step_names.append(branch_start)
+
+    if not tasks:
+        return True
+
+    job = celery_group(tasks)
+    group_result = job.apply_async()
+
+    while not execution._cancelled:
+        await asyncio.sleep(3)
+        if group_result.ready():
+            break
+
+    if execution._cancelled:
+        for child in group_result.children or []:
+            child.revoke(terminate=True)
+        return False
+
+    all_ok = True
+    for i, child_result in enumerate(group_result.results):
+        step_name = step_names[i] if i < len(step_names) else None
+        step = execution.steps.get(step_name) if step_name else None
+
+        try:
+            result = child_result.result
+            if step:
+                step.completed_at = datetime.utcnow().isoformat()
+                if isinstance(result, dict) and result.get("success"):
+                    step.status = StepStatus.SUCCEEDED
+                    step.output = result.get("output", "")
+                else:
+                    step.status = StepStatus.FAILED
+                    step.error = result.get("error", "Task failed") if isinstance(result, dict) else str(result)
+                    all_ok = False
+        except Exception as e:
+            if step:
+                step.status = StepStatus.FAILED
+                step.error = str(e)
+                step.completed_at = datetime.utcnow().isoformat()
+            all_ok = False
+
+    return all_ok
+
+
 def _finalize_agents(execution: StateMachineExecution):
     """Collect agent events and run learning summary."""
     if not AGENTS_AVAILABLE:
@@ -884,6 +1183,40 @@ def _finalize_agents(execution: StateMachineExecution):
             execution.agent_session["learning"].end_of_run_summary()
     except Exception as e:
         logger.warning(f"Agent finalization error: {e}")
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """Kill a subprocess and its entire process group."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        proc.kill()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _kill_active_subprocess(execution_id: str, step_name: str) -> None:
+    """Kill a subprocess left behind after an async timeout.
+
+    Also closes proc.stdout to unblock any thread stuck on os.read()
+    or readline() — the asyncio.wait_for timeout cannot interrupt a
+    blocked OS-level read in a thread, so closing the FD is the only
+    way to free the thread.
+    """
+    proc_key = f"{execution_id}:{step_name}"
+    proc = _active_subprocesses.pop(proc_key, None)
+    if proc:
+        if proc.poll() is None:
+            logger.warning(f"Killing zombie subprocess for {proc_key} (pid={proc.pid})")
+            _kill_process_tree(proc)
+        # Close stdout pipe to unblock any thread doing os.read()/readline()
+        try:
+            if proc.stdout and not proc.stdout.closed:
+                proc.stdout.close()
+        except Exception:
+            pass
 
 
 async def _execute_local_task(
@@ -920,11 +1253,24 @@ async def _execute_local_task(
 
         extra_vars = {**execution.input_params}
 
+        # Tasks that resolve their own templates must not inherit the
+        # orchestrator's default template_name/template_category, because
+        # Ansible -e vars override set_fact inside the task file.
+        _TEMPLATE_OVERRIDE_TASKS = {
+            "create_rosa_role_config", "create_rosa_network",
+        }
+        if resource in _TEMPLATE_OVERRIDE_TASKS:
+            extra_vars.pop("template_name", None)
+            extra_vars.pop("template_category", None)
+
         pre_event_count = len(jobs.get(execution.execution_id, {}).get("agent_events", [])) if AGENTS_AVAILABLE else 0
 
-        result = await asyncio.to_thread(
-            _run_ansible_task_sync, project_root, task_file, extra_vars, step.timeout,
-            execution.execution_id, state_name,
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                _run_ansible_task_sync, project_root, task_file, extra_vars, step.timeout,
+                execution.execution_id, state_name,
+            ),
+            timeout=step.timeout + 30,
         )
 
         step.completed_at = datetime.utcnow().isoformat()
@@ -949,10 +1295,11 @@ async def _execute_local_task(
             step.error = result.get("error", "Task failed")
             return False
 
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, TimeoutError):
         step.status = StepStatus.TIMED_OUT
         step.error = f"Timed out after {step.timeout}s"
         step.completed_at = datetime.utcnow().isoformat()
+        _kill_active_subprocess(execution.execution_id, state_name)
         return False
     except Exception as e:
         step.status = StepStatus.FAILED
@@ -986,10 +1333,20 @@ async def _handle_retry(
         await asyncio.sleep(wait_time)
 
         step.status = StepStatus.RUNNING
-        result = await asyncio.to_thread(
-            _run_ansible_task_sync, project_root, task_file, extra_vars, step.timeout,
-            execution.execution_id, step.name,
-        )
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _run_ansible_task_sync, project_root, task_file, extra_vars, step.timeout,
+                    execution.execution_id, step.name,
+                ),
+                timeout=step.timeout + 30,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            step.status = StepStatus.TIMED_OUT
+            step.error = f"Retry {attempt + 1} timed out after {step.timeout}s"
+            step.completed_at = datetime.utcnow().isoformat()
+            _kill_active_subprocess(execution.execution_id, step.name)
+            return False
 
         if result["success"]:
             step.status = StepStatus.SUCCEEDED
@@ -1066,6 +1423,7 @@ async def _execute_nested_state_machine(
         while not execution._cancelled:
             await asyncio.sleep(3)
             if time.time() - poll_start > step.timeout:
+                await cancel_execution(sub_execution.execution_id)
                 step.status = StepStatus.TIMED_OUT
                 step.error = f"Nested state machine '{nested_sm_name}' timed out after {step.timeout}s"
                 step.completed_at = datetime.utcnow().isoformat()
@@ -1094,6 +1452,26 @@ async def _execute_nested_state_machine(
         step.error = str(e)
         step.completed_at = datetime.utcnow().isoformat()
         return False
+
+
+_TASK_TEMPLATE_MAP = {
+    "create_rosa_role_config": ("rosa-role-config", "features"),
+    "create_rosa_network": ("rosa-network-config", "features"),
+}
+
+
+def _resolve_template_name(task_file: str) -> str:
+    for key, (name, _) in _TASK_TEMPLATE_MAP.items():
+        if key in task_file:
+            return name
+    return "rosa-controlplane-only"
+
+
+def _resolve_template_category(task_file: str) -> str:
+    for key, (_, cat) in _TASK_TEMPLATE_MAP.items():
+        if key in task_file:
+            return cat
+    return "features"
 
 
 def _run_ansible_task_sync(
@@ -1148,8 +1526,8 @@ def _run_ansible_task_sync(
     create_rosa_roles: {extra_vars.get('create_rosa_roles', 'true')}
     create_rosa_network: {extra_vars.get('create_rosa_network', 'true')}
     rcp_version: "{extra_vars.get('openshift_version', '4.20.10')}"
-    template_name: "rosa-controlplane-only"
-    template_category: "features"
+    template_name: "{_resolve_template_name(task_file)}"
+    template_category: "{_resolve_template_category(task_file)}"
     channel: ""
     channel_group: ""
     fips: false
@@ -1213,8 +1591,8 @@ def _run_ansible_task_sync(
         "api_url": extra_vars.get("OCP_HUB_API_URL", ""),
         "mce_namespace": extra_vars.get("MCE_NAMESPACE", "multicluster-engine"),
         "MCE_NAMESPACE": extra_vars.get("MCE_NAMESPACE", "multicluster-engine"),
-        "template_name": "rosa-controlplane-only",
-        "template_category": "features",
+        "template_name": _resolve_template_name(task_file),
+        "template_category": _resolve_template_category(task_file),
         "channel": "",
         "channel_group": "",
         "fips": False,
@@ -1261,6 +1639,7 @@ def _run_ansible_task_sync(
 
     agent_session = ai_agent_sessions.get(execution_id) if (AGENTS_AVAILABLE and execution_id) else None
     agent_lock = threading.Lock()
+    agent_seen_lines: set[str] = set()
 
     is_deletion = "delete" in task_file.lower()
     is_provisioning = "create" in task_file.lower() or "provision" in task_file.lower()
@@ -1282,11 +1661,13 @@ def _run_ansible_task_sync(
                             for line in f:
                                 line = line.strip()
                                 if line and agent_session.get("monitor"):
-                                    try:
-                                        with agent_lock:
-                                            agent_session["monitor"].process_line(line)
-                                    except Exception:
-                                        pass
+                                    with agent_lock:
+                                        if line not in agent_seen_lines:
+                                            agent_seen_lines.add(line)
+                                            try:
+                                                agent_session["monitor"].process_line(line)
+                                            except Exception:
+                                                pass
                             last_pos = f.tell()
                 except Exception:
                     pass
@@ -1296,6 +1677,7 @@ def _run_ansible_task_sync(
         sidecar_thread.start()
 
     vars_file_path = None
+    proc_key = f"{execution_id}:{step_name}" if execution_id else f"anon:{id(task_file)}"
     try:
         import tempfile as _tmpmod
         from playbook_executor import build_playbook_command, SENSITIVE_KEYS
@@ -1339,21 +1721,186 @@ def _run_ansible_task_sync(
             cmd, cwd=project_root,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, env=env,
+            start_new_session=True,
         )
+        _active_subprocesses[proc_key] = proc
+
+        cpu_samples: list[dict] = []
+        cpu_stop = threading.Event()
+
+        def _sample_cpu():
+            try:
+                import psutil
+            except ImportError:
+                return
+            if not isinstance(proc.pid, int):
+                return
+            backend_proc = psutil.Process()
+            backend_proc.cpu_percent()
+            try:
+                child_proc = psutil.Process(proc.pid)
+                child_proc.cpu_percent()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                child_proc = None
+            while not cpu_stop.wait(10):
+                sample = {"t": time.time(), "backend": backend_proc.cpu_percent()}
+                try:
+                    if child_proc and child_proc.is_running():
+                        kids = child_proc.children(recursive=True)
+                        sample["subprocess"] = child_proc.cpu_percent()
+                        sample["child_tree"] = sum(c.cpu_percent() for c in kids)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+                cpu_samples.append(sample)
+
+        cpu_thread = threading.Thread(target=_sample_cpu, daemon=True)
+        cpu_thread.start()
 
         output_lines = []
-        for line in proc.stdout:
-            line_stripped = line.rstrip()
-            output_lines.append(line_stripped)
-            if agent_session and agent_session.get("monitor"):
-                try:
-                    with agent_lock:
-                        agent_session["monitor"].process_line(line_stripped)
-                except Exception:
-                    pass
+        deadline = time.time() + timeout
 
-        returncode = proc.wait(timeout=timeout)
+        # Read stdout using raw os.read() with select() to prevent the
+        # thread from blocking indefinitely.  The previous approach used
+        # select() + proc.stdout.readline(), but readline() is a *buffered*
+        # read that blocks waiting for a full line even after select()
+        # reports data available — it can hang when a grandchild holds the
+        # pipe open and writes partial data (or no newlines).
+        #
+        # os.read() returns immediately with whatever raw bytes are
+        # available (no newline requirement), so select() + os.read()
+        # is a truly non-blocking combination.  We split lines manually.
+        import select as _select
+
+        try:
+            stdout_fd = proc.stdout.fileno()
+            use_raw_read = True
+        except (AttributeError, io.UnsupportedOperation):
+            use_raw_read = False
+
+        _PIPE_GRACE_SECS = 10  # seconds to drain after process exits
+        _proc_exit_time: float | None = None
+        _raw_buf = ""
+
+        def _feed_agent(line_stripped: str):
+            if agent_session and agent_session.get("monitor"):
+                with agent_lock:
+                    if line_stripped not in agent_seen_lines:
+                        agent_seen_lines.add(line_stripped)
+                        try:
+                            agent_session["monitor"].process_line(line_stripped)
+                        except Exception:
+                            pass
+
+        if use_raw_read:
+            while True:
+                if time.time() > deadline:
+                    _kill_process_tree(proc)
+                    return {"success": False, "error": f"Timed out after {timeout}s"}
+
+                # Detect process exit and enforce grace period
+                if proc.poll() is not None:
+                    if _proc_exit_time is None:
+                        _proc_exit_time = time.time()
+                    elif (time.time() - _proc_exit_time) > _PIPE_GRACE_SECS:
+                        logger.warning(
+                            f"[{step_name}] Pipe still open {_PIPE_GRACE_SECS}s "
+                            f"after process exit (pid={proc.pid}). "
+                            f"Killing process group and closing pipe."
+                        )
+                        try:
+                            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                        except (ProcessLookupError, PermissionError, OSError):
+                            pass
+                        break
+
+                ready, _, _ = _select.select([stdout_fd], [], [], 1.0)
+                if not ready:
+                    continue
+
+                # os.read() returns immediately with available bytes —
+                # never blocks waiting for a newline like readline() does.
+                try:
+                    chunk = os.read(stdout_fd, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    # True EOF — all writers have closed the pipe
+                    break
+
+                _raw_buf += chunk.decode("utf-8", errors="replace")
+                while "\n" in _raw_buf:
+                    line_text, _raw_buf = _raw_buf.split("\n", 1)
+                    line_stripped = line_text.rstrip()
+                    output_lines.append(line_stripped)
+                    _feed_agent(line_stripped)
+        else:
+            # Fallback for platforms where fileno() is unavailable.
+            # Uses a watchdog thread to force-close the pipe if the
+            # process exits but the pipe stays open.
+            _watchdog_stop = threading.Event()
+
+            def _pipe_watchdog():
+                """Close proc.stdout if process dies but pipe stays open."""
+                while not _watchdog_stop.wait(2):
+                    if proc.poll() is not None:
+                        # Process exited — give a grace period to drain
+                        _watchdog_stop.wait(_PIPE_GRACE_SECS)
+                        if not _watchdog_stop.is_set():
+                            logger.warning(
+                                f"[{step_name}] Watchdog: force-closing "
+                                f"stdout pipe (pid={proc.pid})"
+                            )
+                            try:
+                                proc.stdout.close()
+                            except Exception:
+                                pass
+                        return
+
+            wd_thread = threading.Thread(target=_pipe_watchdog, daemon=True)
+            wd_thread.start()
+            try:
+                for line in proc.stdout:
+                    if time.time() > deadline:
+                        _kill_process_tree(proc)
+                        return {"success": False, "error": f"Timed out after {timeout}s"}
+                    line_stripped = line.rstrip()
+                    output_lines.append(line_stripped)
+                    _feed_agent(line_stripped)
+            except ValueError:
+                # Pipe was closed by watchdog — expected
+                logger.info(f"[{step_name}] stdout closed by watchdog, exiting read loop")
+            finally:
+                _watchdog_stop.set()
+                wd_thread.join(timeout=3)
+
+        # Flush any trailing partial line
+        if _raw_buf.strip():
+            output_lines.append(_raw_buf.strip())
+
+        # Ensure pipe FD is closed to prevent leaked descriptors
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+
+        returncode = proc.wait(timeout=10)
         combined_output = "\n".join(output_lines)
+
+        cpu_stop.set()
+        cpu_thread.join(timeout=3)
+        if cpu_samples:
+            backend_avg = sum(s.get("backend", 0) for s in cpu_samples) / len(cpu_samples)
+            sub_avg = sum(s.get("subprocess", 0) for s in cpu_samples) / len(cpu_samples)
+            tree_avg = sum(s.get("child_tree", 0) for s in cpu_samples) / len(cpu_samples)
+            backend_peak = max(s.get("backend", 0) for s in cpu_samples)
+            sub_peak = max(s.get("subprocess", 0) for s in cpu_samples)
+            tree_peak = max(s.get("child_tree", 0) for s in cpu_samples)
+            logger.info(
+                f"[CPU] step={step_name} samples={len(cpu_samples)} "
+                f"backend_avg={backend_avg:.1f}% peak={backend_peak:.1f}% | "
+                f"ansible_avg={sub_avg:.1f}% peak={sub_peak:.1f}% | "
+                f"child_tree_avg={tree_avg:.1f}% peak={tree_peak:.1f}%"
+            )
 
         return {
             "success": returncode == 0,
@@ -1361,12 +1908,15 @@ def _run_ansible_task_sync(
             "error": combined_output[-3000:] if returncode != 0 else "",
         }
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        _kill_process_tree(proc)
+        cpu_stop.set()
         return {"success": False, "error": f"Timed out after {timeout}s"}
     except Exception as e:
+        cpu_stop.set()
         return {"success": False, "error": str(e)}
     finally:
+        cpu_stop.set()
+        _active_subprocesses.pop(proc_key, None)
         sidecar_stop.set()
         if sidecar_thread is not None:
             sidecar_thread.join(timeout=5)
