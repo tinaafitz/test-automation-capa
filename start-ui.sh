@@ -5,6 +5,9 @@
 
 set -e
 
+export SSL_CERT_FILE=${SSL_CERT_FILE:-$(python3 -c "import certifi; print(certifi.where())" 2>/dev/null)}
+export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
+
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'

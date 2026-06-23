@@ -523,3 +523,67 @@
       {{ '⚠️  ROSAControlPlane timed out' if (rcp_deletion_failed | default(false)) else '' }}
       {{ '⚠️  ROSANetwork timed out' if (rosanetwork_deletion_failed | default(false)) else '' }}
   when: (rcp_deletion_failed | default(false)) or (rosanetwork_deletion_failed | default(false))
+
+# ================================================================
+# Post-deletion: Verify all CRs are fully removed (resurrection bug evidence)
+# ================================================================
+- name: Final verification - check for any remaining CRs in namespace
+  shell: |
+    REMAINING=""
+    for RESOURCE_TYPE in rosacontrolplane rosanetwork rosaroleconfig cluster.cluster.x-k8s.io rosamachinepool machinepool.cluster.x-k8s.io; do
+      ITEMS=$(oc get ${RESOURCE_TYPE} -n {{ capi_namespace }} -o json 2>/dev/null | python3 -c "
+    import sys, json
+    data = json.load(sys.stdin)
+    for item in data.get('items', []):
+        name = item['metadata']['name']
+        dt = item['metadata'].get('deletionTimestamp', '')
+        finalizers = item['metadata'].get('finalizers', [])
+        print(json.dumps({'type': '${RESOURCE_TYPE}', 'name': name, 'deletionTimestamp': dt, 'finalizers': finalizers}))
+    " 2>/dev/null)
+      if [ -n "$ITEMS" ]; then
+        REMAINING="${REMAINING}${ITEMS}\n"
+      fi
+    done
+    if [ -n "$REMAINING" ]; then
+      echo "RESIDUAL_CRS_FOUND"
+      echo -e "$REMAINING"
+    else
+      echo "ALL_CRS_REMOVED"
+    fi
+  register: post_deletion_verify
+  changed_when: false
+
+- name: Log post-deletion state for resurrection bug tracking
+  shell: |
+    LOGDIR="/tmp/capa-resurrection-evidence"
+    mkdir -p "$LOGDIR"
+    LOGFILE="$LOGDIR/post-deletion-$(date +%Y%m%d-%H%M%S).json"
+    python3 -c "
+    import json, datetime
+    record = {
+        'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+        'event': 'post_deletion_verification',
+        'cluster_name': '{{ cluster_name }}',
+        'namespace': '{{ capi_namespace }}',
+        'status': 'residual_crs' if 'RESIDUAL_CRS_FOUND' in '''{{ post_deletion_verify.stdout }}''' else 'clean',
+        'raw_output': '''{{ post_deletion_verify.stdout }}''',
+        'rcp_deletion_failed': {{ rcp_deletion_failed | default(false) | lower }},
+        'rosanetwork_deletion_failed': {{ rosanetwork_deletion_failed | default(false) | lower }},
+    }
+    print(json.dumps(record, indent=2))
+    " > "$LOGFILE"
+    echo "Post-deletion evidence logged to $LOGFILE"
+  changed_when: false
+
+- name: Warn about residual CRs that may cause resurrection
+  debug:
+    msg: |
+      ╔═══════════════════════════════════════════════════════════════╗
+      ║  WARNING: Residual CRs detected after deletion
+      ╠═══════════════════════════════════════════════════════════════╣
+      {{ post_deletion_verify.stdout }}
+      ║                                                               ║
+      ║  These CRs may resurrect on controller restart.              ║
+      ║  Evidence logged to /tmp/capa-resurrection-evidence/          ║
+      ╚═══════════════════════════════════════════════════════════════╝
+  when: "'RESIDUAL_CRS_FOUND' in post_deletion_verify.stdout"

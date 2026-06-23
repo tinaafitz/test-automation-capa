@@ -10,9 +10,16 @@ organization linkage.
 import json
 import logging
 import os
+import ssl
 import urllib.request
 import urllib.parse
 from typing import Optional, Tuple
+
+try:
+    import certifi
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CONTEXT = None
 
 try:
     import boto3
@@ -69,7 +76,7 @@ class OcmRoleManager:
                 body = urllib.parse.urlencode(data).encode()
 
         req = urllib.request.Request(url, data=body, headers=hdrs, method=method)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CONTEXT) as resp:
             return json.loads(resp.read().decode())
 
     def get_ocm_access_token(self) -> str:

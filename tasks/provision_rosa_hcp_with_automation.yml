@@ -113,6 +113,499 @@
       ═══════════════════════════════════════════════════════════════
 
 # ================================================================
+# PRE-STEP: Check for stale CRs from previous cluster (resurrection bug)
+# ================================================================
+- name: Check for stale CAPA CRs in namespace
+  shell: |
+    STALE_CRS=""
+    STALE_JSON="[]"
+    for RESOURCE_TYPE in rosacontrolplane rosanetwork rosaroleconfig cluster.cluster.x-k8s.io rosamachinepool machinepool.cluster.x-k8s.io; do
+      ITEMS=$(oc get ${RESOURCE_TYPE} -n {{ capi_namespace }} -o json 2>/dev/null | python3 -c "
+    import sys, json
+    data = json.load(sys.stdin)
+    for item in data.get('items', []):
+        name = item['metadata']['name']
+        dt = item['metadata'].get('deletionTimestamp', '')
+        finalizers = item['metadata'].get('finalizers', [])
+        rv = item['metadata'].get('resourceVersion', '')
+        conditions = json.dumps(item.get('status', {}).get('conditions', []))
+        print(json.dumps({'type': '${RESOURCE_TYPE}', 'name': name, 'deletionTimestamp': dt, 'finalizers': finalizers, 'resourceVersion': rv, 'conditions': conditions}))
+    " 2>/dev/null)
+      if [ -n "$ITEMS" ]; then
+        while IFS= read -r line; do
+          STALE_CRS="${STALE_CRS}${RESOURCE_TYPE}/$(echo "$line" | python3 -c "import sys,json;d=json.load(sys.stdin);print(f'{d[\"name\"]}|{d[\"deletionTimestamp\"]}|{\";\".join(d[\"finalizers\"])}')")\n"
+          STALE_JSON=$(echo "$STALE_JSON" | python3 -c "import sys,json;arr=json.load(sys.stdin);arr.append($line);print(json.dumps(arr))")
+        done <<< "$ITEMS"
+      fi
+    done
+    if [ -n "$STALE_CRS" ]; then
+      echo "STALE_CRS_FOUND"
+      echo -e "$STALE_CRS"
+    else
+      echo "CLEAN"
+    fi
+  register: stale_cr_check
+  changed_when: false
+
+- name: Display stale CR warning
+  debug:
+    msg: |
+      ╔═══════════════════════════════════════════════════════════════╗
+      ║  WARNING: Stale CAPA CRs detected in {{ capi_namespace }}
+      ╠═══════════════════════════════════════════════════════════════╣
+      {{ stale_cr_check.stdout }}
+      ║                                                               ║
+      ║  These may cause the resurrection bug where a previously      ║
+      ║  deleted cluster re-provisions its resources.                 ║
+      ╚═══════════════════════════════════════════════════════════════╝
+  when: "'STALE_CRS_FOUND' in stale_cr_check.stdout"
+
+- name: Log stale CR detection for resurrection bug evidence
+  shell: |
+    LOGDIR="/tmp/capa-resurrection-evidence"
+    mkdir -p "$LOGDIR"
+    LOGFILE="$LOGDIR/stale-cr-$(date +%Y%m%d-%H%M%S).json"
+    python3 -c "
+    import json, datetime
+    record = {
+        'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+        'event': 'stale_crs_detected_pre_provision',
+        'target_cluster': '{{ cluster_name }}',
+        'namespace': '{{ capi_namespace }}',
+        'raw_output': '''{{ stale_cr_check.stdout }}''',
+    }
+    print(json.dumps(record, indent=2))
+    " > "$LOGFILE"
+    echo "Evidence logged to $LOGFILE"
+  changed_when: false
+  when: "'STALE_CRS_FOUND' in stale_cr_check.stdout"
+
+- name: Check AWS for orphaned resources from stale CRs
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ AWS_ACCESS_KEY_ID | default(omit) }}"
+    AWS_SECRET_ACCESS_KEY: "{{ AWS_SECRET_ACCESS_KEY | default(omit) }}"
+  shell: |
+    REGION="{{ aws_region | default('us-west-2') }}"
+    ORPHANS=""
+    for CR_LINE in $(echo -e "{{ stale_cr_check.stdout }}" | grep '/' | awk -F'|' '{print $1}'); do
+      RESOURCE_TYPE=$(echo "$CR_LINE" | cut -d'/' -f1)
+      CR_NAME=$(echo "$CR_LINE" | cut -d'/' -f2)
+      case "$RESOURCE_TYPE" in
+        rosanetwork)
+          STACK_PREFIX=$(echo "$CR_NAME" | sed 's/-network$//')
+          STACK_NAME="${STACK_PREFIX}-rosa-network-stack"
+          STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>&1)
+          if [ $? -eq 0 ] && [ "$STATUS" != "DELETE_COMPLETE" ]; then
+            ORPHANS="${ORPHANS}CloudFormation stack ${STACK_NAME} (${STATUS})\n"
+          fi
+          ;;
+        rosaroleconfig)
+          ROLE_PREFIX=$(echo "$CR_NAME" | sed 's/-roles$//')
+          for ROLE_SUFFIX in Installer-Role Support-Role Worker-Role; do
+            ROLE_NAME="${ROLE_PREFIX}-${ROLE_SUFFIX}"
+            aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1
+            if [ $? -eq 0 ]; then
+              ORPHANS="${ORPHANS}IAM role ${ROLE_NAME}\n"
+            fi
+          done
+          OIDC_ARNS=$(aws iam list-open-id-connect-providers --query "OpenIDConnectProviderList[].Arn" --output text 2>/dev/null | tr '\t' '\n' | while read arn; do
+            TAGS=$(aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$arn" --query "Tags" --output json 2>/dev/null)
+            if echo "$TAGS" | grep -q "$ROLE_PREFIX" 2>/dev/null; then
+              echo "$arn"
+            fi
+          done)
+          if [ -n "$OIDC_ARNS" ]; then
+            ORPHANS="${ORPHANS}OIDC provider(s) for ${ROLE_PREFIX}: ${OIDC_ARNS}\n"
+          fi
+          ;;
+      esac
+    done
+    if [ -n "$ORPHANS" ]; then
+      echo "AWS_ORPHANS_FOUND"
+      echo -e "$ORPHANS"
+    else
+      echo "NO_AWS_ORPHANS"
+    fi
+  register: aws_orphan_check
+  changed_when: false
+  failed_when: false
+  when: "'STALE_CRS_FOUND' in stale_cr_check.stdout"
+
+- name: Display AWS orphan warning
+  debug:
+    msg: |
+      ╔═══════════════════════════════════════════════════════════════╗
+      ║  WARNING: Orphaned AWS resources found from stale CRs
+      ╠═══════════════════════════════════════════════════════════════╣
+      {{ aws_orphan_check.stdout }}
+      ╚═══════════════════════════════════════════════════════════════╝
+  when:
+    - "'STALE_CRS_FOUND' in stale_cr_check.stdout"
+    - aws_orphan_check is defined
+    - "'AWS_ORPHANS_FOUND' in aws_orphan_check.stdout"
+
+- name: Clean up orphaned CloudFormation stacks before removing finalizers
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ AWS_ACCESS_KEY_ID | default(omit) }}"
+    AWS_SECRET_ACCESS_KEY: "{{ AWS_SECRET_ACCESS_KEY | default(omit) }}"
+  shell: |
+    REGION="{{ aws_region | default('us-west-2') }}"
+    for CR_LINE in $(echo -e "{{ stale_cr_check.stdout }}" | grep 'rosanetwork/' | awk -F'|' '{print $1}'); do
+      CR_NAME=$(echo "$CR_LINE" | cut -d'/' -f2)
+      STACK_PREFIX=$(echo "$CR_NAME" | sed 's/-network$//')
+      STACK_NAME="${STACK_PREFIX}-rosa-network-stack"
+      STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>&1)
+      if [ $? -ne 0 ]; then
+        echo "Stack $STACK_NAME does not exist — safe to proceed"
+        continue
+      fi
+      if [ "$STATUS" = "DELETE_COMPLETE" ]; then
+        echo "Stack $STACK_NAME already deleted"
+        continue
+      fi
+      if [ "$STATUS" = "DELETE_FAILED" ]; then
+        echo "Stack $STACK_NAME in DELETE_FAILED — cleaning orphaned resources"
+        VPC_ID=$(aws cloudformation describe-stack-resources --stack-name "$STACK_NAME" --region "$REGION" --query "StackResources[?ResourceType=='AWS::EC2::VPC'].PhysicalResourceId" --output text 2>/dev/null)
+        if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
+          for SG_ID in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --region "$REGION" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); do
+            echo "Deleting orphaned security group $SG_ID"
+            aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION" 2>/dev/null || true
+          done
+          for ENI_ID in $(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --region "$REGION" --query "NetworkInterfaces[].NetworkInterfaceId" --output text 2>/dev/null); do
+            ATTACH_ID=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI_ID" --region "$REGION" --query "NetworkInterfaces[0].Attachment.AttachmentId" --output text 2>/dev/null)
+            if [ -n "$ATTACH_ID" ] && [ "$ATTACH_ID" != "None" ]; then
+              aws ec2 detach-network-interface --attachment-id "$ATTACH_ID" --force --region "$REGION" 2>/dev/null || true
+              sleep 2
+            fi
+            echo "Deleting orphaned ENI $ENI_ID"
+            aws ec2 delete-network-interface --network-interface-id "$ENI_ID" --region "$REGION" 2>/dev/null || true
+          done
+          for EP_ID in $(aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID" --region "$REGION" --query "VpcEndpoints[].VpcEndpointId" --output text 2>/dev/null); do
+            echo "Deleting orphaned VPC endpoint $EP_ID"
+            aws ec2 delete-vpc-endpoints --vpc-endpoint-ids "$EP_ID" --region "$REGION" 2>/dev/null || true
+          done
+        fi
+        echo "Retrying stack deletion for $STACK_NAME"
+        aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$REGION" 2>/dev/null || true
+      elif [ "$STATUS" != "DELETE_IN_PROGRESS" ]; then
+        echo "Initiating deletion of stack $STACK_NAME (status: $STATUS)"
+        aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$REGION" 2>/dev/null || true
+      else
+        echo "Stack $STACK_NAME already DELETE_IN_PROGRESS"
+      fi
+    done
+  register: cfn_cleanup
+  changed_when: "'Deleting' in cfn_cleanup.stdout or 'Retrying' in cfn_cleanup.stdout or 'Initiating' in cfn_cleanup.stdout"
+  failed_when: false
+  when:
+    - "'STALE_CRS_FOUND' in stale_cr_check.stdout"
+    - aws_orphan_check is defined
+    - "'AWS_ORPHANS_FOUND' in aws_orphan_check.stdout"
+
+- name: Clean up orphaned IAM roles and OIDC providers from stale ROSARoleConfig
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ AWS_ACCESS_KEY_ID | default(omit) }}"
+    AWS_SECRET_ACCESS_KEY: "{{ AWS_SECRET_ACCESS_KEY | default(omit) }}"
+  shell: |
+    delete_iam_role() {
+      ROLE_NAME="$1"
+      if ! aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+        return 0
+      fi
+      echo "Cleaning orphaned IAM role $ROLE_NAME"
+      for POLICY_ARN in $(aws iam list-attached-role-policies --role-name "$ROLE_NAME" --query "AttachedPolicies[].PolicyArn" --output text 2>/dev/null); do
+        echo "  Detaching policy $POLICY_ARN"
+        aws iam detach-role-policy --role-name "$ROLE_NAME" --policy-arn "$POLICY_ARN" 2>/dev/null || true
+      done
+      for POLICY_NAME in $(aws iam list-role-policies --role-name "$ROLE_NAME" --query "PolicyNames[]" --output text 2>/dev/null); do
+        echo "  Deleting inline policy $POLICY_NAME"
+        aws iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "$POLICY_NAME" 2>/dev/null || true
+      done
+      for PROFILE in $(aws iam list-instance-profiles-for-role --role-name "$ROLE_NAME" --query "InstanceProfiles[].InstanceProfileName" --output text 2>/dev/null); do
+        aws iam remove-role-from-instance-profile --role-name "$ROLE_NAME" --instance-profile-name "$PROFILE" 2>/dev/null || true
+      done
+      aws iam delete-role --role-name "$ROLE_NAME" 2>/dev/null && echo "  Deleted role $ROLE_NAME" || echo "  WARNING: Could not delete role $ROLE_NAME"
+    }
+
+    for CR_LINE in $(echo -e "{{ stale_cr_check.stdout }}" | grep 'rosaroleconfig/' | awk -F'|' '{print $1}'); do
+      CR_NAME=$(echo "$CR_LINE" | cut -d'/' -f2)
+      ROLE_PREFIX=$(echo "$CR_NAME" | sed 's/-roles$//')
+
+      for ROLE_SUFFIX in Installer-Role Support-Role Worker-Role; do
+        delete_iam_role "${ROLE_PREFIX}-${ROLE_SUFFIX}"
+      done
+
+      OPERATOR_SUFFIXES="openshift-cloud-network-config-controller-cloud-credentials openshift-machine-api-aws-cloud-credentials openshift-cloud-credential-operator-cloud-credential-operator-iam-ro openshift-image-registry-installer-cloud-credentials openshift-ingress-operator-cloud-credentials openshift-cluster-csi-drivers-ebs-cloud-credentials kube-system-kube-controller-manager kube-system-capa-controller-manager kube-system-control-plane-operator"
+      for OP_SUFFIX in $OPERATOR_SUFFIXES; do
+        delete_iam_role "${ROLE_PREFIX}-${OP_SUFFIX}"
+      done
+
+      OIDC_DELETED=0
+      for OIDC_ARN in $(aws iam list-open-id-connect-providers --query "OpenIDConnectProviderList[].Arn" --output text 2>/dev/null); do
+        TAGS=$(aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_ARN" --output json 2>/dev/null)
+        if echo "$TAGS" | python3 -c "
+    import sys, json
+    data = json.load(sys.stdin)
+    tags = {t['Key']: t['Value'] for t in data.get('Tags', [])}
+    url = data.get('Url', '')
+    if '${ROLE_PREFIX}' in tags.get('rosa_cluster_name', '') or '${ROLE_PREFIX}' in tags.get('Name', '') or '${ROLE_PREFIX}' in url:
+        sys.exit(0)
+    sys.exit(1)
+    " 2>/dev/null; then
+          echo "Deleting orphaned OIDC provider $OIDC_ARN (prefix: $ROLE_PREFIX)"
+          aws iam delete-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_ARN" 2>/dev/null && echo "  Deleted OIDC provider" || echo "  WARNING: Could not delete OIDC provider"
+          OIDC_DELETED=$((OIDC_DELETED + 1))
+        fi
+      done
+      if [ "$OIDC_DELETED" -eq 0 ]; then
+        echo "No orphaned OIDC providers found for prefix $ROLE_PREFIX"
+      fi
+
+      ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+      if [ -n "$ACCOUNT_ID" ]; then
+        for POLICY_SUFFIX in Installer-Role-Policy Support-Role-Policy Worker-Role-Policy; do
+          POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${ROLE_PREFIX}-${POLICY_SUFFIX}"
+          if aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
+            for VERSION in $(aws iam list-policy-versions --policy-arn "$POLICY_ARN" --query "Versions[?!IsDefaultVersion].VersionId" --output text 2>/dev/null); do
+              aws iam delete-policy-version --policy-arn "$POLICY_ARN" --version-id "$VERSION" 2>/dev/null || true
+            done
+            echo "Deleting orphaned IAM policy $POLICY_ARN"
+            aws iam delete-policy --policy-arn "$POLICY_ARN" 2>/dev/null || echo "  WARNING: Could not delete policy"
+          fi
+        done
+      fi
+    done
+  register: iam_oidc_cleanup
+  changed_when: "'Deleted' in iam_oidc_cleanup.stdout"
+  failed_when: false
+  when:
+    - "'STALE_CRS_FOUND' in stale_cr_check.stdout"
+    - aws_orphan_check is defined
+    - "'AWS_ORPHANS_FOUND' in aws_orphan_check.stdout"
+
+- name: Display IAM/OIDC cleanup result
+  debug:
+    msg: "{{ iam_oidc_cleanup.stdout }}"
+  when:
+    - iam_oidc_cleanup is defined
+    - iam_oidc_cleanup.stdout | default('') | length > 0
+
+- name: Remove stale CRs with stuck finalizers
+  shell: |
+    for RESOURCE_TYPE in rosamachinepool machinepool.cluster.x-k8s.io rosacontrolplane cluster.cluster.x-k8s.io rosanetwork rosaroleconfig; do
+      for CR_NAME in $(oc get ${RESOURCE_TYPE} -n {{ capi_namespace }} -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+        DT=$(oc get ${RESOURCE_TYPE} ${CR_NAME} -n {{ capi_namespace }} -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null)
+        FINALIZERS=$(oc get ${RESOURCE_TYPE} ${CR_NAME} -n {{ capi_namespace }} -o jsonpath='{.metadata.finalizers}' 2>/dev/null)
+        if [ -n "$DT" ]; then
+          echo "Removing stuck finalizers from ${RESOURCE_TYPE}/${CR_NAME} (deleting since ${DT}, finalizers: ${FINALIZERS})"
+          oc patch ${RESOURCE_TYPE} ${CR_NAME} -n {{ capi_namespace }} --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+        else
+          echo "Force deleting stale ${RESOURCE_TYPE}/${CR_NAME} (finalizers: ${FINALIZERS})"
+          oc delete ${RESOURCE_TYPE} ${CR_NAME} -n {{ capi_namespace }} --timeout=30s 2>/dev/null || true
+          oc patch ${RESOURCE_TYPE} ${CR_NAME} -n {{ capi_namespace }} --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+        fi
+      done
+    done
+  register: stale_cr_cleanup
+  changed_when: "'Removing' in stale_cr_cleanup.stdout or 'Force deleting' in stale_cr_cleanup.stdout"
+  when: "'STALE_CRS_FOUND' in stale_cr_check.stdout"
+
+- name: Display cleanup result
+  debug:
+    msg: "{{ stale_cr_cleanup.stdout }}"
+  when:
+    - "'STALE_CRS_FOUND' in stale_cr_check.stdout"
+    - stale_cr_cleanup is defined
+
+- name: Wait for stale CRs to be fully removed
+  shell: |
+    oc get rosacontrolplane,rosanetwork,rosaroleconfig,cluster.cluster.x-k8s.io,rosamachinepool,machinepool.cluster.x-k8s.io -n {{ capi_namespace }} -o name 2>/dev/null | wc -l | tr -d ' '
+  register: remaining_crs
+  until: remaining_crs.stdout == "0"
+  retries: 24
+  delay: 5
+  when: "'STALE_CRS_FOUND' in stale_cr_check.stdout"
+
+- name: Log stale CR cleanup completion
+  shell: |
+    LOGDIR="/tmp/capa-resurrection-evidence"
+    mkdir -p "$LOGDIR"
+    LOGFILE="$LOGDIR/stale-cr-$(date +%Y%m%d-%H%M%S)-cleanup.json"
+    python3 -c "
+    import json, datetime
+    record = {
+        'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+        'event': 'stale_crs_cleaned_pre_provision',
+        'target_cluster': '{{ cluster_name }}',
+        'namespace': '{{ capi_namespace }}',
+        'cleanup_output': '''{{ stale_cr_cleanup.stdout | default('') }}''',
+        'aws_orphans': '''{{ aws_orphan_check.stdout | default('NO_AWS_ORPHANS') }}''',
+        'cfn_cleanup': '''{{ cfn_cleanup.stdout | default('') }}''',
+    }
+    print(json.dumps(record, indent=2))
+    " > "$LOGFILE"
+    echo "Cleanup evidence logged to $LOGFILE"
+  changed_when: false
+  when: "'STALE_CRS_FOUND' in stale_cr_check.stdout"
+
+- name: Check for OCM cluster name collision
+  environment:
+    SSL_CERT_FILE: "{{ lookup('pipe', 'python3 -c \"import certifi; print(certifi.where())\"') }}"
+  shell: |
+    python3 -c "
+    import sys, os, json, ssl, urllib.request
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        ctx = None
+    client_id = '{{ OCM_CLIENT_ID | default('') }}'
+    client_secret = '{{ OCM_CLIENT_SECRET | default('') }}'
+    ocm_api = '{{ OCM_API_URL | default('https://api.stage.openshift.com') }}'.rstrip('/')
+    if not client_id or not client_secret:
+        print('SKIP_OCM_CHECK')
+        sys.exit(0)
+    try:
+        token_data = 'grant_type=client_credentials&client_id=' + client_id + '&client_secret=' + client_secret
+        token_req = urllib.request.Request(
+            'https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token',
+            data=token_data.encode(),
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            method='POST'
+        )
+        with urllib.request.urlopen(token_req, timeout=15, context=ctx) as resp:
+            token = json.loads(resp.read())['access_token']
+        search_req = urllib.request.Request(
+            ocm_api + '/api/clusters_mgmt/v1/clusters?search=name%3D%27{{ cluster_name }}%27',
+            headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/json'}
+        )
+        with urllib.request.urlopen(search_req, timeout=15, context=ctx) as resp:
+            clusters = json.loads(resp.read())
+        active = [c for c in clusters.get('items', []) if c.get('state') not in ('uninstalling', 'error')]
+        if active:
+            for c in active:
+                print(f'OCM_COLLISION: {c[\"id\"]} state={c[\"state\"]}')
+            sys.exit(1)
+        uninstalling = [c for c in clusters.get('items', []) if c.get('state') == 'uninstalling']
+        if uninstalling:
+            for c in uninstalling:
+                print(f'OCM_UNINSTALLING: {c[\"id\"]} state={c[\"state\"]}')
+            sys.exit(2)
+        print('OCM_CLEAN')
+    except Exception as e:
+        print(f'OCM_CHECK_ERROR: {e}')
+        sys.exit(0)
+    "
+  register: ocm_collision_check
+  changed_when: false
+  failed_when: false
+
+- name: Fail if active OCM cluster with same name exists
+  fail:
+    msg: |
+      A cluster named '{{ cluster_name }}' already exists in OCM and is active.
+      {{ ocm_collision_check.stdout }}
+      You must delete or rename before re-provisioning.
+  when:
+    - ocm_collision_check.rc == 1
+
+- name: Warn if OCM cluster is still uninstalling
+  debug:
+    msg: |
+      ⚠️  A cluster named '{{ cluster_name }}' is still uninstalling in OCM.
+      {{ ocm_collision_check.stdout }}
+      Provisioning will proceed — the CAPA controller will wait for OCM cleanup.
+  when:
+    - ocm_collision_check.rc == 2
+
+- name: Check for stale AWS resources matching new cluster name
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ AWS_ACCESS_KEY_ID | default(omit) }}"
+    AWS_SECRET_ACCESS_KEY: "{{ AWS_SECRET_ACCESS_KEY | default(omit) }}"
+  shell: |
+    REGION="{{ aws_region | default('us-west-2') }}"
+    CONFLICTS=""
+    STACK_NAME="{{ cluster_name }}-rosa-network-stack"
+    STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>&1)
+    if [ $? -eq 0 ] && [ "$STATUS" != "DELETE_COMPLETE" ]; then
+      CONFLICTS="${CONFLICTS}CloudFormation stack $STACK_NAME exists (status: $STATUS)\n"
+      if [ "$STATUS" = "DELETE_FAILED" ]; then
+        echo "Cleaning orphaned resources and retrying stack deletion..."
+        VPC_ID=$(aws cloudformation describe-stack-resources --stack-name "$STACK_NAME" --region "$REGION" --query "StackResources[?ResourceType=='AWS::EC2::VPC'].PhysicalResourceId" --output text 2>/dev/null)
+        if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
+          for SG_ID in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --region "$REGION" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); do
+            aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION" 2>/dev/null || true
+          done
+          for ENI_ID in $(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --region "$REGION" --query "NetworkInterfaces[].NetworkInterfaceId" --output text 2>/dev/null); do
+            ATTACH_ID=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI_ID" --region "$REGION" --query "NetworkInterfaces[0].Attachment.AttachmentId" --output text 2>/dev/null)
+            if [ -n "$ATTACH_ID" ] && [ "$ATTACH_ID" != "None" ]; then
+              aws ec2 detach-network-interface --attachment-id "$ATTACH_ID" --force --region "$REGION" 2>/dev/null || true
+              sleep 2
+            fi
+            aws ec2 delete-network-interface --network-interface-id "$ENI_ID" --region "$REGION" 2>/dev/null || true
+          done
+          for EP_ID in $(aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID" --region "$REGION" --query "VpcEndpoints[].VpcEndpointId" --output text 2>/dev/null); do
+            aws ec2 delete-vpc-endpoints --vpc-endpoint-ids "$EP_ID" --region "$REGION" 2>/dev/null || true
+          done
+        fi
+        aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$REGION" 2>/dev/null || true
+        echo "Waiting for stack deletion..."
+        for i in $(seq 1 30); do
+          RECHECK=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>&1)
+          if [ $? -ne 0 ] || [ "$RECHECK" = "DELETE_COMPLETE" ]; then
+            echo "Stack $STACK_NAME deleted successfully"
+            CONFLICTS=""
+            break
+          fi
+          sleep 10
+        done
+      elif [ "$STATUS" = "DELETE_IN_PROGRESS" ]; then
+        echo "Stack $STACK_NAME is DELETE_IN_PROGRESS — waiting..."
+        for i in $(seq 1 30); do
+          RECHECK=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>&1)
+          if [ $? -ne 0 ] || [ "$RECHECK" = "DELETE_COMPLETE" ]; then
+            echo "Stack $STACK_NAME deleted successfully"
+            CONFLICTS=""
+            break
+          fi
+          sleep 10
+        done
+      fi
+    fi
+    if [ -n "$CONFLICTS" ]; then
+      echo "AWS_CONFLICTS_FOUND"
+      echo -e "$CONFLICTS"
+    else
+      echo "AWS_CLEAN"
+    fi
+  register: aws_name_conflict_check
+  changed_when: false
+  failed_when: false
+
+- name: Fail if unresolvable AWS resource conflicts exist
+  fail:
+    msg: |
+      AWS resources with cluster name '{{ cluster_name }}' still exist and could not be cleaned:
+      {{ aws_name_conflict_check.stdout }}
+      Resolve these manually or use a different cluster name prefix.
+  when:
+    - aws_name_conflict_check is defined
+    - "'AWS_CONFLICTS_FOUND' in aws_name_conflict_check.stdout"
+
+- name: Confirm namespace is clean
+  debug:
+    msg: "Namespace {{ capi_namespace }} is clean — no stale CRs. Safe to provision."
+  when: "'CLEAN' in stale_cr_check.stdout"
+
+- name: Confirm all pre-provision checks passed
+  debug:
+    msg: |
+      Pre-provision validation complete:
+      • K8s namespace: {{ 'Cleaned stale CRs' if 'STALE_CRS_FOUND' in stale_cr_check.stdout else 'Clean' }}
+      • OCM cluster name: {{ 'Clean' if ocm_collision_check.rc == 0 else 'Uninstalling (will wait)' }}
+      • AWS resources: {{ 'Clean' if (aws_name_conflict_check.stdout | default('AWS_CLEAN')) is search('AWS_CLEAN') else 'Cleaned' }}
+
+# ================================================================
 # PRE-STEP: Verify AWS Credentials are Present (if automation enabled)
 # ================================================================
 - name: Verify AWS credentials are configured
