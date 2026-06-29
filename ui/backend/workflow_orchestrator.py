@@ -613,7 +613,7 @@ class ExecutionStore:
                 )
                 conn.commit()
         except Exception as e:
-            logger.warning(f"Failed to persist execution {execution_id}: {e}")
+            logger.error(f"Failed to persist execution {execution_id}: {e}")
 
     def register(self, execution: StateMachineExecution):
         self._live[execution.execution_id] = execution
@@ -641,7 +641,10 @@ class ExecutionStore:
                 )
                 conn.commit()
         except Exception as e:
-            logger.warning(f"Failed to persist execution {execution.execution_id}: {e}")
+            logger.error(
+                f"Failed to persist execution {execution.execution_id}: {e} "
+                f"— step state may be lost on restart"
+            )
         self._evict_old()
 
     def _evict_old(self):
@@ -672,6 +675,7 @@ class ExecutionStore:
 _execution_store = ExecutionStore()
 _executions_lock = asyncio.Lock()
 _active_subprocesses: dict[str, subprocess.Popen] = {}
+_background_tasks: set[asyncio.Task] = set()
 
 TASK_RESOURCE_MAP = {
     "preflight_check": "tasks/preflight_check_ocm_role.yml",
@@ -737,11 +741,13 @@ async def start_execution(
         _execution_store.register(execution)
 
     if mode == ExecutionMode.CELERY:
-        asyncio.create_task(_run_celery_execution(execution))
+        task = asyncio.create_task(_run_celery_execution(execution))
     elif mode == ExecutionMode.LOCAL:
-        asyncio.create_task(_run_local_execution(execution))
+        task = asyncio.create_task(_run_local_execution(execution))
     else:
-        asyncio.create_task(_run_aws_execution(execution))
+        task = asyncio.create_task(_run_aws_execution(execution))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return execution
 
@@ -773,6 +779,75 @@ async def cancel_execution(execution_id: str) -> bool:
     return True
 
 
+def _check_k8s_resource_exists(resource_type: str, name: str, namespace: str) -> bool:
+    """Check whether a K8s resource exists. Returns False on any error."""
+    try:
+        result = subprocess.run(
+            ["oc", "get", resource_type, name, "-n", namespace,
+             "--no-headers", "--ignore-not-found"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+_PROVISION_STEP_RESOURCE_CHECKS = {
+    "CreateROSANetwork": ("rosanetwork", "rosa_network_name"),
+    "CreateRosaRoleConfig": ("rosaroleconfig", "rosa_role_config_name"),
+    "VerifyOIDC": ("rosaroleconfig", "rosa_role_config_name"),
+}
+
+_DELETE_STEP_RESOURCE_CHECKS = {
+    "DeleteROSANetwork": ("rosanetwork", "rosa_network_name"),
+    "DeleteRosaRoleConfig": ("rosaroleconfig", "rosa_role_config_name"),
+}
+
+
+def _validate_succeeded_steps(execution: StateMachineExecution) -> None:
+    """Reset steps marked SUCCEEDED whose K8s resource state contradicts completion."""
+    namespace = execution.input_params.get("capi_namespace", "ns-rosa-hcp")
+
+    is_provision = execution.state_machine_name in ("rosa-hcp-provision",)
+    is_delete = execution.state_machine_name in ("rosa-hcp-delete",)
+
+    if is_provision:
+        for step_name, (resource_type, param_key) in _PROVISION_STEP_RESOURCE_CHECKS.items():
+            step = execution.steps.get(step_name)
+            if not step or step.status != StepStatus.SUCCEEDED:
+                continue
+            resource_name = execution.input_params.get(param_key, "")
+            if not resource_name:
+                continue
+            if not _check_k8s_resource_exists(resource_type, resource_name, namespace):
+                logger.warning(
+                    f"Resurrection guard: step '{step_name}' was SUCCEEDED but "
+                    f"{resource_type}/{resource_name} not found in {namespace}"
+                    " — resetting to PENDING"
+                )
+                step.status = StepStatus.PENDING
+                step.error = None
+                step.completed_at = None
+
+    if is_delete:
+        for step_name, (resource_type, param_key) in _DELETE_STEP_RESOURCE_CHECKS.items():
+            step = execution.steps.get(step_name)
+            if not step or step.status != StepStatus.SUCCEEDED:
+                continue
+            resource_name = execution.input_params.get(param_key, "")
+            if not resource_name:
+                continue
+            if _check_k8s_resource_exists(resource_type, resource_name, namespace):
+                logger.warning(
+                    f"Resurrection guard: step '{step_name}' was SUCCEEDED but "
+                    f"{resource_type}/{resource_name} still exists in {namespace}"
+                    " — resetting to PENDING"
+                )
+                step.status = StepStatus.PENDING
+                step.error = None
+                step.completed_at = None
+
+
 async def resume_execution(execution_id: str) -> Optional[StateMachineExecution]:
     """Resume a failed/crashed execution from its last checkpoint."""
     data = _execution_store.get_dict(execution_id)
@@ -785,10 +860,13 @@ async def resume_execution(execution_id: str) -> Optional[StateMachineExecution]
     execution = StateMachineExecution.from_dict(data)
 
     for step in execution.steps.values():
-        if step.status in (StepStatus.FAILED, StepStatus.CANCELLED, StepStatus.RUNNING):
+        if step.status in (StepStatus.FAILED, StepStatus.CANCELLED, StepStatus.RUNNING,
+                           StepStatus.TIMED_OUT):
             step.status = StepStatus.PENDING
             step.error = None
             step.completed_at = None
+
+    _validate_succeeded_steps(execution)
 
     execution.status = StepStatus.RUNNING
     execution.error = None
@@ -797,7 +875,9 @@ async def resume_execution(execution_id: str) -> Optional[StateMachineExecution]
     async with _executions_lock:
         _execution_store.register(execution)
 
-    asyncio.create_task(_run_local_execution(execution))
+    task = asyncio.create_task(_run_local_execution(execution))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return execution
 
 
@@ -1071,7 +1151,8 @@ async def _execute_celery_parallel(
     branches = state_def.get("Branches", [])
 
     all_done = all(
-        execution.steps.get(b.get("StartAt"), StepExecution("", "")).status == StepStatus.SUCCEEDED
+        (step := execution.steps.get(b.get("StartAt"))) is not None
+        and step.status == StepStatus.SUCCEEDED
         for b in branches if b.get("StartAt")
     )
     if all_done and branches:
@@ -1186,15 +1267,31 @@ def _finalize_agents(execution: StateMachineExecution):
 
 
 def _kill_process_tree(proc: subprocess.Popen) -> None:
-    """Kill a subprocess and its entire process group."""
+    """Kill a subprocess and its entire process group, with verification."""
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGTERM)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(pgid, signal.SIGKILL)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.error(
+                    f"Process {proc.pid} (pgid={pgid}) survived SIGKILL"
+                )
     except (ProcessLookupError, PermissionError, OSError):
-        proc.kill()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        pass
+        try:
+            proc.kill()
+            proc.wait(timeout=5)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    if proc.poll() is None:
+        logger.error(
+            f"Zombie process {proc.pid} still running after kill attempts"
+        )
 
 
 def _kill_active_subprocess(execution_id: str, step_name: str) -> None:
@@ -1364,7 +1461,8 @@ async def _execute_local_parallel(
     branches = state_def.get("Branches", [])
 
     all_done = all(
-        execution.steps.get(b.get("StartAt"), StepExecution("", "")).status == StepStatus.SUCCEEDED
+        (step := execution.steps.get(b.get("StartAt"))) is not None
+        and step.status == StepStatus.SUCCEEDED
         for b in branches if b.get("StartAt")
     )
     if all_done and branches:
@@ -1414,10 +1512,31 @@ async def _execute_nested_state_machine(
         return False
 
     try:
-        sub_execution = await start_execution(
-            nested_sm_name, execution.input_params, execution.mode
-        )
-        step.sub_execution_id = sub_execution.execution_id
+        sub_execution = None
+        prior_sub_id = getattr(step, "sub_execution_id", None)
+        if prior_sub_id:
+            prior_data = _execution_store.get_dict(prior_sub_id)
+            if prior_data and prior_data.get("status") == "succeeded":
+                logger.info(
+                    f"Sub-execution {prior_sub_id} already succeeded for "
+                    f"nested state machine '{nested_sm_name}' — skipping"
+                )
+                step.status = StepStatus.SUCCEEDED
+                step.completed_at = datetime.utcnow().isoformat()
+                return True
+
+            sub_execution = await resume_execution(prior_sub_id)
+            if sub_execution:
+                logger.info(
+                    f"Resumed prior sub-execution {prior_sub_id} for nested "
+                    f"state machine '{nested_sm_name}'"
+                )
+
+        if not sub_execution:
+            sub_execution = await start_execution(
+                nested_sm_name, execution.input_params, execution.mode
+            )
+            step.sub_execution_id = sub_execution.execution_id
 
         poll_start = time.time()
         while not execution._cancelled:
