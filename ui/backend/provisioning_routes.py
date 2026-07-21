@@ -121,11 +121,49 @@ async def generate_provisioning_yaml(request: Request):
             else openshift_version
         )
 
+        versions_dir = os.path.join(project_root, "templates", "versions")
+        if not os.path.isdir(os.path.join(versions_dir, major_minor)):
+            try:
+                def _version_sort_key(v):
+                    parts = []
+                    for segment in v.split("."):
+                        digits = "".join(c for c in segment if c.isdigit())
+                        parts.append(int(digits) if digits else 0)
+                    return parts or [0]
+
+                available = sorted(
+                    [d for d in os.listdir(versions_dir) if os.path.isdir(os.path.join(versions_dir, d))],
+                    key=_version_sort_key,
+                    reverse=True,
+                )
+                if available:
+                    print(f"⚠️  Version dir '{major_minor}' not found, falling back to '{available[0]}'")
+                    major_minor = available[0]
+                else:
+                    raise FileNotFoundError(f"No template version directories in {versions_dir}")
+            except OSError as e:
+                raise HTTPException(status_code=500, detail=f"Template versions directory error: {e}")
+
         from jinja2 import Environment, FileSystemLoader
         import re
         from datetime import datetime
 
         # Custom Jinja2 filters to match Ansible functionality
+        def ansible_bool(value):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.lower() in ("true", "yes", "1")
+            if isinstance(value, (int, float)):
+                return bool(value)
+            return bool(value)
+
+        def ansible_int(value, default=0):
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                return default
+
         def regex_replace(value, pattern, replacement):
             """Ansible-compatible regex_replace filter"""
             return re.sub(pattern, replacement, str(value))
@@ -148,6 +186,7 @@ async def generate_provisioning_yaml(request: Request):
             "aws_account_id": "123456789012",  # Placeholder for preview
             "aws_region": aws_region,
             "capi_namespace": "ns-rosa-hcp",
+            "rosa_hcp_namespace": "ns-rosa-hcp",
             "rosa_role_config_name": f"{cluster_name}-roles",
             "rosa_role_prefix": role_prefix,
             "rosa_network_name": f"{cluster_name}-network",
@@ -224,17 +263,19 @@ async def generate_provisioning_yaml(request: Request):
 
         # Determine which template to use based on automation options
         if create_rosa_network and create_rosa_roles:
-            # Use combined template that includes everything (ROSARoleConfig, ROSANetwork, and all cluster resources)
             cp_template_name = "rosa-combined-automation.yaml.j2"
             use_combined_template = True
         elif create_rosa_network:
             cp_template_name = "rosa-capi-network-cluster.yaml.j2"
-            use_combined_template = True  # Network template also includes ROSANetwork
+            cp_template_fallback = "rosa-controlplane-only.yaml.j2"
+            use_combined_template = True
         elif create_rosa_roles:
             cp_template_name = "rosa-capi-roles-cluster.yaml.j2"
-            use_combined_template = True  # Roles template also includes ROSARoleConfig
+            cp_template_fallback = "rosa-controlplane-only.yaml.j2"
+            use_combined_template = True
         else:
             cp_template_name = "rosa-control-plane.yaml.j2"
+            cp_template_fallback = "rosa-controlplane-only.yaml.j2"
             use_combined_template = False
 
         # If NOT using a combined template, render individual resources first
@@ -258,6 +299,8 @@ async def generate_provisioning_yaml(request: Request):
                 if os.path.exists(role_template_path):
                     env = Environment(loader=FileSystemLoader(os.path.dirname(role_template_path)))
                     env.filters["regex_replace"] = regex_replace
+                    env.filters["bool"] = ansible_bool
+                    env.filters["int"] = ansible_int
                     env.globals["lookup"] = ansible_lookup
                     template = env.get_template(os.path.basename(role_template_path))
                     rendered = template.render(**template_vars)
@@ -285,6 +328,8 @@ async def generate_provisioning_yaml(request: Request):
                         loader=FileSystemLoader(os.path.dirname(network_template_path))
                     )
                     env.filters["regex_replace"] = regex_replace
+                    env.filters["bool"] = ansible_bool
+                    env.filters["int"] = ansible_int
                     env.globals["lookup"] = ansible_lookup
                     template = env.get_template(os.path.basename(network_template_path))
                     rendered = template.render(**template_vars)
@@ -311,10 +356,18 @@ async def generate_provisioning_yaml(request: Request):
         if not os.path.exists(cp_template_path):
             cp_template_path = os.path.join(project_root, f"templates/features/{cp_template_name}")
             print(f"🔍 [PREVIEW-DIRECT] Try 4: {cp_template_path} -> {os.path.exists(cp_template_path)}")
+        if not os.path.exists(cp_template_path) and 'cp_template_fallback' in locals():
+            fb = cp_template_fallback
+            cp_template_path = os.path.join(
+                project_root, f"templates/versions/{major_minor}/features/{fb}"
+            )
+            print(f"🔍 [PREVIEW-DIRECT] Try 5 (fallback): {cp_template_path} -> {os.path.exists(cp_template_path)}")
 
         if os.path.exists(cp_template_path):
             env = Environment(loader=FileSystemLoader(os.path.dirname(cp_template_path)))
             env.filters["regex_replace"] = regex_replace
+            env.filters["bool"] = ansible_bool
+            env.filters["int"] = ansible_int
             env.globals["lookup"] = ansible_lookup
             template = env.get_template(os.path.basename(cp_template_path))
             rendered = template.render(
@@ -367,6 +420,13 @@ async def generate_provisioning_yaml(request: Request):
 
         print(f"✅ [PREVIEW-DIRECT] Generated {len(yaml_contents)} YAML document(s)")
         print(f"📄 [PREVIEW-DIRECT] File will be saved as: {combined_file_path}")
+
+        if not combined_yaml.strip():
+            return {
+                "success": False,
+                "message": f"Template rendering produced no content for {cp_template_name}",
+                "yaml_content": "",
+            }
 
         response_data = {
             "success": True,

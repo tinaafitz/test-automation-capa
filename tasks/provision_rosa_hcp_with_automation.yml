@@ -117,14 +117,19 @@
 # ================================================================
 - name: Check for stale CAPA CRs in namespace
   shell: |
+    CURRENT_CLUSTER="{{ cluster_name }}"
     STALE_CRS=""
     STALE_JSON="[]"
     for RESOURCE_TYPE in rosacontrolplane rosanetwork rosaroleconfig cluster.cluster.x-k8s.io rosamachinepool machinepool.cluster.x-k8s.io; do
       ITEMS=$(oc get ${RESOURCE_TYPE} -n {{ capi_namespace }} -o json 2>/dev/null | python3 -c "
     import sys, json
     data = json.load(sys.stdin)
+    current = '${CURRENT_CLUSTER}'
     for item in data.get('items', []):
         name = item['metadata']['name']
+        cluster_label = item['metadata'].get('labels', {}).get('cluster.x-k8s.io/cluster-name', '')
+        if name.startswith(current) or cluster_label == current:
+            continue
         dt = item['metadata'].get('deletionTimestamp', '')
         finalizers = item['metadata'].get('finalizers', [])
         rv = item['metadata'].get('resourceVersion', '')
@@ -392,8 +397,18 @@
 
 - name: Remove stale CRs with stuck finalizers
   shell: |
+    CURRENT_CLUSTER="{{ cluster_name }}"
     for RESOURCE_TYPE in rosamachinepool machinepool.cluster.x-k8s.io rosacontrolplane cluster.cluster.x-k8s.io rosanetwork rosaroleconfig; do
-      for CR_NAME in $(oc get ${RESOURCE_TYPE} -n {{ capi_namespace }} -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+      for CR_NAME in $(oc get ${RESOURCE_TYPE} -n {{ capi_namespace }} -o json 2>/dev/null | python3 -c "
+    import sys, json
+    data = json.load(sys.stdin)
+    current = '${CURRENT_CLUSTER}'
+    for item in data.get('items', []):
+        name = item['metadata']['name']
+        cluster_label = item['metadata'].get('labels', {}).get('cluster.x-k8s.io/cluster-name', '')
+        if not (name.startswith(current) or cluster_label == current):
+            print(name)
+    " 2>/dev/null); do
         DT=$(oc get ${RESOURCE_TYPE} ${CR_NAME} -n {{ capi_namespace }} -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null)
         FINALIZERS=$(oc get ${RESOURCE_TYPE} ${CR_NAME} -n {{ capi_namespace }} -o jsonpath='{.metadata.finalizers}' 2>/dev/null)
         if [ -n "$DT" ]; then
@@ -419,9 +434,26 @@
 
 - name: Wait for stale CRs to be fully removed
   shell: |
-    oc get rosacontrolplane,rosanetwork,rosaroleconfig,cluster.cluster.x-k8s.io,rosamachinepool,machinepool.cluster.x-k8s.io -n {{ capi_namespace }} -o name 2>/dev/null | wc -l | tr -d ' '
+    CURRENT_CLUSTER="{{ cluster_name }}"
+    REMAINING=0
+    for RESOURCE_TYPE in rosacontrolplane rosanetwork rosaroleconfig cluster.cluster.x-k8s.io rosamachinepool machinepool.cluster.x-k8s.io; do
+      COUNT=$(oc get ${RESOURCE_TYPE} -n {{ capi_namespace }} -o json 2>/dev/null | python3 -c "
+    import sys, json
+    data = json.load(sys.stdin)
+    current = '${CURRENT_CLUSTER}'
+    count = 0
+    for item in data.get('items', []):
+        name = item['metadata']['name']
+        cluster_label = item['metadata'].get('labels', {}).get('cluster.x-k8s.io/cluster-name', '')
+        if not (name.startswith(current) or cluster_label == current):
+            count += 1
+    print(count)
+    " 2>/dev/null)
+      REMAINING=$((REMAINING + COUNT))
+    done
+    echo $REMAINING
   register: remaining_crs
-  until: remaining_crs.stdout == "0"
+  until: remaining_crs.stdout | trim == "0"
   retries: 24
   delay: 5
   when: "'STALE_CRS_FOUND' in stale_cr_check.stdout"

@@ -5,6 +5,8 @@ supported_versions:
   - "4.18"
   - "4.19" 
   - "4.20"
+  - "4.21"
+  - "4.22"
 
 # Default version if none specified
 default_version: "4.19"
@@ -13,7 +15,7 @@ default_version: "4.19"
 validation_rules:
   version_format: "^4\\.(1[8-9]|2[0-9])$"
   min_supported: "4.18"
-  max_supported: "4.20"
+  max_supported: "4.22"
   
 # Template path patterns
 template_paths:
