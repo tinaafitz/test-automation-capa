@@ -37,7 +37,10 @@
         "Expired OCM token",
         "Invalid client credentials",
         "Incorrect client ID/secret"
-      ]
+      ],
+      "learned_confidence": 0.8,
+      "last_adjusted": "2026-06-24T14:28:41.220314",
+      "adjustment_reason": "2 consecutive failures in last 2 runs"
     },
     {
       "type": "ocm_role_not_linked",
@@ -94,7 +97,10 @@
         "Too many API calls in short period",
         "AWS API limits",
         "OCM API limits"
-      ]
+      ],
+      "learned_confidence": 1.0,
+      "last_adjusted": "2026-06-24T14:28:41.220228",
+      "adjustment_reason": "4 consecutive successes in last 4 runs"
     },
     {
       "type": "resource_quota_exceeded",
