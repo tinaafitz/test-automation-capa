@@ -81,30 +81,28 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
   const [availableVersions, setAvailableVersions] = useState([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
 
-  // Fetch available ROSA versions when modal opens
+  // Fetch available ROSA versions when modal opens or channel group changes
   useEffect(() => {
     const fetchVersions = async () => {
       if (!isOpen) return;
 
       try {
         setLoadingVersions(true);
-        const response = await fetch(buildApiUrl(API_ENDPOINTS.VERSIONS));
+        const channelParam = config.channelGroup ? `?channel_group=${config.channelGroup}` : '';
+        const response = await fetch(buildApiUrl(`${API_ENDPOINTS.VERSIONS}${channelParam}`));
         const data = await response.json();
 
         if (data.versions && data.versions.length > 0) {
           setAvailableVersions(data.versions);
 
-          // Update default version if current version is outdated
-          if (data.default_version && config.openShiftVersion === '4.20.8') {
+          if (data.default_version) {
             setConfig((prev) => ({ ...prev, openShiftVersion: data.default_version }));
           }
         } else {
-          // Fallback to hardcoded versions if API fails
           setAvailableVersions(['4.21.0', '4.20.12', '4.20.11', '4.20.10', '4.20.8', '4.19.22', '4.19.21']);
         }
       } catch (error) {
         console.error('Error fetching ROSA versions:', error);
-        // Fallback to hardcoded versions
         setAvailableVersions(['4.21.0', '4.20.12', '4.20.11', '4.20.10', '4.20.8', '4.19.22', '4.19.21']);
       } finally {
         setLoadingVersions(false);
@@ -112,7 +110,7 @@ export function RosaProvisionModal({ isOpen, onClose, onSubmit, testSuite, mceIn
     };
 
     fetchVersions();
-  }, [isOpen]);
+  }, [isOpen, config.channelGroup]);
 
   // Check for log forwarding config when cluster name changes
   useEffect(() => {

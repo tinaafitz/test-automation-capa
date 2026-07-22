@@ -26,6 +26,7 @@ generated-yamls/
 .idea/
 
 # Secrets (must be mounted at runtime)
+.env
 vars/user_vars.yml
 *.pem
 *.key

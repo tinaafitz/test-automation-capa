@@ -61,17 +61,19 @@ async def health_check():
 # ============================================================================
 
 @router.get("/api/versions")
-async def get_supported_versions():
+async def get_supported_versions(channel_group: str = "stable"):
     """Get supported OpenShift versions — offloads to thread pool."""
-    return await asyncio.to_thread(_get_supported_versions_sync)
+    return await asyncio.to_thread(_get_supported_versions_sync, channel_group)
 
 
-def _get_supported_versions_sync():
+def _get_supported_versions_sync(channel_group: str = "stable"):
     """Get supported OpenShift versions by calling rosa list versions (sync)."""
+    allowed_groups = {"stable", "fast", "candidate", "eus", "nightly"}
+    if channel_group not in allowed_groups:
+        channel_group = "stable"
     try:
-        # Call rosa list versions to get the actual available versions
         result = subprocess.run(
-            ["rosa", "list", "versions", "--channel-group", "stable"],
+            ["rosa", "list", "versions", "--channel-group", channel_group],
             capture_output=True,
             text=True,
             timeout=10,

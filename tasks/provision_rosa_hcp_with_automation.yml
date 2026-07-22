@@ -190,11 +190,13 @@
     AWS_ACCESS_KEY_ID: "{{ AWS_ACCESS_KEY_ID | default(omit) }}"
     AWS_SECRET_ACCESS_KEY: "{{ AWS_SECRET_ACCESS_KEY | default(omit) }}"
   shell: |
+    CURRENT_CLUSTER="{{ cluster_name }}"
     REGION="{{ aws_region | default('us-west-2') }}"
     ORPHANS=""
     for CR_LINE in $(echo -e "{{ stale_cr_check.stdout }}" | grep '/' | awk -F'|' '{print $1}'); do
       RESOURCE_TYPE=$(echo "$CR_LINE" | cut -d'/' -f1)
       CR_NAME=$(echo "$CR_LINE" | cut -d'/' -f2)
+      case "$CR_NAME" in "${CURRENT_CLUSTER}"*) continue ;; esac
       case "$RESOURCE_TYPE" in
         rosanetwork)
           STACK_PREFIX=$(echo "$CR_NAME" | sed 's/-network$//')
@@ -254,9 +256,11 @@
     AWS_ACCESS_KEY_ID: "{{ AWS_ACCESS_KEY_ID | default(omit) }}"
     AWS_SECRET_ACCESS_KEY: "{{ AWS_SECRET_ACCESS_KEY | default(omit) }}"
   shell: |
+    CURRENT_CLUSTER="{{ cluster_name }}"
     REGION="{{ aws_region | default('us-west-2') }}"
     for CR_LINE in $(echo -e "{{ stale_cr_check.stdout }}" | grep 'rosanetwork/' | awk -F'|' '{print $1}'); do
       CR_NAME=$(echo "$CR_LINE" | cut -d'/' -f2)
+      case "$CR_NAME" in "${CURRENT_CLUSTER}"*) echo "Skipping current cluster resource $CR_NAME"; continue ;; esac
       STACK_PREFIX=$(echo "$CR_NAME" | sed 's/-network$//')
       STACK_NAME="${STACK_PREFIX}-rosa-network-stack"
       STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" --query 'Stacks[0].StackStatus' --output text 2>&1)
@@ -332,8 +336,10 @@
       aws iam delete-role --role-name "$ROLE_NAME" 2>/dev/null && echo "  Deleted role $ROLE_NAME" || echo "  WARNING: Could not delete role $ROLE_NAME"
     }
 
+    CURRENT_CLUSTER="{{ cluster_name }}"
     for CR_LINE in $(echo -e "{{ stale_cr_check.stdout }}" | grep 'rosaroleconfig/' | awk -F'|' '{print $1}'); do
       CR_NAME=$(echo "$CR_LINE" | cut -d'/' -f2)
+      case "$CR_NAME" in "${CURRENT_CLUSTER}"*) echo "Skipping current cluster resource $CR_NAME"; continue ;; esac
       ROLE_PREFIX=$(echo "$CR_NAME" | sed 's/-roles$//')
 
       for ROLE_SUFFIX in Installer-Role Support-Role Worker-Role; do
