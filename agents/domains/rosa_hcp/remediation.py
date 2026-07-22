@@ -275,205 +275,149 @@ class RosaHcpRemediationAgent(RemediationAgent):
     def _fix_retry_cloudformation_delete(self, params: Dict) -> Tuple[bool, str]:
         stack_name = params.get("stack_name")
         region = params.get("region", "us-west-2")
+        max_retries = params.get("max_retries", 3)
+        initial_wait = params.get("initial_wait", 30)
 
         if not stack_name:
             return False, "Stack name is required for CloudFormation retry"
 
+        from ...aws_client import AWSClient
+        aws = AWSClient(region=region, log_fn=self.log)
+
+        if not aws.available:
+            self.log("boto3 not available, falling back to CLI-based cleanup", "warning")
+            return self._fix_retry_cloudformation_delete_cli(params)
+
         self.log(f"Retrying CloudFormation stack deletion: {stack_name}", "info")
+
+        try:
+            stack_status = aws.describe_stack_status(stack_name)
+
+            if stack_status == "GONE":
+                return True, f"CloudFormation stack {stack_name} already deleted"
+            if stack_status == "DELETE_COMPLETE":
+                return True, f"CloudFormation stack {stack_name} already deleted"
+            if stack_status == "DELETE_IN_PROGRESS":
+                self.log(f"Stack {stack_name} already DELETE_IN_PROGRESS, waiting...", "info")
+                time.sleep(initial_wait)
+                stack_status = aws.describe_stack_status(stack_name)
+                if stack_status in ("GONE", "DELETE_COMPLETE"):
+                    return True, f"Stack {stack_name} deleted after waiting"
+
+            if stack_status != "DELETE_FAILED":
+                return False, f"Stack {stack_name} in unexpected state: {stack_status}"
+
+            self.log(f"Waiting {initial_wait}s for ROSA to finish its own cleanup...", "info")
+            time.sleep(initial_wait)
+
+            vpc_id = aws.get_vpc_from_stack(stack_name)
+            all_cleanup_details = []
+
+            for attempt in range(1, max_retries + 1):
+                self.log(f"Cleanup attempt {attempt}/{max_retries} for {stack_name}", "info")
+                cleanup_details = []
+
+                if vpc_id:
+                    vpce_list = aws.describe_vpc_endpoints(vpc_id)
+                    if vpce_list:
+                        vpce_ids = [ep["id"] for ep in vpce_list]
+                        ok, msg = aws.delete_vpc_endpoints(vpce_ids)
+                        if ok:
+                            cleanup_details.append(msg)
+                        self.log("Waiting 20s for ENIs to release after VPC endpoint deletion", "info")
+                        time.sleep(20)
+
+                    enis = aws.describe_network_interfaces(vpc_id)
+                    for eni in enis:
+                        if "lambda" in eni.get("description", "").lower():
+                            continue
+                        if eni.get("attachment_id"):
+                            aws.detach_network_interface(eni["attachment_id"])
+                            time.sleep(2)
+                        ok, msg = aws.delete_network_interface(eni["id"])
+                        if ok:
+                            cleanup_details.append(msg)
+
+                    sgs = aws.describe_security_groups_text(vpc_id)
+                    for sg in sgs:
+                        ok, msg = aws.delete_security_group(sg["id"])
+                        if ok:
+                            cleanup_details.append(f"Deleted security group {sg['id']} ({sg['name']})")
+
+                    subnets = aws.describe_subnets(vpc_id)
+                    for subnet_id in subnets:
+                        ok, msg = aws.delete_subnet(subnet_id)
+                        if ok:
+                            cleanup_details.append(msg)
+
+                    igws = aws.describe_internet_gateways(vpc_id)
+                    for igw_id in igws:
+                        aws.detach_internet_gateway(igw_id, vpc_id)
+                        ok, msg = aws.delete_internet_gateway(igw_id)
+                        if ok:
+                            cleanup_details.append(msg)
+
+                all_cleanup_details.extend(cleanup_details)
+                if cleanup_details:
+                    self.log(f"Cleanup: {'; '.join(cleanup_details)}", "info")
+
+                ok, msg = aws.delete_stack(stack_name)
+                if not ok:
+                    return False, f"Failed to retry stack deletion: {msg}"
+
+                self.log(f"Waiting 15s for stack deletion to process...", "info")
+                time.sleep(15)
+
+                new_status = aws.describe_stack_status(stack_name)
+                if new_status in ("GONE", "DELETE_COMPLETE", "DELETE_IN_PROGRESS"):
+                    summary = f"; {'; '.join(all_cleanup_details)}" if all_cleanup_details else ""
+                    return True, f"Stack {stack_name} deletion succeeded after attempt {attempt}{summary}"
+
+                if new_status == "DELETE_FAILED" and attempt < max_retries:
+                    wait = initial_wait * attempt
+                    self.log(f"Stack still DELETE_FAILED, waiting {wait}s before retry {attempt + 1}", "warning")
+                    time.sleep(wait)
+                    continue
+
+            summary = f"; {'; '.join(all_cleanup_details)}" if all_cleanup_details else ""
+            return False, f"Stack {stack_name} still DELETE_FAILED after {max_retries} attempts{summary}"
+
+        except Exception as e:
+            return False, f"Error retrying CloudFormation delete: {str(e)}"
+
+    def _fix_retry_cloudformation_delete_cli(self, params: Dict) -> Tuple[bool, str]:
+        """Fallback CLI-based CloudFormation retry when boto3 is unavailable."""
+        stack_name = params.get("stack_name")
+        region = params.get("region", "us-west-2")
+
+        if not stack_name:
+            return False, "Stack name is required"
 
         try:
             status_cmd = [
                 "aws", "cloudformation", "describe-stacks",
-                "--stack-name", stack_name,
-                "--region", region,
-                "--query", "Stacks[0].StackStatus",
-                "--output", "text"
+                "--stack-name", stack_name, "--region", region,
+                "--query", "Stacks[0].StackStatus", "--output", "text"
             ]
             status_result = subprocess.run(status_cmd, capture_output=True, text=True, timeout=10)
 
             if status_result.returncode != 0:
                 if "does not exist" in status_result.stderr:
-                    return True, f"CloudFormation stack {stack_name} already deleted"
-                return False, f"Failed to check stack status: {status_result.stderr}"
+                    return True, f"Stack {stack_name} already deleted"
+                return False, f"Failed to check stack: {status_result.stderr}"
 
-            stack_status = status_result.stdout.strip()
-
-            if stack_status not in ("DELETE_IN_PROGRESS", "DELETE_FAILED"):
-                return False, f"Stack {stack_name} in unexpected state: {stack_status}"
-
-            cleanup_details = []
-            cleanup_errors = []
-
-            vpc_cmd = [
-                "aws", "cloudformation", "list-stack-resources",
-                "--stack-name", stack_name,
-                "--region", region,
-                "--query", "StackResourceSummaries[?ResourceType=='AWS::EC2::VPC'].PhysicalResourceId",
-                "--output", "text"
-            ]
-            vpc_result = subprocess.run(vpc_cmd, capture_output=True, text=True, timeout=10)
-            vpc_id = vpc_result.stdout.strip() if vpc_result.returncode == 0 else None
-
-            if vpc_id and vpc_id.startswith("vpc-"):
-                self.log(f"Cleaning up VPC {vpc_id} dependencies before retry", "info")
-
-                vpce_cmd = [
-                    "aws", "ec2", "describe-vpc-endpoints",
-                    "--region", region,
-                    "--filters", f"Name=vpc-id,Values={vpc_id}",
-                    "--query", "VpcEndpoints[*].VpcEndpointId",
-                    "--output", "text"
-                ]
-                vpce_result = subprocess.run(vpce_cmd, capture_output=True, text=True, timeout=10)
-                if vpce_result.returncode == 0 and vpce_result.stdout.strip():
-                    vpce_ids = [v for v in vpce_result.stdout.strip().split() if v.startswith("vpce-")]
-                    if vpce_ids:
-                        self.log(f"Deleting {len(vpce_ids)} VPC endpoint(s)", "info")
-                        del_vpce = subprocess.run([
-                            "aws", "ec2", "delete-vpc-endpoints",
-                            "--region", region,
-                            "--vpc-endpoint-ids", *vpce_ids
-                        ], capture_output=True, text=True, timeout=60)
-                        if del_vpce.returncode == 0:
-                            cleanup_details.append(f"Deleted {len(vpce_ids)} VPC endpoint(s)")
-                        else:
-                            cleanup_errors.append(f"Failed to delete VPC endpoints: {del_vpce.stderr.strip()}")
-                        self.log("Waiting 20s for ENIs to release after VPC endpoint deletion", "info")
-                        time.sleep(20)
-
-                eni_cmd = [
-                    "aws", "ec2", "describe-network-interfaces",
-                    "--region", region,
-                    "--filters", f"Name=vpc-id,Values={vpc_id}",
-                    "--query", "NetworkInterfaces[*].[NetworkInterfaceId,Attachment.AttachmentId,Status]",
-                    "--output", "text"
-                ]
-                eni_result = subprocess.run(eni_cmd, capture_output=True, text=True, timeout=10)
-                if eni_result.returncode == 0 and eni_result.stdout.strip():
-                    for line in eni_result.stdout.strip().split('\n'):
-                        parts = line.split('\t')
-                        if len(parts) >= 1:
-                            eni_id = parts[0]
-                            attachment_id = parts[1] if len(parts) > 1 and parts[1] != "None" else None
-                            if attachment_id:
-                                detach_r = subprocess.run([
-                                    "aws", "ec2", "detach-network-interface",
-                                    "--region", region,
-                                    "--attachment-id", attachment_id, "--force"
-                                ], capture_output=True, text=True, timeout=10)
-                                if detach_r.returncode != 0:
-                                    cleanup_errors.append(f"Failed to detach ENI {eni_id}: {detach_r.stderr.strip()}")
-                                time.sleep(2)
-                            del_eni_r = subprocess.run([
-                                "aws", "ec2", "delete-network-interface",
-                                "--region", region,
-                                "--network-interface-id", eni_id
-                            ], capture_output=True, text=True, timeout=10)
-                            if del_eni_r.returncode == 0:
-                                cleanup_details.append(f"Deleted ENI {eni_id}")
-                            else:
-                                cleanup_errors.append(f"Failed to delete ENI {eni_id}: {del_eni_r.stderr.strip()}")
-
-                sg_cmd = [
-                    "aws", "ec2", "describe-security-groups",
-                    "--region", region,
-                    "--filters", f"Name=vpc-id,Values={vpc_id}",
-                    "--query", "SecurityGroups[?GroupName!='default'].[GroupId,GroupName]",
-                    "--output", "text"
-                ]
-                sg_result = subprocess.run(sg_cmd, capture_output=True, text=True, timeout=10)
-                if sg_result.returncode == 0 and sg_result.stdout.strip():
-                    for line in sg_result.stdout.strip().split('\n'):
-                        parts = line.split('\t')
-                        if len(parts) >= 1:
-                            sg_id = parts[0]
-                            sg_name = parts[1] if len(parts) > 1 else "unknown"
-                            del_result = subprocess.run([
-                                "aws", "ec2", "delete-security-group",
-                                "--region", region,
-                                "--group-id", sg_id
-                            ], capture_output=True, text=True, timeout=10)
-                            if del_result.returncode == 0:
-                                cleanup_details.append(f"Deleted security group {sg_id} ({sg_name})")
-                                self.log(f"Deleted orphaned security group {sg_id} ({sg_name})", "info")
-                            else:
-                                cleanup_errors.append(f"Failed to delete SG {sg_id}: {del_result.stderr.strip()}")
-
-                subnet_cmd = [
-                    "aws", "ec2", "describe-subnets",
-                    "--region", region,
-                    "--filters", f"Name=vpc-id,Values={vpc_id}",
-                    "--query", "Subnets[*].SubnetId",
-                    "--output", "text"
-                ]
-                subnet_result = subprocess.run(subnet_cmd, capture_output=True, text=True, timeout=10)
-                if subnet_result.returncode == 0 and subnet_result.stdout.strip():
-                    for subnet_id in subnet_result.stdout.strip().split('\t'):
-                        del_sub_r = subprocess.run([
-                            "aws", "ec2", "delete-subnet",
-                            "--region", region,
-                            "--subnet-id", subnet_id
-                        ], capture_output=True, text=True, timeout=10)
-                        if del_sub_r.returncode == 0:
-                            cleanup_details.append(f"Deleted subnet {subnet_id}")
-                        else:
-                            cleanup_errors.append(f"Failed to delete subnet {subnet_id}: {del_sub_r.stderr.strip()}")
-
-                igw_cmd = [
-                    "aws", "ec2", "describe-internet-gateways",
-                    "--region", region,
-                    "--filters", f"Name=attachment.vpc-id,Values={vpc_id}",
-                    "--query", "InternetGateways[*].InternetGatewayId",
-                    "--output", "text"
-                ]
-                igw_result = subprocess.run(igw_cmd, capture_output=True, text=True, timeout=10)
-                if igw_result.returncode == 0 and igw_result.stdout.strip():
-                    for igw_id in igw_result.stdout.strip().split('\t'):
-                        subprocess.run([
-                            "aws", "ec2", "detach-internet-gateway",
-                            "--region", region,
-                            "--internet-gateway-id", igw_id,
-                            "--vpc-id", vpc_id
-                        ], capture_output=True, text=True, timeout=10)
-                        del_igw_r = subprocess.run([
-                            "aws", "ec2", "delete-internet-gateway",
-                            "--region", region,
-                            "--internet-gateway-id", igw_id
-                        ], capture_output=True, text=True, timeout=10)
-                        if del_igw_r.returncode == 0:
-                            cleanup_details.append(f"Deleted internet gateway {igw_id}")
-                        else:
-                            cleanup_errors.append(f"Failed to delete IGW {igw_id}: {del_igw_r.stderr.strip()}")
-
-                if cleanup_details:
-                    self.log(f"VPC cleanup: {'; '.join(cleanup_details)}", "info")
-                if cleanup_errors:
-                    self.log(f"VPC cleanup errors: {'; '.join(cleanup_errors)}", "warning")
-
-            if stack_status == "DELETE_FAILED":
+            if "DELETE_FAILED" in status_result.stdout:
                 delete_cmd = [
                     "aws", "cloudformation", "delete-stack",
-                    "--stack-name", stack_name,
-                    "--region", region
+                    "--stack-name", stack_name, "--region", region
                 ]
-                delete_result = subprocess.run(delete_cmd, capture_output=True, text=True, timeout=10)
+                subprocess.run(delete_cmd, capture_output=True, text=True, timeout=10)
+                return True, f"Retried stack deletion for {stack_name} (CLI fallback)"
 
-                if delete_result.returncode != 0:
-                    return False, f"Failed to retry stack deletion: {delete_result.stderr}"
+            return True, f"Stack {stack_name} status: {status_result.stdout.strip()}"
 
-                time.sleep(5)
-                recheck = subprocess.run(status_cmd, capture_output=True, text=True, timeout=10)
-                if recheck.returncode == 0 and "DELETE_FAILED" in recheck.stdout:
-                    self.log(f"Stack {stack_name} immediately re-entered DELETE_FAILED after retry", "warning")
-                    return False, f"Stack {stack_name} re-entered DELETE_FAILED — dependencies may still exist"
-
-            cleanup_summary = f"; {'; '.join(cleanup_details)}" if cleanup_details else ""
-            return True, f"Cleaned up VPC dependencies for {stack_name}{cleanup_summary}"
-
-        except subprocess.TimeoutExpired:
-            return False, "Timeout during CloudFormation retry"
         except Exception as e:
-            return False, f"Error retrying CloudFormation delete: {str(e)}"
+            return False, f"CLI fallback error: {e}"
 
     def _fix_install_capi(self, params: Dict) -> Tuple[bool, str]:
         self.log("CAPI/CAPA installation check/fix", "info")
