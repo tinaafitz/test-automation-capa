@@ -1327,7 +1327,7 @@ const CAPADashboardContent = () => {
                           // Success - update with final logs
                           const output = currentOutput || 'Provisioning completed successfully';
 
-                          updateRecentOperationStatus(provisionId, '✅ ROSA HCP cluster provisioned successfully!', output);
+                          updateRecentOperationStatus(provisionId, '✅ ROSA HCP cluster provisioned successfully!', output, { agentStats });
                           const successResults = {
                             success: true,
                             timestamp: new Date().toISOString(),
@@ -1345,7 +1345,7 @@ const CAPADashboardContent = () => {
                           // Failure - update with error logs
                           const output = currentOutput || (jobData.error || jobData.message || 'Provisioning failed');
 
-                          updateRecentOperationStatus(provisionId, '❌ Provisioning failed', output);
+                          updateRecentOperationStatus(provisionId, '❌ Provisioning failed', output, { agentStats });
                           const failureResults = {
                             success: false,
                             timestamp: new Date().toISOString(),
@@ -1362,7 +1362,7 @@ const CAPADashboardContent = () => {
 
                         // Still running - update with current logs every poll
                         if (currentOutput) {
-                          updateRecentOperationStatus(provisionId, '🚀 Provisioning...', currentOutput);
+                          updateRecentOperationStatus(provisionId, '🚀 Provisioning...', currentOutput, { agentStats });
                           setProvisionResults({
                             success: true,
                             timestamp: new Date().toISOString(),
@@ -2064,20 +2064,26 @@ const CAPADashboardContent = () => {
                 const jobData = await jobResponse.json();
                 console.log(`📋 Job status:`, jobData);
 
-                // Fetch logs regardless of status to show real-time output
-                const logsResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}/logs`));
+                // Fetch logs and agent stats
+                const [logsResponse, agentResponse2] = await Promise.all([
+                  fetch(buildApiUrl(`/api/jobs/${jobId}/logs`)),
+                  fetch(buildApiUrl(`/api/jobs/${jobId}/agent-stats`)).catch(() => null),
+                ]);
                 const logsData = await logsResponse.json();
                 const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
+                const agentData2 = agentResponse2 ? await agentResponse2.json().catch(() => null) : null;
+                const agentStats2 = agentData2?.agent_stats || null;
 
                 if (jobData.status === 'completed') {
                   // Success - update with final logs
                   const output = currentOutput || 'Provisioning completed successfully';
 
-                  updateRecentOperationStatus(provisionId, '✅ ROSA HCP cluster provisioned successfully!', output);
+                  updateRecentOperationStatus(provisionId, '✅ ROSA HCP cluster provisioned successfully!', output, { agentStats: agentStats2 });
                   const successResults = {
                     success: true,
                     timestamp: new Date().toISOString(),
                     output,
+                    agentStats: agentStats2,
                   };
                   console.log('✅ Setting provision results (success):', successResults);
                   setProvisionResults(successResults);
@@ -2088,11 +2094,12 @@ const CAPADashboardContent = () => {
                   // Failure - update with error logs
                   const output = currentOutput || (jobData.error || jobData.message || 'Provisioning failed');
 
-                  updateRecentOperationStatus(provisionId, '❌ Provisioning failed', output);
+                  updateRecentOperationStatus(provisionId, '❌ Provisioning failed', output, { agentStats: agentStats2 });
                   const failureResults = {
                     success: false,
                     timestamp: new Date().toISOString(),
                     output,
+                    agentStats: agentStats2,
                   };
                   console.log('❌ Setting provision results (failure):', failureResults);
                   setProvisionResults(failureResults);
@@ -2102,12 +2109,12 @@ const CAPADashboardContent = () => {
 
                 // Still running - update with current logs every 5 seconds
                 if (attempts % 5 === 0 && currentOutput) {
-                  updateRecentOperationStatus(provisionId, '🚀 Provisioning...', currentOutput);
-                  // Also update the inline display
+                  updateRecentOperationStatus(provisionId, '🚀 Provisioning...', currentOutput, { agentStats: agentStats2 });
                   setProvisionResults({
                     success: true,
                     timestamp: new Date().toISOString(),
                     output: currentOutput,
+                    agentStats: agentStats2,
                   });
                 }
 
