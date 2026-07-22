@@ -52,10 +52,9 @@ class CredentialsUpdate(BaseModel):
 
 
 def _get_rosa_status_sync():
-    """Check ROSA CLI authentication status (sync)."""
+    """Check ROSA/OCM authentication status via OCM API with CLI fallback."""
     import time
 
-    # Check if we have cached data that's still valid
     current_time = time.time()
     if (
         rosa_status_cache["data"] is not None
@@ -64,61 +63,34 @@ def _get_rosa_status_sync():
         return rosa_status_cache["data"]
 
     try:
-        # Use synchronous subprocess with very short timeout for better reliability
-        result = subprocess.run(
-            ["rosa", "whoami"], capture_output=True, text=True, timeout=5  # Very short timeout
-        )
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+        from agents.ocm_client import get_ocm_client
+        ocm = get_ocm_client()
+        result = ocm.whoami()
 
-        if result.returncode == 0:
-            # Parse rosa whoami output
-            output_lines = result.stdout.split("\n")
-            user_info = {}
-
-            for line in output_lines:
-                if ":" in line:
-                    key, value = line.split(":", 1)
-                    user_info[key.strip().lower().replace(" ", "_")] = value.strip()
-
+        if result and result.get("authenticated"):
             response_data = {
                 "success": True,
                 "authenticated": True,
                 "status": "success",
-                "message": "ROSA CLI is authenticated and ready",
-                "user_info": user_info,
-                "raw_output": result.stdout,
-                "command": "rosa whoami",
+                "message": result.get("message", "Authenticated"),
+                "user_info": result.get("user_info", {}),
+                "raw_output": "",
+                "command": result.get("source", "ocm_api"),
                 "last_checked": datetime.now().isoformat(),
             }
-
-            # Cache the successful response
             rosa_status_cache["data"] = response_data
             rosa_status_cache["timestamp"] = current_time
-
             return response_data
         else:
-            # Parse error to provide helpful guidance
-            error_msg = result.stderr if result.stderr else "Unknown error"
-
-            if "not logged in" in error_msg.lower() or "authentication" in error_msg.lower():
-                fix_command = "rosa login --env staging --use-auth-code"
-                suggestion = "Run 'rosa login --env staging --use-auth-code' to authenticate with the ROSA staging environment"
-            elif "command not found" in error_msg.lower():
-                fix_command = "Install ROSA CLI"
-                suggestion = (
-                    "Install the ROSA CLI from https://console.redhat.com/openshift/downloads"
-                )
-            else:
-                fix_command = "rosa whoami"
-                suggestion = "Check your ROSA CLI installation and network connectivity"
-
             return {
                 "success": False,
                 "authenticated": False,
                 "status": "error",
-                "message": f"ROSA CLI authentication failed: {error_msg}",
-                "error": error_msg,
-                "fix_command": fix_command,
-                "suggestion": suggestion,
+                "message": "OCM authentication failed or credentials not configured",
+                "error": "Set OCM_CLIENT_ID and OCM_CLIENT_SECRET environment variables, or run 'rosa login'",
+                "fix_command": "rosa login --env staging --use-auth-code",
+                "suggestion": "Configure OCM service account credentials or authenticate via ROSA CLI",
                 "last_checked": datetime.now().isoformat(),
             }
 

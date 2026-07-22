@@ -67,85 +67,36 @@ async def get_supported_versions(channel_group: str = "stable"):
 
 
 def _get_supported_versions_sync(channel_group: str = "stable"):
-    """Get supported OpenShift versions by calling rosa list versions (sync)."""
+    """Get supported OpenShift versions via OCM API with rosa CLI fallback."""
     allowed_groups = {"stable", "fast", "candidate", "eus", "nightly"}
     if channel_group not in allowed_groups:
         channel_group = "stable"
+
+    _FALLBACK = {
+        "success": True,
+        "versions": ["4.21.0", "4.20.12", "4.20.11", "4.20.10", "4.20.8", "4.19.22", "4.19.21"],
+        "default_version": "4.20.12",
+        "latest_version": "4.21.0",
+    }
+
     try:
-        result = subprocess.run(
-            ["rosa", "list", "versions", "--channel-group", channel_group],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+        from agents.ocm_client import get_ocm_client
+        ocm = get_ocm_client()
+        versions, err = ocm.list_versions(channel_group)
 
-        if result.returncode != 0:
-            # Fallback to hardcoded versions if rosa command fails
-            return {
-                "success": True,
-                "versions": [
-                    "4.21.0",
-                    "4.20.12",
-                    "4.20.11",
-                    "4.20.10",
-                    "4.20.8",
-                    "4.19.22",
-                    "4.19.21",
-                ],
-                "default_version": "4.20.12",
-                "latest_version": "4.21.0",
-            }
+        if err or not versions:
+            return _FALLBACK
 
-        # Parse the output to extract version numbers
-        versions = []
-        for line in result.stdout.split("\n"):
-            # Skip header and empty lines
-            if line.strip() and not line.startswith("VERSION") and not line.startswith("WARN"):
-                parts = line.split()
-                if parts and parts[0]:
-                    version = parts[0]
-                    # Validate it's a version string (x.y.z format)
-                    if len(version.split(".")) == 3 and all(
-                        p.isdigit() for p in version.split(".")
-                    ):
-                        versions.append(version)
-
-        if not versions:
-            # Fallback if parsing failed
-            return {
-                "success": True,
-                "versions": [
-                    "4.21.0",
-                    "4.20.12",
-                    "4.20.11",
-                    "4.20.10",
-                    "4.20.8",
-                    "4.19.22",
-                    "4.19.21",
-                ],
-                "default_version": "4.20.12",
-                "latest_version": "4.21.0",
-            }
-
-        # Return the versions with the latest as default
         return {
             "success": True,
             "versions": versions,
-            "default_version": (
-                versions[1] if len(versions) > 1 else versions[0]
-            ),  # Second version is usually latest stable
+            "default_version": versions[1] if len(versions) > 1 else versions[0],
             "latest_version": versions[0] if versions else "4.21.0",
         }
-
     except Exception as e:
         print(f"Error fetching ROSA versions: {e}")
-        # Fallback to hardcoded versions
-        return {
-            "success": True,
-            "versions": ["4.21.0", "4.20.12", "4.20.11", "4.20.10", "4.20.8", "4.19.22", "4.19.21"],
-            "default_version": "4.20.12",
-            "latest_version": "4.21.0",
-        }
+        return _FALLBACK
 
 
 # ============================================================================

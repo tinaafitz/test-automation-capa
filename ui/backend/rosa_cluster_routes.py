@@ -321,49 +321,34 @@ def _get_rosa_clusters_sync(context: str = None):
     capi_cluster_names = None
 
     try:
-        # Try to get actual ROSA clusters using rosa CLI with short timeout
-        result = subprocess.run(
-            ["rosa", "list", "clusters", "-o", "json"],
-            capture_output=True,
-            text=True,
-            timeout=5,  # Short timeout - rosa CLI can hang without credentials
-        )
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+        from agents.ocm_client import get_ocm_client
+        ocm = get_ocm_client()
+        rosa_clusters, err = ocm.list_clusters()
 
-        if result.returncode == 0:
-            # Successfully got clusters from rosa CLI
-            try:
-                rosa_clusters = json.loads(result.stdout)
-                cluster_list = []
+        if not err and rosa_clusters:
+            cluster_list = []
+            for cluster in rosa_clusters:
+                cluster_name = cluster.get("name", "unknown")
+                if capi_cluster_names is not None and cluster_name not in capi_cluster_names:
+                    continue
+                state = cluster.get("status", "unknown")
+                cluster_list.append({
+                    "name": cluster_name,
+                    "status": "ready" if state == "ready" else state,
+                    "region": cluster.get("region", "N/A"),
+                    "created": cluster.get("created"),
+                    "version": cluster.get("version", "N/A"),
+                    "namespace": "ns-rosa-hcp",
+                    "progress": 100 if state == "ready" else 50 if state == "installing" else 0,
+                })
 
-                for cluster in rosa_clusters:
-                    cluster_name = cluster.get("name", "unknown")
-
-                    # Only include clusters that exist as CAPI resources on this hub
-                    if capi_cluster_names is not None and cluster_name not in capi_cluster_names:
-                        continue
-
-                    # Extract cluster information from rosa CLI output
-                    cluster_info = {
-                        "name": cluster_name,
-                        "status": "ready" if cluster.get("state") == "ready" else cluster.get("state", "unknown"),
-                        "region": cluster.get("region", {}).get("id", "N/A") if isinstance(cluster.get("region"), dict) else cluster.get("region", "N/A"),
-                        "created": cluster.get("creation_timestamp"),
-                        "version": cluster.get("openshift_version", "N/A"),
-                        "namespace": "ns-rosa-hcp",  # CAPI clusters are in ns-rosa-hcp
-                        "progress": 100 if cluster.get("state") == "ready" else 50 if cluster.get("state") == "installing" else 0,
-                    }
-
-                    cluster_list.append(cluster_info)
-
-                return {
-                    "success": True,
-                    "clusters": cluster_list,
-                    "count": len(cluster_list),
-                    "filtered_by_context": context,
-                }
-            except json.JSONDecodeError:
-                # Fall through to RosaControlPlane method
-                pass
+            return {
+                "success": True,
+                "clusters": cluster_list,
+                "count": len(cluster_list),
+                "filtered_by_context": context,
+            }
 
         # Fallback: Fetch ROSAControlPlane resources from all namespaces
         result = subprocess.run(
