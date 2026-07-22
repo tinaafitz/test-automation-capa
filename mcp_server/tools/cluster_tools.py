@@ -1,7 +1,9 @@
 """ROSA HCP cluster listing and status tools."""
 
 import json
+import os
 import subprocess
+import sys
 
 
 def register_tools(mcp):
@@ -10,31 +12,15 @@ def register_tools(mcp):
     def capa_list_clusters() -> str:
         """List all ROSA HCP clusters with status, region, version, and namespace."""
         try:
-            result = subprocess.run(
-                ["rosa", "list", "clusters", "-o", "json"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode != 0:
-                # Fallback to K8s ROSAControlPlane resources
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+            from agents.ocm_client import get_ocm_client
+            ocm = get_ocm_client()
+            clusters, err = ocm.list_clusters()
+            if err:
                 return _list_from_k8s()
-
-            clusters = json.loads(result.stdout)
-            cluster_list = []
-            for c in clusters:
-                cluster_list.append({
-                    "name": c.get("name", "unknown"),
-                    "status": c.get("state", "unknown"),
-                    "region": (c.get("region", {}).get("id", "N/A")
-                               if isinstance(c.get("region"), dict)
-                               else c.get("region", "N/A")),
-                    "version": c.get("openshift_version", "N/A"),
-                    "created": c.get("creation_timestamp"),
-                })
-            return json.dumps({"clusters": cluster_list, "count": len(cluster_list)}, indent=2)
-        except subprocess.TimeoutExpired:
-            return _list_from_k8s()
+            return json.dumps({"clusters": clusters, "count": len(clusters)}, indent=2)
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            return _list_from_k8s()
 
     @mcp.tool()
     def capa_cluster_status(cluster_name: str) -> str:
@@ -45,25 +31,13 @@ def register_tools(mcp):
         """
         result = {}
 
-        # ROSA CLI status
         try:
-            proc = subprocess.run(
-                ["rosa", "describe", "cluster", "--cluster", cluster_name, "-o", "json"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if proc.returncode == 0:
-                rosa_data = json.loads(proc.stdout)
-                result["rosa"] = {
-                    "name": rosa_data.get("name"),
-                    "state": rosa_data.get("state"),
-                    "version": rosa_data.get("openshift_version"),
-                    "region": (rosa_data.get("region", {}).get("id")
-                               if isinstance(rosa_data.get("region"), dict)
-                               else rosa_data.get("region")),
-                    "api_url": rosa_data.get("api", {}).get("url") if isinstance(rosa_data.get("api"), dict) else None,
-                    "console_url": rosa_data.get("console", {}).get("url") if isinstance(rosa_data.get("console"), dict) else None,
-                    "created": rosa_data.get("creation_timestamp"),
-                }
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+            from agents.ocm_client import get_ocm_client
+            ocm = get_ocm_client()
+            rosa_data, err = ocm.describe_cluster(cluster_name)
+            if rosa_data:
+                result["rosa"] = rosa_data
         except Exception as e:
             result["rosa"] = {"error": str(e)}
 
