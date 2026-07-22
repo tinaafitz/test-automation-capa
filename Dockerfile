@@ -50,7 +50,7 @@ RUN curl -sL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/
 
 # Install Python dependencies (backend + ansible)
 COPY ui/backend/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt ansible requests anthropic pyyaml && rm /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt ansible requests anthropic pyyaml mcp && rm /tmp/requirements.txt
 
 # Copy application code
 COPY playbooks/ /app/playbooks/
@@ -66,6 +66,10 @@ COPY vars/ /app/vars/
 COPY versions/ /app/versions/
 COPY test-suites/ /app/test-suites/
 COPY ui/backend/ /app/ui/backend/
+COPY mcp_server/ /app/mcp_server/
+COPY ansible.cfg /app/ansible.cfg
+COPY capa_core.py /app/capa_core.py
+COPY playbook_executor.py /app/playbook_executor.py
 
 # Copy built frontend
 COPY --from=frontend-build /app/frontend/build /app/ui/frontend/build
@@ -103,7 +107,10 @@ server {
 NGINX
 
 # Create persistent dirs
-RUN mkdir -p /app/vars /data
+RUN mkdir -p /app/vars /data /app/generated-yamls
+
+ENV AUTOMATION_PATH=/app
+ENV ANSIBLE_CONFIG=/app/ansible.cfg
 
 # Entrypoint script
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh

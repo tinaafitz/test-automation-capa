@@ -180,6 +180,7 @@ async def generate_provisioning_yaml(request: Request):
 
         # Template variables
         template_vars = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
             "cluster_name": cluster_name,
             "cluster_name_prefix": cluster_name[:32],  # Truncate to 32 chars for AWS limits
             "rcp_version": openshift_version,

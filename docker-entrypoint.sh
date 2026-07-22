@@ -22,6 +22,7 @@ fi
 # Show credential status
 echo "  AWS: ${AWS_ACCESS_KEY_ID:+configured}${AWS_ACCESS_KEY_ID:-not set}"
 echo "  oc:  $(oc whoami 2>/dev/null || echo 'not logged in')"
+echo "  Mode: ${ORCHESTRATOR_MODE:-local}"
 echo "==========================================="
 
 # Start backend
@@ -39,6 +40,18 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
+# Optionally start an in-process Celery worker (single-node celery mode)
+CELERY_PID=""
+if [ "${ORCHESTRATOR_MODE}" = "celery" ] && [ "${CELERY_EMBEDDED:-false}" = "true" ]; then
+    echo "Starting embedded Celery worker..."
+    celery -A celery_app worker \
+        --loglevel="${LOG_LEVEL:-info}" \
+        --concurrency="${CELERY_CONCURRENCY:-2}" \
+        --queues=ansible &
+    CELERY_PID=$!
+    echo "Celery worker PID: $CELERY_PID"
+fi
+
 # Start nginx (frontend)
 echo "Starting frontend on :3000..."
 nginx -g "daemon off;" &
@@ -48,6 +61,17 @@ echo "==========================================="
 echo "  CAPA Automation ready at http://localhost:3000"
 echo "==========================================="
 
-# Wait for either process to exit
-wait -n $BACKEND_PID $NGINX_PID
+# Graceful shutdown handler
+shutdown() {
+    echo "Shutting down..."
+    kill $BACKEND_PID 2>/dev/null
+    kill $NGINX_PID 2>/dev/null
+    [ -n "$CELERY_PID" ] && kill $CELERY_PID 2>/dev/null
+    wait
+    exit 0
+}
+trap shutdown SIGTERM SIGINT
+
+# Wait for any process to exit
+wait -n $BACKEND_PID $NGINX_PID ${CELERY_PID:+$CELERY_PID}
 exit $?

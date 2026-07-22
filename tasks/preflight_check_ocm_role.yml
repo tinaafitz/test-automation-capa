@@ -36,16 +36,76 @@
   set_fact:
     boto3_unavailable: "{{ ocm_role_status.error is defined and 'No module named' in ocm_role_status.error }}"
 
+- name: Verify OCM role is linked via ROSA CLI
+  shell: |
+    rosa list ocm-role 2>&1 | grep -v "^WARN" | grep -v "^$" | tail -n +2
+  register: rosa_ocm_role_list
+  changed_when: false
+  failed_when: false
+
+- name: Parse OCM role linked status
+  set_fact:
+    ocm_role_linked: "{{ 'Yes' in (rosa_ocm_role_list.stdout | default('')) }}"
+    ocm_role_linked_arn: "{{ rosa_ocm_role_list.stdout | default('') | regex_search('arn:aws:iam::[0-9]+:role/[^\\s]+') | default('') }}"
+
 - name: Display OCM role status
   debug:
     msg: >-
-      {% if ocm_role_status.exists %}
-      ✅ OCM role found: {{ ocm_role_status.name }} ({{ ocm_role_status.arn }})
+      {% if ocm_role_status.exists and ocm_role_linked | bool %}
+      ✅ OCM role found and linked: {{ ocm_role_status.name }} ({{ ocm_role_status.arn }})
+      {% elif ocm_role_status.exists and not (ocm_role_linked | bool) %}
+      ⚠️ OCM role exists in AWS ({{ ocm_role_status.name }}) but is NOT linked in OCM — will attempt to link
       {% elif boto3_unavailable | bool %}
       ℹ️ OCM role check skipped — boto3 not available in system Python. The OCM role likely already exists; install boto3 or use the backend venv to verify.
       {% else %}
       ⚠️ No OCM role found in AWS IAM — will attempt to create one
       {% endif %}
+
+- name: Link existing OCM role if unlinked
+  shell: |
+    rosa link ocm-role --role-arn "{{ ocm_role_status.arn }}" --yes 2>&1
+  register: ocm_role_link_result
+  when:
+    - ocm_role_status.exists
+    - not (ocm_role_linked | bool)
+  failed_when: false
+
+- name: Display OCM role link result
+  debug:
+    msg: "{{ ocm_role_link_result.stdout | default('') }}"
+  when: ocm_role_link_result is defined and ocm_role_link_result.stdout is defined
+
+- name: Unlink stale OCM role if linked role doesn't exist in AWS
+  shell: |
+    LINKED_ARN="{{ ocm_role_linked_arn }}"
+    LINKED_NAME=$(echo "$LINKED_ARN" | sed -n 's|.*role/||p')
+    if [ -n "$LINKED_NAME" ]; then
+      aws iam get-role --role-name "$LINKED_NAME" >/dev/null 2>&1
+      if [ $? -ne 0 ]; then
+        echo "Stale linked role detected: $LINKED_ARN does not exist in AWS"
+        rosa unlink ocm-role --role-arn "$LINKED_ARN" --yes 2>&1
+        echo "STALE_ROLE_UNLINKED"
+      else
+        echo "Linked role $LINKED_NAME exists in AWS — OK"
+      fi
+    fi
+  register: stale_role_check
+  changed_when: "'STALE_ROLE_UNLINKED' in stale_role_check.stdout"
+  failed_when: false
+  when: ocm_role_linked | bool
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ AWS_ACCESS_KEY_ID }}"
+    AWS_SECRET_ACCESS_KEY: "{{ AWS_SECRET_ACCESS_KEY }}"
+    AWS_DEFAULT_REGION: "{{ aws_region | default('us-west-2') }}"
+
+- name: Link correct OCM role after stale unlink
+  shell: |
+    rosa link ocm-role --role-arn "{{ ocm_role_status.arn }}" --yes 2>&1
+  when:
+    - stale_role_check is defined
+    - "'STALE_ROLE_UNLINKED' in (stale_role_check.stdout | default(''))"
+    - ocm_role_status.exists
+  failed_when: false
 
 - name: Create and link OCM role if missing
   when: not ocm_role_status.exists and not (boto3_unavailable | bool)

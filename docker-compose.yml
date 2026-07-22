@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${APP_PORT:-3000}:3000"
+      - "${API_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - ORCHESTRATOR_MODE=${ORCHESTRATOR_MODE:-local}
+    volumes:
+      - ${KUBECONFIG:-~/.kube/config}:/kube/config:ro
+      - ${USER_VARS_PATH:-./vars/user_vars.yml}:/app/vars/user_vars.yml:ro
+      - app-data:/data
+      - ./generated-yamls:/app/generated-yamls
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      celery -A celery_app worker
+      --loglevel=info
+      --concurrency=${CELERY_CONCURRENCY:-4}
+      --queues=ansible
+    working_dir: /app/ui/backend
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - ORCHESTRATOR_MODE=celery
+    volumes:
+      - ${KUBECONFIG:-~/.kube/config}:/kube/config:ro
+      - ${USER_VARS_PATH:-./vars/user_vars.yml}:/app/vars/user_vars.yml:ro
+      - app-data:/data
+      - ./generated-yamls:/app/generated-yamls
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - celery
+
+volumes:
+  redis-data:
+  app-data:
