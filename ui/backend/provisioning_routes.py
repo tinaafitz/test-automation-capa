@@ -19,7 +19,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 
 from shared_state import jobs
-from jobs_service import get_agent_stats
+from jobs_service import get_agent_stats, persist_agent_stats_on_completion
 from agents_service import init_ai_agents
 from notification_routes import send_cluster_notifications
 

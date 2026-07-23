@@ -207,7 +207,7 @@ def _save_agent_kb_file(filename: str, data):
 # ── Endpoints ───────────────────────────────────────────────────────────
 
 @router.get("/api/agents/dashboard")
-async def get_agent_dashboard():
+async def get_agent_dashboard(since: str = ""):
     """Aggregated agent overview: status, pipeline activity, state distribution."""
     # Agent statuses from active sessions
     agent_statuses = {
@@ -241,6 +241,8 @@ async def get_agent_dashboard():
 
     # State distribution from outcomes
     outcomes = _load_agent_kb_file("remediation_outcomes.json")
+    if since:
+        outcomes = [o for o in outcomes if o.get("timestamp", "") >= since]
     state_dist = {"detected": 0, "diagnosing": 0, "remediating": 0, "resolved": 0, "failed": 0}
     for o in outcomes:
         if o.get("success"):
@@ -270,9 +272,12 @@ async def get_agent_dashboard():
 
 
 @router.get("/api/agents/remediation-metrics")
-async def get_agent_remediation_metrics():
+async def get_agent_remediation_metrics(since: str = ""):
     """Remediation totals, success rate, per-type breakdown, and trend."""
     outcomes = _load_agent_kb_file("remediation_outcomes.json")
+
+    if since:
+        outcomes = [o for o in outcomes if o.get("timestamp", "") >= since]
 
     total_success = sum(1 for o in outcomes if o.get("success"))
     total_failed = sum(1 for o in outcomes if not o.get("success"))
@@ -283,12 +288,17 @@ async def get_agent_remediation_metrics():
     for o in outcomes:
         it = o.get("issue_type", "unknown")
         if it not in by_type:
-            by_type[it] = {"total": 0, "success": 0, "failed": 0}
+            by_type[it] = {"total": 0, "success": 0, "failed": 0, "earliest": "", "latest": ""}
         by_type[it]["total"] += 1
         if o.get("success"):
             by_type[it]["success"] += 1
         else:
             by_type[it]["failed"] += 1
+        ts = o.get("timestamp", "")
+        if ts and (not by_type[it]["earliest"] or ts < by_type[it]["earliest"]):
+            by_type[it]["earliest"] = ts
+        if ts > by_type[it]["latest"]:
+            by_type[it]["latest"] = ts
     for stats in by_type.values():
         stats["rate"] = round(stats["success"] / stats["total"] * 100, 1) if stats["total"] else 0
 
@@ -309,6 +319,10 @@ async def get_agent_remediation_metrics():
             daily[day]["failed"] += 1
     trend = sorted(daily.values(), key=lambda d: d["date"])
 
+    timestamps = [o.get("timestamp", "") for o in outcomes if o.get("timestamp")]
+    earliest = min(timestamps) if timestamps else None
+    latest = max(timestamps) if timestamps else None
+
     return {
         "success": True,
         "metrics": {
@@ -319,6 +333,8 @@ async def get_agent_remediation_metrics():
             "avg_duration_seconds": avg_duration,
             "by_issue_type": by_type,
             "trend": trend,
+            "earliest_event": earliest,
+            "latest_event": latest,
         },
     }
 
@@ -399,11 +415,36 @@ async def get_agent_knowledge_base():
         sev = i.get("severity", "medium")
         by_severity[sev] = by_severity.get(sev, 0) + 1
 
+    # Per-type stats from outcomes
+    type_stats = {}
+    for o in outcomes:
+        it = o.get("issue_type", "unknown")
+        ts = o.get("timestamp", "")
+        if it not in type_stats:
+            type_stats[it] = {"first_seen": ts, "last_seen": ts, "success": 0, "failed": 0}
+        if ts and ts < type_stats[it]["first_seen"]:
+            type_stats[it]["first_seen"] = ts
+        if ts and ts > type_stats[it]["last_seen"]:
+            type_stats[it]["last_seen"] = ts
+        if o.get("success"):
+            type_stats[it]["success"] += 1
+        else:
+            type_stats[it]["failed"] += 1
+
     # Most and least triggered
     pattern_triggers = []
     for i in issues_list:
         it = i.get("type", "")
-        pattern_triggers.append({"type": it, "count": trigger_counts.get(it, 0)})
+        stats = type_stats.get(it, {})
+        pattern_triggers.append({
+            "type": it,
+            "count": trigger_counts.get(it, 0),
+            "first_seen": stats.get("first_seen"),
+            "last_seen": stats.get("last_seen"),
+            "success": stats.get("success", 0),
+            "failed": stats.get("failed", 0),
+            "success_rate": round(stats["success"] / (stats["success"] + stats["failed"]) * 100, 1) if stats.get("success", 0) + stats.get("failed", 0) > 0 else None,
+        })
     pattern_triggers.sort(key=lambda p: p["count"], reverse=True)
 
     # Coverage gaps -- patterns never triggered

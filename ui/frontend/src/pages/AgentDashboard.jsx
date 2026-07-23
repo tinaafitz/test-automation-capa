@@ -153,14 +153,36 @@ const AgentDashboard = () => {
   const [showAllPatterns, setShowAllPatterns] = useState(true);
   const [collapsedCards, setCollapsedCards] = useState({});
   const toggleCard = (key) => setCollapsedCards(prev => ({ ...prev, [key]: !prev[key] }));
+  const [dateRange, setDateRange] = useState('all');
+
+  const DATE_RANGES = [
+    { key: '24h', label: '24h', hours: 24 },
+    { key: '7d', label: '7d', hours: 168 },
+    { key: '30d', label: '30d', hours: 720 },
+    { key: 'all', label: 'All', hours: 0 },
+  ];
+
+  const getSinceParam = (rangeKey) => {
+    const range = DATE_RANGES.find(r => r.key === rangeKey);
+    if (!range || range.hours === 0) return '';
+    const d = new Date(Date.now() - range.hours * 3600000);
+    return d.toISOString();
+  };
 
   const fetchAll = async () => {
     setLoading(true);
     setError(null);
     try {
+      const sinceParam = getSinceParam(dateRange);
+      const metricsUrl = sinceParam
+        ? `/api/agents/remediation-metrics?since=${encodeURIComponent(sinceParam)}`
+        : '/api/agents/remediation-metrics';
+      const dashUrl = sinceParam
+        ? `/api/agents/dashboard?since=${encodeURIComponent(sinceParam)}`
+        : '/api/agents/dashboard';
       const [dashRes, metricsRes, confRes, kbRes, roiRes] = await Promise.all([
-        fetch(buildApiUrl('/api/agents/dashboard')),
-        fetch(buildApiUrl('/api/agents/remediation-metrics')),
+        fetch(buildApiUrl(dashUrl)),
+        fetch(buildApiUrl(metricsUrl)),
         fetch(buildApiUrl('/api/agents/confidence')),
         fetch(buildApiUrl('/api/agents/knowledge-base')),
         fetch(buildApiUrl('/api/agents/roi')),
@@ -182,6 +204,7 @@ const AgentDashboard = () => {
   };
 
   useEffect(() => { if (!data) fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, [dateRange]);
   useEffect(() => {
     const interval = setInterval(fetchAll, 30000);
     return () => clearInterval(interval);
@@ -259,6 +282,29 @@ const AgentDashboard = () => {
             </div>
           </div>
           <div className="flex items-center gap-5">
+            <div className="flex items-center gap-1 rounded p-0.5" style={{ background: '#1e2736' }}>
+              {DATE_RANGES.map(r => (
+                <button key={r.key}
+                  onClick={() => { setDateRange(r.key); }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+                    dateRange === r.key
+                      ? 'text-white' : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                  style={dateRange === r.key ? { background: '#2a3344' } : {}}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            {data?.metrics && (
+              <div className="text-[10px] text-gray-500 text-right leading-tight">
+                {data.metrics.earliest_event && data.metrics.latest_event && (
+                  <div>Data: {new Date(data.metrics.earliest_event).toLocaleDateString()} &ndash; {new Date(data.metrics.latest_event).toLocaleDateString()}</div>
+                )}
+                {data.lastUpdated && (
+                  <div>Refreshed: {new Date(data.lastUpdated).toLocaleTimeString()}</div>
+                )}
+              </div>
+            )}
             <button onClick={fetchAll} disabled={loading}
               className={`refresh-btn flex items-center gap-1.5 px-4 py-1.5 rounded font-semibold text-xs ${loading ? 'opacity-50' : ''}`}>
               <ArrowPathIcon className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -367,9 +413,15 @@ const AgentDashboard = () => {
                     {!collapsedCards['monitor-list'] && <div className="space-y-0.5 overflow-y-auto scrollbar-dark flex-1" style={{ minHeight: 0 }}>
                       {(() => {
                         const triggerMap = {};
-                        (kb?.most_triggered || []).forEach(p => { triggerMap[p.type] = p.count; });
+                        (kb?.most_triggered || []).forEach(p => { triggerMap[p.type] = p; });
                         const allPatterns = patterns.map(p => ({
-                          ...p, count: triggerMap[p.type] || 0,
+                          ...p,
+                          count: triggerMap[p.type]?.count || 0,
+                          first_seen: triggerMap[p.type]?.first_seen,
+                          last_seen: triggerMap[p.type]?.last_seen,
+                          outcome_success: triggerMap[p.type]?.success || 0,
+                          outcome_failed: triggerMap[p.type]?.failed || 0,
+                          outcome_rate: triggerMap[p.type]?.success_rate,
                         })).sort((a, b) => b.count - a.count)
                           .filter(p => showAllPatterns || p.count > 0);
                         const maxCount = allPatterns[0]?.count || 1;
@@ -410,6 +462,9 @@ const AgentDashboard = () => {
                                   {p.description && (
                                     <p className="text-[11px] mb-2" style={{ color: '#8899aa' }}>{p.description}</p>
                                   )}
+                                  {p.pattern && (
+                                    <p className="text-[10px] font-mono mb-2 px-2 py-1 rounded" style={{ color: '#6b7f8e', background: '#1a2332' }}>{p.pattern}</p>
+                                  )}
                                   <div className="flex flex-wrap gap-x-4 gap-y-1">
                                     <div className="flex items-center gap-1">
                                       <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Severity:</span>
@@ -423,6 +478,25 @@ const AgentDashboard = () => {
                                       <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Triggered:</span>
                                       <span className="text-[11px] font-bold" style={{ color: '#d5dbdb' }}>{p.count}x</span>
                                     </div>
+                                    {p.first_seen && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>First:</span>
+                                        <span className="text-[11px]" style={{ color: '#8899aa' }}>{new Date(p.first_seen).toLocaleDateString()}</span>
+                                      </div>
+                                    )}
+                                    {p.last_seen && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Last:</span>
+                                        <span className="text-[11px]" style={{ color: '#8899aa' }}>{new Date(p.last_seen).toLocaleDateString()}</span>
+                                      </div>
+                                    )}
+                                    {p.outcome_rate != null && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Success:</span>
+                                        <span className="text-[11px] font-bold" style={{ color: p.outcome_rate >= 80 ? '#22c55e' : '#eab308' }}>{p.outcome_rate}%</span>
+                                        <span className="text-[10px]" style={{ color: '#5a6a7a' }}>({p.outcome_success}W {p.outcome_failed}F)</span>
+                                      </div>
+                                    )}
                                     {p.consecutive_successes > 0 && (
                                       <div className="flex items-center gap-1">
                                         <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Streak:</span>
@@ -496,7 +570,8 @@ const AgentDashboard = () => {
                       ) : patterns.sort((a, b) => (b.learned_confidence || 0) - (a.learned_confidence || 0)).map(p => {
                         const pct = Math.round((p.learned_confidence || 0) * 100);
                         const isExp = expandedDiagnose === p.type;
-                        const triggerCount = (kb?.most_triggered || []).find(t => t.type === p.type)?.count || 0;
+                        const triggerInfo = (kb?.most_triggered || []).find(t => t.type === p.type) || {};
+                        const triggerCount = triggerInfo.count || 0;
                         const sevColor = { critical: '#fca5a5', high: '#fdba74', medium: '#fde047', low: '#93c5fd' }[p.severity] || '#93c5fd';
                         return (
                           <div key={p.type}>
@@ -542,6 +617,25 @@ const AgentDashboard = () => {
                                     <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Triggered:</span>
                                     <span className="text-[11px] font-bold" style={{ color: '#d5dbdb' }}>{triggerCount}x</span>
                                   </div>
+                                  {triggerInfo.first_seen && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>First:</span>
+                                      <span className="text-[11px]" style={{ color: '#8899aa' }}>{new Date(triggerInfo.first_seen).toLocaleDateString()}</span>
+                                    </div>
+                                  )}
+                                  {triggerInfo.last_seen && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Last:</span>
+                                      <span className="text-[11px]" style={{ color: '#8899aa' }}>{new Date(triggerInfo.last_seen).toLocaleDateString()}</span>
+                                    </div>
+                                  )}
+                                  {triggerInfo.success_rate != null && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Success:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: triggerInfo.success_rate >= 80 ? '#22c55e' : '#eab308' }}>{triggerInfo.success_rate}%</span>
+                                      <span className="text-[10px]" style={{ color: '#5a6a7a' }}>({triggerInfo.success || 0}W {triggerInfo.failed || 0}F)</span>
+                                    </div>
+                                  )}
                                   {p.consecutive_successes > 0 && (
                                     <div className="flex items-center gap-1">
                                       <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Win Streak:</span>
@@ -631,7 +725,8 @@ const AgentDashboard = () => {
                                     <span style={{ color: '#FF9900', fontSize: 10, opacity: 0.5 }}>{isExp ? '\u25BC' : '\u25B6'}</span>
                                     <span className="text-[12px]" style={{ color: '#b0bec5' }}>{type.replace(/_/g, ' ')}</span>
                                   </div>
-                                  <span className="text-[12px]" style={{ color: '#8899aa' }}>
+                                  <span className="text-[12px] flex items-center gap-2" style={{ color: '#8899aa' }}>
+                                    {info.latest && <span className="text-[10px]" style={{ color: '#5a6a7a' }}>{new Date(info.latest).toLocaleDateString()}</span>}
                                     <span style={{ color: '#22c55e' }}>{info.success || 0}</span>
                                     {(info.failed || 0) > 0 && <span style={{ color: '#ef4444' }}> / {info.failed}</span>}
                                   </span>
@@ -645,6 +740,9 @@ const AgentDashboard = () => {
                               </div>
                               {isExp && (
                                 <div className="pattern-detail ml-5 mt-1 mb-2 pl-3" style={{ borderLeft: '2px solid #FF9900' }}>
+                                  {patternInfo?.description && (
+                                    <p className="text-[11px] mb-2" style={{ color: '#8899aa' }}>{patternInfo.description}</p>
+                                  )}
                                   <div className="flex flex-wrap gap-x-4 gap-y-1">
                                     <div className="flex items-center gap-1">
                                       <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Success:</span>
@@ -658,6 +756,24 @@ const AgentDashboard = () => {
                                       <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Rate:</span>
                                       <span className="text-[11px] font-bold" style={{ color: (info.rate || 0) >= 80 ? '#22c55e' : '#eab308' }}>{info.rate || 0}%</span>
                                     </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Time saved:</span>
+                                      <span className="text-[11px] font-bold" style={{ color: '#6ee7b7' }}>
+                                        ~{(info.success || 0) * ({'rosanetwork_stuck_deletion': 45, 'cloudformation_deletion_failure': 30, 'rosaroleconfig_stuck_deletion': 15, 'api_rate_limit': 5, 'ocm_auth_failure': 15}[type] || 30)} min
+                                      </span>
+                                    </div>
+                                    {info.earliest && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>First:</span>
+                                        <span className="text-[11px]" style={{ color: '#8899aa' }}>{new Date(info.earliest).toLocaleDateString()}</span>
+                                      </div>
+                                    )}
+                                    {info.latest && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Last:</span>
+                                        <span className="text-[11px]" style={{ color: '#8899aa' }}>{new Date(info.latest).toLocaleString()}</span>
+                                      </div>
+                                    )}
                                     {patternInfo && (
                                       <>
                                         <div className="flex items-center gap-1">
@@ -754,7 +870,9 @@ const AgentDashboard = () => {
                                     <div className="h-full rounded-sm bar-animate" style={{ width: `${pct}%`, background: confidenceBarGradient(pct) }} />
                                   </div>
                                 </div>
-                                {isExp && (
+                                {isExp && (() => {
+                                  const triggerInfo = (kb?.most_triggered || []).find(t => t.type === p.type) || {};
+                                  return (
                                   <div className="pattern-detail ml-5 mt-1 mb-2 pl-3" style={{ borderLeft: '2px solid #10b981' }}>
                                     <div className="flex flex-wrap gap-x-4 gap-y-1">
                                       <div className="flex items-center gap-1">
@@ -764,13 +882,38 @@ const AgentDashboard = () => {
                                       {(p.consecutive_successes || 0) > 0 && (
                                         <div className="flex items-center gap-1">
                                           <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Win streak:</span>
-                                          <span className="text-[11px] font-bold" style={{ color: '#22c55e' }}>{p.consecutive_successes} (confidence +0.05 per 3)</span>
+                                          <span className="text-[11px] font-bold" style={{ color: '#22c55e' }}>{p.consecutive_successes}</span>
                                         </div>
                                       )}
                                       {(p.consecutive_failures || 0) > 0 && (
                                         <div className="flex items-center gap-1">
                                           <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Fail streak:</span>
-                                          <span className="text-[11px] font-bold" style={{ color: '#ef4444' }}>{p.consecutive_failures} (confidence -0.1 per 2)</span>
+                                          <span className="text-[11px] font-bold" style={{ color: '#ef4444' }}>{p.consecutive_failures}</span>
+                                        </div>
+                                      )}
+                                      {triggerInfo.success_rate != null && (
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Success rate:</span>
+                                          <span className="text-[11px] font-bold" style={{ color: triggerInfo.success_rate >= 80 ? '#22c55e' : '#eab308' }}>{triggerInfo.success_rate}%</span>
+                                          <span className="text-[10px]" style={{ color: '#5a6a7a' }}>({triggerInfo.success || 0}W {triggerInfo.failed || 0}F)</span>
+                                        </div>
+                                      )}
+                                      {triggerInfo.first_seen && (
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>First:</span>
+                                          <span className="text-[11px]" style={{ color: '#8899aa' }}>{new Date(triggerInfo.first_seen).toLocaleDateString()}</span>
+                                        </div>
+                                      )}
+                                      {triggerInfo.last_seen && (
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Last:</span>
+                                          <span className="text-[11px]" style={{ color: '#8899aa' }}>{new Date(triggerInfo.last_seen).toLocaleDateString()}</span>
+                                        </div>
+                                      )}
+                                      {p.last_adjusted && (
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] uppercase" style={{ color: '#5a6a7a' }}>Adjusted:</span>
+                                          <span className="text-[11px]" style={{ color: '#8899aa' }}>{new Date(p.last_adjusted).toLocaleString()}</span>
                                         </div>
                                       )}
                                       <div className="flex items-center gap-1">
@@ -780,14 +923,20 @@ const AgentDashboard = () => {
                                         </span>
                                       </div>
                                     </div>
-                                    <p className="text-[11px] mt-1.5" style={{ color: '#6b7f8e' }}>
-                                      {pct >= 80 ? 'High confidence — agent has learned this pattern reliably resolves with current remediation strategy.'
-                                        : pct >= 50 ? 'Moderate confidence — agent is still learning, more outcomes needed to stabilize.'
-                                        : pct > 0 ? 'Low confidence — recent failures have reduced trust. Agent will re-diagnose before remediating.'
-                                        : 'No confidence data yet — awaiting first remediation outcome.'}
+                                    {p.adjustment_reason && (
+                                      <p className="text-[10px] mt-1.5" style={{ color: '#6b7f8e' }}>
+                                        Reason: {p.adjustment_reason}
+                                      </p>
+                                    )}
+                                    <p className="text-[11px] mt-1" style={{ color: '#6b7f8e' }}>
+                                      {pct >= 80 ? 'High confidence — agent reliably resolves this pattern.'
+                                        : pct >= 50 ? 'Moderate confidence — still learning, more outcomes needed.'
+                                        : pct > 0 ? 'Low confidence — recent failures reduced trust. Will re-diagnose before remediating.'
+                                        : 'No confidence data yet — awaiting first outcome.'}
                                     </p>
                                   </div>
-                                )}
+                                  );
+                                })()}
                               </div>
                             );
                           })}
