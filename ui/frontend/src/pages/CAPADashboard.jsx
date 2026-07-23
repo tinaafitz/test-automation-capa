@@ -1832,28 +1832,66 @@ const CAPADashboardContent = () => {
                             )}
                           </div>
                           {task.agentStats.resource_details?.length > 0 && (
-                            <div className="mt-2 pt-2 border-t border-yellow-200 space-y-1">
-                              {task.agentStats.resource_details.map((detail, idx) => {
-                                const statusIcon = detail.status === 'resolved' ? '✅'
-                                  : detail.status === 'failed' ? '⚠️'
-                                  : detail.status === 'detected' ? '🔍'
-                                  : 'ℹ️';
-                                const issueLabel = detail.issue_type?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
-                                return (
-                                  <div key={idx} className="flex items-start gap-2 text-xs text-gray-600">
-                                    <span className="flex-shrink-0">{statusIcon}</span>
-                                    <div>
-                                      <span className="font-medium text-gray-700">{detail.resource_key}</span>
-                                      <span className="mx-1">&mdash;</span>
-                                      <span>{issueLabel}</span>
-                                      {detail.diagnosis && (
-                                        <span className="text-gray-500 ml-1">({detail.diagnosis})</span>
-                                      )}
+                            <details className="mt-2 pt-2 border-t border-yellow-200">
+                              <summary className="cursor-pointer text-xs font-medium text-gray-600 hover:text-gray-800">
+                                View {task.agentStats.resource_details.length} resource detail(s)
+                              </summary>
+                              <div className="mt-2 space-y-3">
+                                {task.agentStats.resource_details.map((detail, idx) => {
+                                  const statusIcon = detail.status === 'resolved' ? '✅'
+                                    : detail.status === 'failed' ? '⚠️'
+                                    : detail.status === 'detected' ? '🔍'
+                                    : 'ℹ️';
+                                  const issueLabel = detail.issue_type?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
+                                  const statusColor = detail.status === 'resolved' ? 'text-green-700'
+                                    : detail.status === 'failed' ? 'text-red-600'
+                                    : 'text-yellow-700';
+                                  return (
+                                    <div key={idx} className="bg-white rounded border border-gray-200 p-2">
+                                      <div className="flex items-start gap-2 text-xs">
+                                        <span className="flex-shrink-0 mt-0.5">{statusIcon}</span>
+                                        <div className="flex-1">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="font-semibold text-gray-800">{issueLabel}</span>
+                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColor} bg-opacity-10 ${detail.status === 'resolved' ? 'bg-green-100' : detail.status === 'failed' ? 'bg-red-100' : 'bg-yellow-100'}`}>
+                                              {detail.status}
+                                            </span>
+                                          </div>
+                                          <div className="text-gray-500 mt-0.5">{detail.resource_key}</div>
+                                          {detail.diagnosis && (
+                                            <div className="text-gray-600 mt-1">
+                                              <span className="font-medium">Diagnosis:</span> {detail.diagnosis}
+                                            </div>
+                                          )}
+                                          {detail.fix_applied && detail.fix_applied !== 'log_and_continue' && (
+                                            <div className="text-gray-600 mt-0.5">
+                                              <span className="font-medium">Fix applied:</span> {detail.fix_applied.replace(/_/g, ' ')}
+                                            </div>
+                                          )}
+                                          {detail.timeline?.length > 0 && (
+                                            <details className="mt-1">
+                                              <summary className="cursor-pointer text-[10px] text-gray-400 hover:text-gray-600">
+                                                Timeline ({detail.timeline.length} event{detail.timeline.length > 1 ? 's' : ''})
+                                              </summary>
+                                              <div className="mt-1 pl-2 border-l-2 border-gray-200 space-y-0.5">
+                                                {detail.timeline.map((event, tidx) => (
+                                                  <div key={tidx} className="text-[10px] text-gray-500">
+                                                    <span className="text-gray-400">{new Date(event.time).toLocaleTimeString()}</span>
+                                                    {' '}<span className="font-medium">{event.action?.replace(/_/g, ' ')}</span>
+                                                    {event.confidence != null && <span className="ml-1">({Math.round(event.confidence * 100)}% confidence)</span>}
+                                                    {event.result && <div className="text-gray-400 ml-3 truncate" title={event.result}>{event.result}</div>}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </details>
+                                          )}
+                                        </div>
+                                      </div>
                                     </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                                  );
+                                })}
+                              </div>
+                            </details>
                           )}
                         </div>
                       )}
