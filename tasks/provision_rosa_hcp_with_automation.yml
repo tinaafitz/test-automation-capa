@@ -421,9 +421,7 @@
           echo "Removing stuck finalizers from ${RESOURCE_TYPE}/${CR_NAME} (deleting since ${DT}, finalizers: ${FINALIZERS})"
           oc patch ${RESOURCE_TYPE} ${CR_NAME} -n {{ capi_namespace }} --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
         else
-          echo "Force deleting stale ${RESOURCE_TYPE}/${CR_NAME} (finalizers: ${FINALIZERS})"
-          oc delete ${RESOURCE_TYPE} ${CR_NAME} -n {{ capi_namespace }} --timeout=30s 2>/dev/null || true
-          oc patch ${RESOURCE_TYPE} ${CR_NAME} -n {{ capi_namespace }} --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+          echo "Skipping ${RESOURCE_TYPE}/${CR_NAME} — no deletionTimestamp (belongs to another active cluster)"
         fi
       done
     done

@@ -42,10 +42,34 @@ class OCMClient:
         )).rstrip("/")
         self._log_fn = log_fn
         self._token: Optional[str] = None
+        self._refresh_token: Optional[str] = None
+        self._ocm_client_id: Optional[str] = None
+
+        if not self.client_id or not self.client_secret:
+            self._load_ocm_config()
+
+    def _load_ocm_config(self):
+        ocm_paths = [
+            os.path.expanduser("~/Library/Application Support/ocm/ocm.json"),
+            os.path.expanduser("~/.config/ocm/ocm.json"),
+        ]
+        for path in ocm_paths:
+            try:
+                with open(path) as f:
+                    config = json.load(f)
+                self._refresh_token = config.get("refresh_token", "")
+                self._ocm_client_id = config.get("client_id", "ocm-cli")
+                if config.get("url"):
+                    self.api_url = config["url"].rstrip("/")
+                if self._refresh_token:
+                    self._log(f"Loaded OCM refresh token from {path}", "debug")
+                    return
+            except (FileNotFoundError, json.JSONDecodeError):
+                continue
 
     @property
     def available(self) -> bool:
-        return bool(self.client_id and self.client_secret)
+        return bool((self.client_id and self.client_secret) or self._refresh_token)
 
     def _log(self, message: str, level: str = "info"):
         if self._log_fn:
@@ -75,16 +99,33 @@ class OCMClient:
         if self._token:
             return self._token
 
-        result = self._api_request(
-            SSO_TOKEN_URL,
-            method="POST",
-            data={
-                "grant_type": "client_credentials",
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
+        if self.client_id and self.client_secret:
+            result = self._api_request(
+                SSO_TOKEN_URL,
+                method="POST",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        elif self._refresh_token:
+            result = self._api_request(
+                SSO_TOKEN_URL,
+                method="POST",
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": self._ocm_client_id or "ocm-cli",
+                    "refresh_token": self._refresh_token,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            if result.get("refresh_token"):
+                self._refresh_token = result["refresh_token"]
+        else:
+            raise RuntimeError("No OCM credentials available")
+
         self._token = result.get("access_token", "")
         if not self._token:
             raise RuntimeError(f"Failed to get OCM token: {result.get('error', 'unknown error')}")
