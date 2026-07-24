@@ -38,8 +38,8 @@
         "Invalid client credentials",
         "Incorrect client ID/secret"
       ],
-      "learned_confidence": 0.8,
-      "last_adjusted": "2026-06-24T14:28:41.220314",
+      "learned_confidence": 0.3,
+      "last_adjusted": "2026-07-22T16:31:39.853238",
       "adjustment_reason": "2 consecutive failures in last 2 runs"
     },
     {
@@ -177,9 +177,9 @@
         "IAM roles still in use",
         "Controller unable to clean up resources"
       ],
-      "learned_confidence": 1.0,
-      "last_adjusted": "2026-04-20T16:21:21.617842",
-      "adjustment_reason": "4 consecutive successes in last 4 runs"
+      "learned_confidence": 0.3,
+      "last_adjusted": "2026-07-23T12:03:41.259535",
+      "adjustment_reason": "5 consecutive failures in last 5 runs"
     },
     {
       "type": "vpc_deletion_failure",

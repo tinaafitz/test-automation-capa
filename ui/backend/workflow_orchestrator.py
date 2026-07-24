@@ -895,7 +895,10 @@ async def _run_local_execution(execution: StateMachineExecution):
                 "agent_events": [],
                 "created_at": execution.created_at,
             }
-            execution.agent_session = init_ai_agents(execution.execution_id)
+            _op_type = "delete" if "delete" in execution.state_machine_name else "provision"
+            execution.agent_session = init_ai_agents(
+                execution.execution_id, operation_type=_op_type
+            )
             logger.info(f"AI agents initialized for execution {execution.execution_id}")
         except Exception as e:
             logger.warning(f"Failed to initialize AI agents: {e}")

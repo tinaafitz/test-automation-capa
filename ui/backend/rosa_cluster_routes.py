@@ -245,7 +245,7 @@ async def create_cluster(config: ClusterConfig, background_tasks: BackgroundTask
     }
 
     # Initialize AI agents for provisioning monitoring
-    init_ai_agents(job_id)
+    init_ai_agents(job_id, operation_type="provision")
 
     # Start background task
     asyncio.create_task(
@@ -301,7 +301,7 @@ async def delete_cluster(cluster_id: str, background_tasks: BackgroundTasks):
         "cluster_name": cluster["config"].get("name", ""),
         "capi_namespace": cluster["config"].get("capi_namespace", "ns-rosa-hcp"),
     }
-    init_ai_agents(job_id)
+    init_ai_agents(job_id, operation_type="delete")
     asyncio.create_task(
         _resolve("run_playbook_background")("playbooks/delete_rosa_hcp_cluster.yml", delete_vars, job_id, "Delete ROSA HCP Cluster")
     )
@@ -912,7 +912,7 @@ async def delete_rosa_cluster(
         }
 
         # Initialize AI agents for deletion monitoring
-        init_ai_agents(job_id)
+        init_ai_agents(job_id, operation_type="delete")
 
         # Start deletion in background (use asyncio.to_thread to avoid blocking event loop)
         asyncio.create_task(asyncio.to_thread(_resolve("perform_cluster_deletion"), job_id, cluster_name, namespace))

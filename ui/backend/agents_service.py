@@ -54,7 +54,7 @@ def _get_app_module():
     return sys.modules.get("app")
 
 
-def init_ai_agents(job_id: str, dry_run: bool = False):
+def init_ai_agents(job_id: str, dry_run: bool = False, operation_type: str = ""):
     """Initialize AI agent framework for a job.  Returns dict of agents or None.
 
     Reads ``AI_AGENTS_AVAILABLE`` and the four agent classes from the
@@ -116,6 +116,7 @@ def init_ai_agents(job_id: str, dry_run: bool = False):
                         resource_key=resource_key,
                         details=message,
                         duration_seconds=_duration,
+                        operation_type=operation_type,
                     )
                 except Exception:
                     pass
@@ -207,7 +208,7 @@ def _save_agent_kb_file(filename: str, data):
 # ── Endpoints ───────────────────────────────────────────────────────────
 
 @router.get("/api/agents/dashboard")
-async def get_agent_dashboard(since: str = ""):
+async def get_agent_dashboard(since: str = "", operation_type: str = ""):
     """Aggregated agent overview: status, pipeline activity, state distribution."""
     # Agent statuses from active sessions
     agent_statuses = {
@@ -243,6 +244,8 @@ async def get_agent_dashboard(since: str = ""):
     outcomes = _load_agent_kb_file("remediation_outcomes.json")
     if since:
         outcomes = [o for o in outcomes if o.get("timestamp", "") >= since]
+    if operation_type:
+        outcomes = [o for o in outcomes if o.get("operation_type", "") == operation_type]
     state_dist = {"detected": 0, "diagnosing": 0, "remediating": 0, "resolved": 0, "failed": 0}
     for o in outcomes:
         if o.get("success"):
@@ -272,12 +275,14 @@ async def get_agent_dashboard(since: str = ""):
 
 
 @router.get("/api/agents/remediation-metrics")
-async def get_agent_remediation_metrics(since: str = ""):
+async def get_agent_remediation_metrics(since: str = "", operation_type: str = ""):
     """Remediation totals, success rate, per-type breakdown, and trend."""
     outcomes = _load_agent_kb_file("remediation_outcomes.json")
 
     if since:
         outcomes = [o for o in outcomes if o.get("timestamp", "") >= since]
+    if operation_type:
+        outcomes = [o for o in outcomes if o.get("operation_type", "") == operation_type]
 
     total_success = sum(1 for o in outcomes if o.get("success"))
     total_failed = sum(1 for o in outcomes if not o.get("success"))
@@ -477,9 +482,11 @@ _ROI_ORPHAN_COST_MONTHLY = 139  # USD per orphaned cluster
 
 
 @router.get("/api/agents/roi")
-async def get_agent_roi():
+async def get_agent_roi(operation_type: str = ""):
     """ROI: clusters saved, time saved, cost avoided."""
     outcomes = _load_agent_kb_file("remediation_outcomes.json")
+    if operation_type:
+        outcomes = [o for o in outcomes if o.get("operation_type", "") == operation_type]
 
     successful = [o for o in outcomes if o.get("success")]
     # Unique resources saved
