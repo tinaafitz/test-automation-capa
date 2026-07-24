@@ -157,6 +157,7 @@ const AgentDashboard = () => {
   const [operationFilter, setOperationFilter] = useState('');
 
   const DATE_RANGES = [
+    { key: '1h', label: '1h', hours: 1 },
     { key: '24h', label: '24h', hours: 24 },
     { key: '7d', label: '7d', hours: 168 },
     { key: '30d', label: '30d', hours: 720 },
