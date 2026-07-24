@@ -307,16 +307,22 @@ class RosaHcpDiagnosticAgent(DiagnosticAgent):
 
     def _diagnose_cloudformation_failure(self, context: Dict) -> Dict:
         self.log("Analyzing CloudFormation failure...", "debug")
+        resource_name = context.get("resource_name", "unknown")
+        namespace = context.get("namespace", "ns-rosa-hcp")
+        stack_name = resource_name.replace("-network", "") + "-rosa-network-stack" if resource_name != "unknown" else ""
+        
         return {
             "issue_type": "cloudformation_deletion_failure",
-            "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+            "root_cause": "CloudFormation stack failed to delete, likely due to orphaned VPC dependencies",
             "severity": "high",
-            "confidence": 0.8,
-            "evidence": ["CloudFormation deletion failure detected in logs"],
-            "recommended_fix": "manual_cloudformation_cleanup",
+            "confidence": 0.9,
+            "evidence": ["CloudFormation deletion failure detected"],
+            "recommended_fix": "retry_cloudformation_delete",
             "fix_parameters": {
-                "action": "inspect_and_report",
-                "message": "CloudFormation stack requires manual inspection and cleanup"
+                "stack_name": stack_name,
+                "region": context.get("region", "us-west-2"),
+                "resource_name": resource_name,
+                "namespace": namespace,
             }
         }
 

@@ -12,6 +12,7 @@ Endpoints moved here from app.py:
 """
 
 import asyncio
+import json
 import sys
 from datetime import datetime
 
@@ -99,15 +100,42 @@ def check_and_timeout_stuck_jobs():
             jobs[job_id]["progress"] = 0
             stuck_jobs.append(job_id)
 
+            # Persist agent stats before cleaning up session
+            persist_agent_stats_on_completion(job_id)
+
             print(f"⏱️ Marked job {job_id} as failed due to timeout ({int(elapsed_time)} minutes)")
 
     return stuck_jobs
+
+
+def persist_agent_stats_on_completion(job_id: str):
+    """Save agent stats to the job record in SQLite when a job completes."""
+    try:
+        # Get current agent stats
+        stats = get_agent_stats(job_id)
+        
+        # Only persist if agent was enabled and we have meaningful data
+        if stats.get("enabled") and job_id in jobs:
+            # Store the agent stats in the job record (this auto-persists to SQLite via JobStore)
+            jobs[job_id]["agent_stats"] = stats
+            
+            # Clean up the in-memory agent session since the job is complete
+            if job_id in ai_agent_sessions:
+                ai_agent_sessions.pop(job_id, None)
+                print(f"[AI Agent] Stats persisted and session cleaned up for job {job_id}")
+    except Exception as e:
+        print(f"[AI Agent] Error persisting stats for job {job_id}: {e}")
 
 
 def get_agent_stats(job_id: str) -> dict:
     """Get AI agent statistics for a job."""
     session = ai_agent_sessions.get(job_id)
     if not session:
+        # Try to get persisted agent stats from the job record if job is not in memory
+        if job_id in jobs:
+            persisted_stats = jobs[job_id].get("agent_stats")
+            if persisted_stats:
+                return persisted_stats
         return {"enabled": False}
 
     monitor = session["monitor"]
@@ -256,6 +284,9 @@ async def cancel_job(job_id: str):
     jobs[job_id]["error"] = "Job was manually cancelled"
     jobs[job_id]["completed_at"] = datetime.now().isoformat()
     jobs[job_id]["progress"] = 0
+
+    # Persist agent stats before cleaning up session
+    persist_agent_stats_on_completion(job_id)
 
     return {"success": True, "message": "Job cancelled successfully", "job_id": job_id}
 

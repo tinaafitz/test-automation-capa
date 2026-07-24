@@ -26,7 +26,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 
 from shared_state import jobs, ai_agent_sessions
-from jobs_service import get_agent_stats
+from jobs_service import get_agent_stats, persist_agent_stats_on_completion
 from agents_service import init_ai_agents
 from playbook_executor import build_playbook_command
 
@@ -171,11 +171,15 @@ def run_ansible_task_background(
                     "message"
                 ] = f"{description} completed and refreshed at {completed_time}"
                 jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                # Persist agent stats before cleaning up session
+                persist_agent_stats_on_completion(job_id)
             else:
                 jobs[job_id]["status"] = "failed"
                 jobs[job_id]["message"] = f"{description} failed: {display_message}"
                 jobs[job_id]["error"] = error_message
                 jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                # Persist agent stats before cleaning up session
+                persist_agent_stats_on_completion(job_id)
 
             jobs[job_id]["logs"] = result.stdout.split("\n") + result.stderr.split("\n")
             return
@@ -362,11 +366,15 @@ def run_ansible_task_background(
                     "message"
                 ] = f"{description} completed and refreshed at {completed_time}"
                 jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                # Persist agent stats before cleaning up session
+                persist_agent_stats_on_completion(job_id)
             else:
                 jobs[job_id]["status"] = "failed"
                 jobs[job_id]["message"] = f"{description} failed: {error_message}"
                 jobs[job_id]["error"] = error_message
                 jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                # Persist agent stats before cleaning up session
+                persist_agent_stats_on_completion(job_id)
 
             jobs[job_id]["logs"] = stdout_lines + stderr_lines
 
@@ -789,13 +797,15 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             jobs[job_id]["progress"] = 100
             jobs[job_id]["return_code"] = 0
             jobs[job_id]["message"] = "Playbook completed successfully"
+            # Persist agent stats before cleaning up session
+            persist_agent_stats_on_completion(job_id)
         else:
             jobs[job_id]["status"] = "failed"
             jobs[job_id]["progress"] = 100
             jobs[job_id]["return_code"] = returncode
             jobs[job_id]["message"] = f"Playbook failed with return code {returncode}"
-
-        jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
+            # Persist agent stats before cleaning up session
+            persist_agent_stats_on_completion(job_id)
 
         if jobs[job_id]["status"] == "failed":
             agent_stats = jobs[job_id].get("agent_stats", {})
@@ -856,7 +866,8 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
         jobs[job_id]["return_code"] = 1
         jobs[job_id]["message"] = "Playbook timed out after 90 minutes"
         jobs[job_id]["logs"].append("ERROR: Process timed out after 90 minutes")
-        jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
+        # Persist agent stats before cleaning up session
+        persist_agent_stats_on_completion(job_id)
         jobs[job_id]["completed_at"] = datetime.now().isoformat()
     except Exception as e:
         jobs[job_id]["status"] = "failed"
@@ -864,7 +875,8 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
         jobs[job_id]["return_code"] = 1
         jobs[job_id]["message"] = f"Error: {str(e)}"
         jobs[job_id]["logs"].append(f"ERROR: {str(e)}")
-        jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
+        # Persist agent stats before cleaning up session
+        persist_agent_stats_on_completion(job_id)
         jobs[job_id]["completed_at"] = datetime.now().isoformat()
     finally:
         _active_job_processes.pop(job_id, None)
