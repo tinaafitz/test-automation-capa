@@ -1262,3 +1262,138 @@ RosaProvisionModal.propTypes = {
   }),
   inline: PropTypes.bool,
 };
+
+const generateSuffix = () => {
+  const bytes = new Uint8Array(1);
+  crypto.getRandomValues(bytes);
+  return bytes[0].toString(16).padStart(2, '0');
+};
+
+export function ExpressProvision({ onSubmit }) {
+  const [prefix, setPrefix] = useState(() => `ui${generateSuffix()}`);
+  const [channelGroup, setChannelGroup] = useState('stable');
+  const [submitting, setSubmitting] = useState(false);
+
+  const [availableVersions, setAvailableVersions] = useState([]);
+  const [defaultVersion, setDefaultVersion] = useState('4.22.5');
+  const [loadingVersions, setLoadingVersions] = useState(false);
+
+  useEffect(() => {
+    const fetchVersions = async () => {
+      setLoadingVersions(true);
+      try {
+        const response = await fetch(buildApiUrl(`${API_ENDPOINTS.VERSIONS}?channel_group=${channelGroup}`));
+        const data = await response.json();
+        if (data.versions && data.versions.length > 0) {
+          setAvailableVersions(data.versions);
+          if (data.default_version) setDefaultVersion(data.default_version);
+        }
+      } catch {}
+      finally { setLoadingVersions(false); }
+    };
+    fetchVersions();
+  }, [channelGroup]);
+
+  const clusterName = prefix ? `${prefix}-rosa-hcp` : '';
+  const nodePoolName = prefix ? `${prefix}-np` : '';
+
+  const handleSubmit = async () => {
+    if (!prefix.trim()) return;
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        clusterName,
+        nodePoolName,
+        clusterDescription: '',
+        openShiftVersion: defaultVersion,
+        createRosaNetwork: true,
+        createRosaRoleConfig: true,
+        vpcCidrBlock: '10.0.0.0/16',
+        availabilityZoneCount: 1,
+        rolePrefix: prefix,
+        domainPrefix: prefix,
+        channelGroup,
+        channel: '',
+        awsRegion: 'us-west-2',
+        privateNetwork: false,
+        additionalTags: '',
+        enableLogForwarding: false,
+        fips: false,
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const recommendedVersion = availableVersions.length > 1 ? availableVersions[1] : defaultVersion;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-end gap-3">
+        <div className="w-36">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Cluster Prefix <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={prefix}
+            onChange={(e) => setPrefix(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 10))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+            placeholder="tst"
+            maxLength={10}
+            autoFocus
+          />
+        </div>
+        {prefix && (
+          <span className="text-sm text-gray-400 pb-2 font-mono">{clusterName}</span>
+        )}
+        <div className="w-32">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Channel</label>
+          <select
+            value={channelGroup}
+            onChange={(e) => setChannelGroup(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+          >
+            <option value="stable">Stable</option>
+            <option value="fast">Fast</option>
+            <option value="candidate">Candidate</option>
+            <option value="eus">EUS</option>
+            <option value="nightly">Nightly</option>
+          </select>
+        </div>
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={!prefix.trim() || submitting || loadingVersions}
+          className="px-5 py-2 text-sm text-white font-medium rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+        >
+          {submitting ? (
+            <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Provisioning...</>
+          ) : (
+            <>Provision Cluster</>
+          )}
+        </button>
+      </div>
+
+      {prefix && (
+        <p className="text-xs text-gray-400">
+          <span className="font-mono">{clusterName}</span>
+          <span className="mx-1.5 text-gray-300">&middot;</span>
+          <span className="font-mono">{nodePoolName}</span>
+          <span className="mx-1.5 text-gray-300">&middot;</span>
+          <span>{recommendedVersion}</span>
+          <span className="mx-1.5 text-gray-300">&middot;</span>
+          <span>us-west-2</span>
+          <span className="mx-1.5 text-gray-300">&middot;</span>
+          <span>1 AZ</span>
+          <span className="mx-1.5 text-gray-300">&middot;</span>
+          <span>auto roles</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+ExpressProvision.propTypes = {
+  onSubmit: PropTypes.func.isRequired,
+};
