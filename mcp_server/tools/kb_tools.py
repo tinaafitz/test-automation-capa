@@ -36,11 +36,12 @@ def register_tools(mcp):
         return json.dumps({"matches": results, "count": len(results), "total_known_issues": len(issues)}, indent=2)
 
     @mcp.tool()
-    def capa_remediation_history(issue_type: str = "", limit: int = 20) -> str:
+    def capa_remediation_history(issue_type: str = "", operation_type: str = "", limit: int = 20) -> str:
         """View past remediation outcomes — what fixes were tried, whether they succeeded, and details.
 
         Args:
             issue_type: Filter by issue type (optional)
+            operation_type: Filter by operation type: 'provision' or 'delete' (optional)
             limit: Max results to return (default: 20)
         """
         try:
@@ -51,6 +52,8 @@ def register_tools(mcp):
 
         if issue_type:
             outcomes = [o for o in outcomes if o.get("issue_type") == issue_type]
+        if operation_type:
+            outcomes = [o for o in outcomes if o.get("operation_type", "") == operation_type]
 
         # Compute summary stats
         total = len(outcomes)

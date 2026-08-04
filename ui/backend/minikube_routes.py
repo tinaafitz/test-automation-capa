@@ -151,6 +151,18 @@ async def get_capi_component_versions(cluster_name: str = None, environment: str
         cluster_name: Optional cluster name (for Minikube context)
         environment: Optional environment type ('mce' or 'minikube')
     """
+    def _extract_version(image):
+        if not image:
+            return "unknown"
+        if "@sha256:" in image:
+            sha = image.split("@sha256:")[-1][:12]
+            repo = image.split("@")[0]
+            repo_name = repo.split("/")[-1] if "/" in repo else repo
+            return f"{repo_name} ({sha})"
+        if ":" in image:
+            return image.split(":")[-1]
+        return "unknown"
+
     try:
         components = []
 
@@ -209,120 +221,122 @@ async def get_capi_component_versions(cluster_name: str = None, environment: str
             print(f"Failed to get cert-manager version: {e}")
             components.append({"name": "Cert Manager", "version": "unknown", "enabled": False})
 
-        # Get CAPI controller version
+        # Get CAPI controller version (try capi-system first, then multicluster-engine for MCE)
         try:
-            capi_result = subprocess.run(
-                cli_cmd
-                + [
-                    "get",
-                    "deployment",
-                    "capi-controller-manager",
-                    "-n",
-                    "capi-system",
-                    "-o",
-                    "jsonpath={.spec.template.spec.containers[?(@.name=='manager')].image}",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if capi_result.returncode == 0:
-                image = capi_result.stdout.strip()
-                version = image.split(":")[-1] if ":" in image else "unknown"
-
-                # Fetch YAML for CAPI controller deployment
-                yaml_result = subprocess.run(
+            capi_found = False
+            for capi_ns in ["capi-system", "multicluster-engine"]:
+                capi_result = subprocess.run(
                     cli_cmd
                     + [
                         "get",
                         "deployment",
                         "capi-controller-manager",
                         "-n",
-                        "capi-system",
+                        capi_ns,
                         "-o",
-                        "yaml",
+                        "jsonpath={.spec.template.spec.containers[?(@.name=='manager')].image}",
                     ],
                     capture_output=True,
                     text=True,
                     timeout=10,
                 )
-                yaml_content = yaml_result.stdout if yaml_result.returncode == 0 else ""
+                if capi_result.returncode == 0 and capi_result.stdout.strip():
+                    image = capi_result.stdout.strip()
+                    version = _extract_version(image)
 
-                components.append(
-                    {
-                        "name": "CAPI Controller",
-                        "version": version,
-                        "enabled": True,
-                        "yaml": yaml_content,
-                        "type": "Deployment",
-                        "namespace": "capi-system",
-                    }
-                )
+                    yaml_result = subprocess.run(
+                        cli_cmd
+                        + [
+                            "get",
+                            "deployment",
+                            "capi-controller-manager",
+                            "-n",
+                            capi_ns,
+                            "-o",
+                            "yaml",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    yaml_content = yaml_result.stdout if yaml_result.returncode == 0 else ""
+
+                    components.append(
+                        {
+                            "name": "CAPI Controller",
+                            "version": version,
+                            "enabled": True,
+                            "yaml": yaml_content,
+                            "type": "Deployment",
+                            "namespace": capi_ns,
+                        }
+                    )
+                    capi_found = True
+                    break
+            if not capi_found:
+                components.append({"name": "CAPI Controller", "version": "unknown", "enabled": False})
         except Exception as e:
             print(f"Failed to get CAPI controller version: {e}")
             components.append({"name": "CAPI Controller", "version": "unknown", "enabled": False})
 
-        # Get CAPA controller version
+        # Get CAPA controller version (try capa-system first, then multicluster-engine for MCE)
         try:
-            capa_result = subprocess.run(
-                cli_cmd
-                + [
-                    "get",
-                    "deployment",
-                    "capa-controller-manager",
-                    "-n",
-                    "capa-system",
-                    "-o",
-                    "jsonpath={.spec.template.spec.containers[?(@.name=='manager')].image}",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if capa_result.returncode == 0:
-                image = capa_result.stdout.strip()
-                # Extract version/tag from image
-                if ":" in image:
-                    repo = image.split(":")[0]
-                    tag = image.split(":")[-1]
-                    # Check if it's a custom image
-                    if "quay.io/melserng" in image or "dev" in tag or "pr" in tag.lower():
-                        # Show repo shortname + tag for custom images
-                        repo_name = repo.split("/")[-1] if "/" in repo else repo
-                        version = f"{tag} (custom: {repo_name})"
-                    else:
-                        version = tag
-                else:
-                    version = "unknown"
-
-                # Fetch YAML for CAPA controller deployment
-                yaml_result = subprocess.run(
+            capa_found = False
+            for capa_ns in ["capa-system", "multicluster-engine"]:
+                capa_result = subprocess.run(
                     cli_cmd
                     + [
                         "get",
                         "deployment",
                         "capa-controller-manager",
                         "-n",
-                        "capa-system",
+                        capa_ns,
                         "-o",
-                        "yaml",
+                        "jsonpath={.spec.template.spec.containers[?(@.name=='manager')].image}",
                     ],
                     capture_output=True,
                     text=True,
                     timeout=10,
                 )
-                yaml_content = yaml_result.stdout if yaml_result.returncode == 0 else ""
+                if capa_result.returncode == 0 and capa_result.stdout.strip():
+                    image = capa_result.stdout.strip()
+                    version = _extract_version(image)
+                    if "quay.io/melserng" in image:
+                        repo = image.split("@")[0] if "@" in image else image.rsplit(":", 1)[0]
+                        repo_name = repo.split("/")[-1] if "/" in repo else repo
+                        version = f"{version} (custom: {repo_name})"
 
-                components.append(
-                    {
-                        "name": "CAPA Controller",
-                        "version": version,
-                        "enabled": True,
-                        "yaml": yaml_content,
-                        "type": "Deployment",
-                        "namespace": "capa-system",
-                    }
-                )
+                    yaml_result = subprocess.run(
+                        cli_cmd
+                        + [
+                            "get",
+                            "deployment",
+                            "capa-controller-manager",
+                            "-n",
+                            capa_ns,
+                            "-o",
+                            "yaml",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    yaml_content = yaml_result.stdout if yaml_result.returncode == 0 else ""
+
+                    components.append(
+                        {
+                            "name": "CAPA Controller",
+                            "version": version,
+                            "enabled": True,
+                            "yaml": yaml_content,
+                            "type": "Deployment",
+                            "namespace": capa_ns,
+                        }
+                    )
+                    capa_found = True
+                    break
+            if not capa_found:
+                components.append({"name": "CAPA Controller", "version": "unknown", "enabled": False})
         except Exception as e:
             print(f"Failed to get CAPA controller version: {e}")
             components.append({"name": "CAPA Controller", "version": "unknown", "enabled": False})

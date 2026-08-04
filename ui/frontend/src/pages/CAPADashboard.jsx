@@ -9,7 +9,7 @@ import CredentialsModal from '../components/modals/CredentialsModal';
 import MCEEnvironmentSelector from '../components/MCEEnvironmentSelector';
 import ActiveEnvironmentBanner from '../components/ActiveEnvironmentBanner';
 import { YamlEditorModal } from '../components/YamlEditorModal';
-import { RosaProvisionModal } from '../components/RosaProvisionModal';
+import { RosaProvisionModal, ExpressProvision } from '../components/RosaProvisionModal';
 import ResourcesViewer from '../components/ResourcesViewer';
 import NotificationSettingsInline from '../components/NotificationSettingsInline';
 import WorkflowBuilder from '../components/WorkflowBuilder';
@@ -217,7 +217,7 @@ const CAPADashboardContent = () => {
   const [showEnvironments, setShowEnvironments] = useState(false);
   const [showYamlEditorModal, setShowYamlEditorModal] = useState(false);
   const [yamlEditorData, setYamlEditorData] = useState(null);
-  const [provisionViewMode, setProvisionViewMode] = useState('form'); // 'form' or 'yaml'
+  const [provisionViewMode, setProvisionViewMode] = useState('express'); // 'express', 'form', or 'yaml'
   const [credentialsRefreshKey, setCredentialsRefreshKey] = useState(0);
   const [verificationResults, setVerificationResults] = useState(null);
   const [configurationResults, setConfigurationResults] = useState(null);
@@ -237,6 +237,7 @@ const CAPADashboardContent = () => {
     ocpStatus,
     mceFeatures,
     mceInfo,
+    componentVersions,
     mceLastVerified,
     loading: apiLoading,
     refreshAllStatus,
@@ -303,15 +304,15 @@ const CAPADashboardContent = () => {
           // Continue polling this job
           pollProvisionJob(runningProvisionJob.id);
         } else {
-          // No running job, clear results and show form
+          // No running job, clear results and show express
           setProvisionResults(null);
-          setProvisionViewMode('form');
+          setProvisionViewMode('express');
         }
       }
     } catch (error) {
       console.error('Error checking for running provision jobs:', error);
       setProvisionResults(null);
-      setProvisionViewMode('form');
+      setProvisionViewMode('express');
     } finally {
       setIsCheckingProvisionJob(false);
     }
@@ -1219,24 +1220,68 @@ const CAPADashboardContent = () => {
             ) : (
               /* Toggle between Form and YAML Editor - Only show if no provision results and not provisioning */
               !provisionResults && !isProvisioning && (
-                provisionViewMode === 'form' ? (
-                  /* Provision Form - Inline */
-                  <div className="bg-white rounded-lg shadow-md border border-gray-100 p-6">
-                    <RosaProvisionModal
-                      isOpen={true}
-                      inline={true}
-                      onClose={() => {}} // No close action needed for inline form
-                      onSubmit={handleProvisionSubmit}
-                      mceInfo={mceInfo}
-                      testSuite={selectedTestSuite}
-                    />
+                provisionViewMode !== 'yaml' ? (
+                  /* Express / Custom creation method */
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                    <div className="mb-6">
+                      <h3 className="text-sm font-semibold text-gray-900 mb-3">Choose a creation method</h3>
+                      <div className="space-y-2">
+                        <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                          provisionViewMode === 'express' ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-200 hover:bg-gray-50'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="provisionMode"
+                            checked={provisionViewMode === 'express'}
+                            onChange={() => setProvisionViewMode('express')}
+                            className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                          />
+                          <div>
+                            <span className="text-sm font-medium text-gray-900">Express</span>
+                            <p className="text-xs text-gray-500 mt-0.5">Use recommended defaults. Only specify a prefix and channel group.</p>
+                          </div>
+                        </label>
+                        <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                          provisionViewMode === 'form' ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-200 hover:bg-gray-50'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="provisionMode"
+                            checked={provisionViewMode === 'form'}
+                            onChange={() => setProvisionViewMode('form')}
+                            className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                          />
+                          <div>
+                            <span className="text-sm font-medium text-gray-900">Custom</span>
+                            <p className="text-xs text-gray-500 mt-0.5">Set all configuration options including version, network, roles, FIPS, and log forwarding.</p>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-gray-200 pt-6">
+                      {provisionViewMode === 'express' ? (
+                        <ExpressProvision
+                          onSubmit={handleProvisionSubmit}
+                        />
+                      ) : (
+                        <RosaProvisionModal
+                          isOpen={true}
+                          inline={true}
+                          onClose={() => setProvisionViewMode('express')}
+                          onSubmit={handleProvisionSubmit}
+                          mceInfo={mceInfo}
+                          testSuite={selectedTestSuite}
+                        />
+                      )}
+                    </div>
                   </div>
                 ) : (
                 /* YAML Editor - Inline */
                 <YamlEditorModal
                   isOpen={true}
                   inline={true}
-                  onClose={() => setProvisionViewMode('form')}
+                  onClose={() => setProvisionViewMode('express')}
                   yamlData={yamlEditorData}
                   readOnly={false}
                   onProvision={async (editedYaml) => {
@@ -1298,7 +1343,7 @@ const CAPADashboardContent = () => {
                     console.log(`🔍 Polling job status for job_id: ${jobId}`);
 
                     // Close YAML editor immediately
-                    setProvisionViewMode('form');
+                    setProvisionViewMode('express');
 
                     // Poll for job completion
                     const pollJobStatus = async () => {
@@ -1393,7 +1438,7 @@ const CAPADashboardContent = () => {
                       isRunning: false,
                     });
                     // Close YAML editor and show error output
-                    setProvisionViewMode('form');
+                    setProvisionViewMode('express');
                   } finally {
                     setIsProvisioning(false);
                     setProvisionJobId(null);
@@ -2004,6 +2049,7 @@ const CAPADashboardContent = () => {
           <ActiveEnvironmentBanner
             key={credentialsRefreshKey}
             verificationTimestamp={mceLastVerified}
+            mceInfo={mceInfo}
           />
 
           {/* Toast Message */}

@@ -39,7 +39,7 @@ class LearningAgent(BaseAgent):
 
     def record_outcome(self, issue_type: str, diagnosis: Dict, fix_applied: str,
                        success: bool, resource_key: str = "", details: str = "",
-                       duration_seconds: float = None):
+                       duration_seconds: float = None, operation_type: str = ""):
         """
         Record the outcome of a remediation attempt.
 
@@ -60,6 +60,8 @@ class LearningAgent(BaseAgent):
         }
         if duration_seconds is not None:
             outcome["duration_seconds"] = round(duration_seconds, 2)
+        if operation_type:
+            outcome["operation_type"] = operation_type
 
         self.session_outcomes.append(outcome)
 

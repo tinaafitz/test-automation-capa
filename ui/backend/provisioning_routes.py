@@ -517,7 +517,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
         }
 
         # Initialize AI agents for provisioning monitoring
-        agents = init_ai_agents(job_id)
+        agents = init_ai_agents(job_id, operation_type="provision")
 
         # Run application in background
         async def apply_yaml_background():

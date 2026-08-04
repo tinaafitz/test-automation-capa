@@ -38,8 +38,8 @@
         "Invalid client credentials",
         "Incorrect client ID/secret"
       ],
-      "learned_confidence": 0.8,
-      "last_adjusted": "2026-06-24T14:28:41.220314",
+      "learned_confidence": 0.3,
+      "last_adjusted": "2026-07-22T16:31:39.853238",
       "adjustment_reason": "2 consecutive failures in last 2 runs"
     },
     {
@@ -177,9 +177,9 @@
         "IAM roles still in use",
         "Controller unable to clean up resources"
       ],
-      "learned_confidence": 1.0,
-      "last_adjusted": "2026-04-20T16:21:21.617842",
-      "adjustment_reason": "4 consecutive successes in last 4 runs"
+      "learned_confidence": 0.3,
+      "last_adjusted": "2026-07-23T12:03:41.259535",
+      "adjustment_reason": "5 consecutive failures in last 5 runs"
     },
     {
       "type": "vpc_deletion_failure",
@@ -259,6 +259,72 @@
       ]
     },
     {
+      "type": "instance_profile_leak",
+      "pattern": "(?i)(?:instance.?profile.*limit|LimitExceeded.*instance.?profile|cannot create instance profile|1000.*instance.?profile)",
+      "severity": "critical",
+      "auto_fix": false,
+      "description": "ROSA/OCM worker-preflight instance profile leak. During cluster provisioning, the ROSA service creates rosa-service-managed-staging-*-<cluster>-worker-preflight instance profiles for each reconciliation attempt. If the control plane reconciliation loops rapidly (e.g., due to a stuck or failing provision), hundreds of empty instance profiles accumulate and are never cleaned up. AWS account limit is 1,000.",
+      "symptoms": [
+        "Instance profile count approaching or at 1,000",
+        "All leaked profiles follow pattern: rosa-service-managed-staging-<uuid>-<cluster>-worker-preflight",
+        "Profiles have no attached roles (empty)",
+        "Profiles created in rapid succession (seconds apart) during a single provisioning attempt",
+        "New cluster provisioning fails with LimitExceeded"
+      ],
+      "common_causes": [
+        "ROSA service creates a new worker-preflight instance profile on each control plane reconciliation loop",
+        "Cluster stuck in reconciliation (e.g., ROSAControlPlane not reaching Ready) causes rapid profile creation",
+        "ROSA service does not clean up preflight instance profiles after use or on failure",
+        "Known upstream ROSA/OCM bug — profiles are created but never garbage-collected"
+      ],
+      "resolution_steps": [
+        "1. Identify the cluster prefix: aws iam list-instance-profiles --query 'InstanceProfiles[*].InstanceProfileName' | grep worker-preflight | sed 's/.*-\\([a-z]*\\)-worker-preflight/\\1/' | sort | uniq -c | sort -rn",
+        "2. Verify profiles are empty (no attached roles): aws iam list-instance-profiles --query 'InstanceProfiles[?contains(InstanceProfileName, `<cluster>-worker-preflight`)].[InstanceProfileName,Roles]'",
+        "3. Bulk delete: aws iam list-instance-profiles --query 'InstanceProfiles[?contains(InstanceProfileName, `<cluster>-worker-preflight`)].InstanceProfileName' --output text | tr '\\t' '\\n' | xargs -P10 -I{} aws iam delete-instance-profile --instance-profile-name {}",
+        "4. File upstream bug with ROSA/OCM team for missing garbage collection of preflight instance profiles"
+      ],
+      "first_observed": "2026-07-29",
+      "observed_incidents": [
+        {
+          "cluster": "cmb-rosa-hcp",
+          "ocm_id": "2rqupp2710e75t4v623oekdlnjkml5u4",
+          "version": "4.22.3",
+          "channel_group": "stable",
+          "date": "2026-07-27",
+          "profile_count": 996,
+          "time_window": "19:17:37 to 20:29:32 UTC (~72 minutes)",
+          "all_profiles_empty": true,
+          "naming_pattern": "rosa-service-managed-staging-<uuid>-cmb-worker-preflight",
+          "sample_earliest": "rosa-service-managed-staging-2rqm1k72n3lgejqi0l7uh3vj41kqti04-cmb-worker-preflight (2026-07-27T19:17:37Z)",
+          "sample_latest": "rosa-service-managed-staging-2rqn3aq3v0nk1a5u89thd3pht9ebe0gb-cmb-worker-preflight (2026-07-27T20:29:32Z)",
+          "root_cause_error": "InvalidIdentityToken: The web identity token provided could not be validated — STS AssumeRoleWithWebIdentity failed for operator role cmb-openshift-ingress-operator-cloud-credentials",
+          "cluster_state_at_discovery": "waiting — stuck since 2026-07-28T05:15:19Z, no K8s CRs exist (ROSAControlPlane, Cluster, ROSANetwork all deleted from K8s but OCM cluster persists)",
+          "orphaned_aws_resources": {
+            "cloudformation_stack": "cmb-rosa-hcp-rosa-network-stack (CREATE_COMPLETE)",
+            "vpc": "vpc-05dd95a535b21bcd5 (10.0.0.0/16)",
+            "nat_gateways": ["nat-0d046280d690a5fcf", "nat-06d780b15955f27f6"],
+            "eips": ["eipalloc-0fe60a1588eab1925", "eipalloc-091bf13097cf59b68"],
+            "subnets": ["subnet-0974b6e7e3f511721", "subnet-0f14bb0f4a9948bb8", "subnet-04d23d284b11e6a69", "subnet-0246503848fac8f01"],
+            "iam_roles": [
+              "cmb-HCP-ROSA-Installer-Role",
+              "cmb-HCP-ROSA-Support-Role",
+              "cmb-HCP-ROSA-Worker-Role",
+              "cmb-kube-system-capa-controller-manager",
+              "cmb-kube-system-control-plane-operator",
+              "cmb-kube-system-kms-provider",
+              "cmb-kube-system-kube-controller-manager",
+              "cmb-openshift-cloud-network-config-controller-cloud-credentials",
+              "cmb-openshift-cluster-csi-drivers-ebs-cloud-credentials",
+              "cmb-openshift-image-registry-installer-cloud-credentials",
+              "cmb-openshift-ingress-operator-cloud-credentials"
+            ],
+            "instance_profiles_deleted": 996
+          },
+          "remediation_performed": "2026-07-29: Bulk deleted 996 instance profiles. OCM cluster, CF stack, VPC, NAT gateways, IAM roles still need cleanup."
+        }
+      ]
+    },
+    {
       "type": "iam_permission_error",
       "pattern": "(?i)(?:access denied|not authorized|AccessDenied|UnauthorizedAccess|iam.*(?:error|fail|denied))",
       "severity": "high",
@@ -274,6 +340,37 @@
         "Missing IAM roles",
         "Incorrect role trust policies"
       ]
+    },
+    {
+      "type": "ocm_nodepool_build_failure",
+      "pattern": "(?i)(?:failed to build initial node pools|OCM5001.*node.?pool|node.?pool.*failed.*build)",
+      "severity": "high",
+      "auto_fix": false,
+      "description": "OCM reports 'failed to build initial node pools for cluster' — control plane provisions successfully but default worker node pool fails to initialize. OCM marks cluster as error state with provision error code OCM5001. CAPA controller has no recovery path once OCM sets error state.",
+      "symptoms": [
+        "Cluster state: error with OCM5001 provision error code",
+        "ROSAControlPlaneReady: False with reason 'error' and message 'OCM5001'",
+        "Install logs show control plane reached 'available' state",
+        "Compute current: 0, desired: 2+",
+        "ROSAMachinePool stuck at WaitingForRosaControlPlane",
+        "failureMessage: 'ROSA with HCP cluster provision has failed'"
+      ],
+      "common_causes": [
+        "Transient AWS capacity issues in selected availability zones",
+        "Timing issues in OCM internal node pool orchestration",
+        "Subnet or NAT gateway connectivity problems (rare — verify network health)",
+        "Worker IAM role trust policy misconfiguration (rare — verify roles)"
+      ],
+      "resolution_steps": [
+        "1. Verify network health: oc get rosanetwork <name>-network -n <ns> — confirm ROSANetworkReady: True",
+        "2. Verify roles: oc get rosaroleconfig <name>-roles -n <ns> — confirm ROSARoleConfigReady: True",
+        "3. Check install logs: rosa logs install -c <ocm-id> — confirm control plane reached 'available'",
+        "4. If network and roles are healthy, this is a transient OCM failure — delete and reprovision",
+        "5. The cluster spec, network, and roles can be reused on retry"
+      ],
+      "learned_confidence": 0.7,
+      "last_adjusted": "2026-07-28T16:30:00.000000",
+      "adjustment_reason": "First occurrence — transient failure observed on ttt-422-test (4.22.4, stable channel)"
     }
   ]
 }

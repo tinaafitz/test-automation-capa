@@ -154,8 +154,10 @@ const AgentDashboard = () => {
   const [collapsedCards, setCollapsedCards] = useState({});
   const toggleCard = (key) => setCollapsedCards(prev => ({ ...prev, [key]: !prev[key] }));
   const [dateRange, setDateRange] = useState('all');
+  const [operationFilter, setOperationFilter] = useState('');
 
   const DATE_RANGES = [
+    { key: '1h', label: '1h', hours: 1 },
     { key: '24h', label: '24h', hours: 24 },
     { key: '7d', label: '7d', hours: 168 },
     { key: '30d', label: '30d', hours: 720 },
@@ -174,18 +176,21 @@ const AgentDashboard = () => {
     setError(null);
     try {
       const sinceParam = getSinceParam(dateRange);
-      const metricsUrl = sinceParam
-        ? `/api/agents/remediation-metrics?since=${encodeURIComponent(sinceParam)}`
-        : '/api/agents/remediation-metrics';
-      const dashUrl = sinceParam
-        ? `/api/agents/dashboard?since=${encodeURIComponent(sinceParam)}`
-        : '/api/agents/dashboard';
+      const opParam = operationFilter ? `&operation_type=${operationFilter}` : '';
+      const baseMetrics = sinceParam
+        ? `/api/agents/remediation-metrics?since=${encodeURIComponent(sinceParam)}${opParam}`
+        : `/api/agents/remediation-metrics?${opParam.slice(1)}`;
+      const metricsUrl = baseMetrics.endsWith('?') ? baseMetrics.slice(0, -1) : baseMetrics;
+      const baseDash = sinceParam
+        ? `/api/agents/dashboard?since=${encodeURIComponent(sinceParam)}${opParam}`
+        : `/api/agents/dashboard?${opParam.slice(1)}`;
+      const dashUrl = baseDash.endsWith('?') ? baseDash.slice(0, -1) : baseDash;
       const [dashRes, metricsRes, confRes, kbRes, roiRes] = await Promise.all([
         fetch(buildApiUrl(dashUrl)),
         fetch(buildApiUrl(metricsUrl)),
         fetch(buildApiUrl('/api/agents/confidence')),
         fetch(buildApiUrl('/api/agents/knowledge-base')),
-        fetch(buildApiUrl('/api/agents/roi')),
+        fetch(buildApiUrl(operationFilter ? `/api/agents/roi?operation_type=${operationFilter}` : '/api/agents/roi')),
       ]);
       const [dash, metrics, conf, kb, roi] = await Promise.all([
         dashRes.json(), metricsRes.json(), confRes.json(), kbRes.json(), roiRes.json(),
@@ -204,7 +209,7 @@ const AgentDashboard = () => {
   };
 
   useEffect(() => { if (!data) fetchAll(); }, []);
-  useEffect(() => { fetchAll(); }, [dateRange]);
+  useEffect(() => { fetchAll(); }, [dateRange, operationFilter]);
   useEffect(() => {
     const interval = setInterval(fetchAll, 30000);
     return () => clearInterval(interval);
@@ -282,6 +287,19 @@ const AgentDashboard = () => {
             </div>
           </div>
           <div className="flex items-center gap-5">
+            <div className="flex items-center gap-1 rounded p-0.5" style={{ background: '#1e2736' }}>
+              {[{ key: '', label: 'All' }, { key: 'provision', label: 'Provision' }, { key: 'delete', label: 'Delete' }].map(r => (
+                <button key={r.key}
+                  onClick={() => { setOperationFilter(r.key); }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+                    operationFilter === r.key
+                      ? 'text-white' : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                  style={operationFilter === r.key ? { background: '#2a3344' } : {}}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
             <div className="flex items-center gap-1 rounded p-0.5" style={{ background: '#1e2736' }}>
               {DATE_RANGES.map(r => (
                 <button key={r.key}
