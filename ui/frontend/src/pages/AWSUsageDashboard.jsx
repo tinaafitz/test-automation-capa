@@ -1,21 +1,98 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowPathIcon } from '@heroicons/react/24/outline';
+import { ArrowPathIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 import CapaSidebar from '../components/sidebar/CapaSidebar';
-import AWSUsageTrend from '../components/charts/AWSUsageTrend';
+import AWSUsageTrend, { Sparkline, RESOURCE_COLORS } from '../components/charts/AWSUsageTrend';
 
-// Persistent cache survives navigation via sessionStorage
-// Shared key with AWSQuotaWidget so both components use the same data
 const AWS_CACHE_KEY = 'aws-usage-cache';
 const _loadCache = () => {
   try {
     const c = JSON.parse(sessionStorage.getItem(AWS_CACHE_KEY));
-    if (!c) return { usage: null, lastUpdated: null, billedResources: [], freeResources: [] };
-    return { usage: c.usage || null, lastUpdated: c.lastUpdated || null, billedResources: c.billedResources || [], freeResources: c.freeResources || [] };
-  } catch { return { usage: null, lastUpdated: null, billedResources: [], freeResources: [] }; }
+    if (!c) return { usage: null, lastUpdated: null, billedResources: [], freeResources: [], region: null };
+    return { usage: c.usage || null, lastUpdated: c.lastUpdated || null, billedResources: c.billedResources || [], freeResources: c.freeResources || [], region: c.region || null };
+  } catch { return { usage: null, lastUpdated: null, billedResources: [], freeResources: [], region: null }; }
 };
 const _saveCache = (cache) => {
   try { sessionStorage.setItem(AWS_CACHE_KEY, JSON.stringify(cache)); } catch {}
+};
+
+const AWS_ICONS = {
+  nat_gateways: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z',
+  route53_zones: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z',
+  ec2_instances: 'M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z',
+  ebs_volumes: 'M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z',
+  load_balancers: 'M4 15h16v-2H4v2zm0 4h16v-2H4v2zm0-8h16V9H4v2zm0-6v2h16V5H4z',
+  s3_buckets: 'M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z',
+  instance_profiles: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
+  cloudformation_stacks: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z',
+  iam_roles: 'M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z',
+  vpcs: 'M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM5 15h14v2H5zm0-4h14v2H5zm0-4h14v2H5z',
+  security_groups: 'M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z',
+};
+
+const ServiceIcon = ({ resourceKey, size = 16, className = '' }) => {
+  const path = AWS_ICONS[resourceKey];
+  if (!path) return null;
+  const color = RESOURCE_COLORS[resourceKey] || '#545B64';
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} className={className}>
+      <path d={path} />
+    </svg>
+  );
+};
+
+const AWS_CONSOLE_URLS = {
+  nat_gateways: 'vpc/home#NatGateways:',
+  route53_zones: 'route53/v2/hostedzones#',
+  ec2_instances: 'ec2/home#Instances:',
+  ebs_volumes: 'ec2/home#Volumes:',
+  load_balancers: 'ec2/home#LoadBalancers:',
+  s3_buckets: 's3/buckets',
+  instance_profiles: 'iam/home#/roles',
+  cloudformation_stacks: 'cloudformation/home#/stacks',
+  iam_roles: 'iam/home#/roles',
+  vpcs: 'vpc/home#vpcs:',
+  security_groups: 'ec2/home#SecurityGroups:',
+};
+
+const getConsoleUrl = (key, region) => {
+  const path = AWS_CONSOLE_URLS[key];
+  if (!path) return null;
+  if (key === 's3_buckets' || key === 'iam_roles' || key === 'instance_profiles') {
+    return `https://console.aws.amazon.com/${path}`;
+  }
+  return `https://${region || 'us-east-1'}.console.aws.amazon.com/${path}`;
+};
+
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000;
+
+const CountUp = ({ value }) => {
+  const [display, setDisplay] = useState(0);
+  const prev = useRef(0);
+  useEffect(() => {
+    if (value === undefined || value === null || value === 'error') { setDisplay(value); return; }
+    const start = prev.current;
+    const diff = value - start;
+    if (diff === 0) { setDisplay(value); return; }
+    const duration = 600;
+    const startTime = performance.now();
+    const animate = (now) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(Math.round(start + diff * eased));
+      if (progress < 1) requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
+    prev.current = value;
+  }, [value]);
+  if (display === 'error') return <span className="text-red-600">Error</span>;
+  return <>{display?.toLocaleString() ?? '-'}</>;
+};
+
+const StatusDot = ({ pct }) => {
+  const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500';
+  return <span className={`inline-block w-2 h-2 rounded-full ${color}`} />;
 };
 
 const AWSUsageDashboard = ({ inline = false }) => {
@@ -27,6 +104,7 @@ const AWSUsageDashboard = ({ inline = false }) => {
   const [error, setError] = useState(null);
   const [billedResources, setBilledResources] = useState(cached.billedResources);
   const [freeResources, setFreeResources] = useState(cached.freeResources);
+  const [region, setRegion] = useState(cached.region);
   const [configLoading, setConfigLoading] = useState(cached.billedResources.length === 0);
   const [expandedResource, setExpandedResource] = useState(null);
   const [detailsCache, setDetailsCache] = useState({});
@@ -34,11 +112,28 @@ const AWSUsageDashboard = ({ inline = false }) => {
   const [creatorFilter, setCreatorFilter] = useState('all');
   const [availableCreators, setAvailableCreators] = useState([]);
   const [refreshingKey, setRefreshingKey] = useState(null);
+  const [sortField, setSortField] = useState('name');
+  const [sortDir, setSortDir] = useState('asc');
+  const [trendData, setTrendData] = useState([]);
+  const [chartResources, setChartResources] = useState(new Set());
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const countdownRef = useRef(null);
+  const autoRefreshRef = useRef(null);
 
-  // Combine all resources for rendering
   const resourceConfig = [...billedResources, ...freeResources];
 
-  // Fetch resource configuration on component mount (skip if cached)
+  useEffect(() => {
+    const fetchTrend = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/aws/usage-trend?days=30');
+        const data = await response.json();
+        if (data.success) setTrendData(data.trend || []);
+      } catch {}
+    };
+    fetchTrend();
+  }, []);
+
   useEffect(() => {
     if (cached.billedResources.length > 0) {
       setConfigLoading(false);
@@ -48,15 +143,17 @@ const AWSUsageDashboard = ({ inline = false }) => {
       try {
         const response = await fetch('http://localhost:8000/api/aws/usage-config');
         const data = await response.json();
-
         if (data.success) {
           const billed = data.billedResources || [];
           const free = data.freeResources || [];
+          const reg = data.metadata?.region || 'us-west-2';
           setBilledResources(billed);
           setFreeResources(free);
+          setRegion(reg);
           const c = _loadCache();
           c.billedResources = billed;
           c.freeResources = free;
+          c.region = reg;
           _saveCache(c);
         } else {
           setError(data.message || 'Failed to load AWS configuration');
@@ -67,16 +164,45 @@ const AWSUsageDashboard = ({ inline = false }) => {
         setConfigLoading(false);
       }
     };
-
     fetchConfig();
   }, []);
 
-  // Auto-fetch usage data when rendered inline
   useEffect(() => {
     if (inline && !usage && !loading) {
       fetchUsage();
     }
   }, [inline, configLoading]);
+
+  const handleKeyPress = useCallback((e) => {
+    if (e.key === 'r' || e.key === 'R') {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+      fetchUsage();
+    }
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [handleKeyPress]);
+
+  useEffect(() => {
+    if (autoRefresh) {
+      setCountdown(AUTO_REFRESH_INTERVAL / 1000);
+      countdownRef.current = setInterval(() => {
+        setCountdown(prev => {
+          if (prev <= 1) return AUTO_REFRESH_INTERVAL / 1000;
+          return prev - 1;
+        });
+      }, 1000);
+      autoRefreshRef.current = setInterval(() => {
+        fetchUsage();
+      }, AUTO_REFRESH_INTERVAL);
+    }
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
+    };
+  }, [autoRefresh]);
 
   const fetchUsage = async () => {
     setLoading(true);
@@ -86,7 +212,6 @@ const AWSUsageDashboard = ({ inline = false }) => {
     try {
       const response = await fetch('http://localhost:8000/api/aws/usage');
       const data = await response.json();
-
       if (data.success) {
         const ts = new Date(data.timestamp);
         setUsage(data.usage);
@@ -106,27 +231,23 @@ const AWSUsageDashboard = ({ inline = false }) => {
   };
 
   const toggleResourceDetails = async (resourceKey) => {
-    // If already expanded, collapse it
     if (expandedResource === resourceKey) {
       setExpandedResource(null);
       return;
     }
-
     setExpandedResource(resourceKey);
-
-    // Use cached data if available
+    setSortField('name');
+    setSortDir('asc');
     if (detailsCache[resourceKey]) {
       const cached = detailsCache[resourceKey];
       setAvailableCreators(cached.creators);
       setCreatorFilter('all');
       return;
     }
-
     setDetailsLoading(true);
     try {
       const response = await fetch(`http://localhost:8000/api/aws/resource-details/${resourceKey}`);
       const data = await response.json();
-
       if (data.success) {
         const details = data.details;
         const creators = new Set();
@@ -138,8 +259,6 @@ const AWSUsageDashboard = ({ inline = false }) => {
         setDetailsCache(prev => ({ ...prev, [resourceKey]: { details, creators: creatorList } }));
         setAvailableCreators(creatorList);
         setCreatorFilter('all');
-      } else {
-        setError(data.message || 'Failed to fetch resource details');
       }
     } catch (err) {
       setError(`Error fetching details: ${err.message}`);
@@ -154,7 +273,6 @@ const AWSUsageDashboard = ({ inline = false }) => {
     try {
       const response = await fetch(`http://localhost:8000/api/aws/resource-details/${resourceKey}`);
       const data = await response.json();
-
       if (data.success) {
         const details = data.details;
         const creators = new Set();
@@ -166,8 +284,6 @@ const AWSUsageDashboard = ({ inline = false }) => {
         setDetailsCache(prev => ({ ...prev, [resourceKey]: { details, creators: creatorList } }));
         setAvailableCreators(creatorList);
         setCreatorFilter('all');
-      } else {
-        setError(data.message || 'Failed to fetch resource details');
       }
     } catch (err) {
       setError(`Error fetching details: ${err.message}`);
@@ -190,33 +306,13 @@ const AWSUsageDashboard = ({ inline = false }) => {
           _saveCache(c);
           return updated;
         });
-        // Clear cached details for this resource so next expand fetches fresh data
         setDetailsCache(prev => { const next = { ...prev }; delete next[resourceKey]; return next; });
       }
-    } catch (err) {
-      // silently fail
-    } finally {
+    } catch {} finally {
       setRefreshingKey(null);
     }
   };
 
-  // Get status color based on count and threshold
-  const getStatusColor = (count, threshold) => {
-    if (count === 'error') return 'bg-red-100 border-red-300';
-    if (count >= threshold * 0.9) return 'bg-red-100 border-red-300';
-    if (count >= threshold * 0.7) return 'bg-yellow-100 border-yellow-300';
-    return 'bg-green-100 border-green-300';
-  };
-
-  // Get text color based on count and threshold
-  const getTextColor = (count, threshold) => {
-    if (count === 'error') return 'text-red-700';
-    if (count >= threshold * 0.9) return 'text-red-700';
-    if (count >= threshold * 0.7) return 'text-yellow-700';
-    return 'text-green-700';
-  };
-
-  // Calculate estimated monthly cost
   const calculateCost = (resource) => {
     if (!usage || !resource || !resource.costPerMonth) return null;
     const count = usage[resource.key];
@@ -224,14 +320,29 @@ const AWSUsageDashboard = ({ inline = false }) => {
     return (count * resource.costPerMonth).toFixed(2);
   };
 
-  // Inline details table component
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <ChevronUpIcon className="h-3 w-3 text-gray-300" />;
+    return sortDir === 'asc'
+      ? <ChevronUpIcon className="h-3 w-3 text-[#232F3E]" />
+      : <ChevronDownIcon className="h-3 w-3 text-[#232F3E]" />;
+  };
+
   const InlineDetailsTable = () => {
     if (detailsLoading) {
       return (
-        <div className="py-3 px-4 bg-gray-50 border-t border-gray-200">
+        <div className="py-4 px-4 bg-[#FAFAFA] border-t border-gray-200">
           <div className="flex items-center gap-2 text-sm text-gray-500">
             <ArrowPathIcon className="h-4 w-4 animate-spin" />
-            Loading details...
+            Loading resources...
           </div>
         </div>
       );
@@ -240,8 +351,8 @@ const AWSUsageDashboard = ({ inline = false }) => {
     const cached = detailsCache[expandedResource];
     if (!cached || cached.details.length === 0) {
       return (
-        <div className="py-3 px-4 bg-gray-50 border-t border-gray-200">
-          <p className="text-sm text-gray-500">No details available</p>
+        <div className="py-4 px-4 bg-[#FAFAFA] border-t border-gray-200">
+          <p className="text-sm text-gray-500">No resources found</p>
         </div>
       );
     }
@@ -254,110 +365,131 @@ const AWSUsageDashboard = ({ inline = false }) => {
     const hasCreated = resourceDetails.some(r => r.created_at || r.launch_time);
     const hasVpc = resourceDetails.some(r => r.vpc_id);
 
+    const sorted = [...filtered].sort((a, b) => {
+      let aVal, bVal;
+      switch (sortField) {
+        case 'name': aVal = (a.name || '').toLowerCase(); bVal = (b.name || '').toLowerCase(); break;
+        case 'id': aVal = a.id || ''; bVal = b.id || ''; break;
+        case 'state': aVal = a.state || ''; bVal = b.state || ''; break;
+        case 'created': aVal = a.created_at || a.launch_time || ''; bVal = b.created_at || b.launch_time || ''; break;
+        default: aVal = ''; bVal = '';
+      }
+      if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+
     return (
-      <div className="bg-gray-50 border-t border-gray-200 px-3 py-2">
-        {/* Filter row */}
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs text-gray-500">
-            <strong>{filtered.length}</strong> resources
-            {creatorFilter !== 'all' && ` by ${creatorFilter}`}
+      <div className="bg-[#FAFAFA] border-t border-gray-200">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+          <p className="text-xs text-gray-600 font-medium">
+            {filtered.length} resource{filtered.length !== 1 ? 's' : ''}
+            {creatorFilter !== 'all' && <span className="text-gray-400"> filtered by {creatorFilter}</span>}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             {availableCreators.length > 2 && (
               <select
                 value={creatorFilter}
                 onChange={(e) => setCreatorFilter(e.target.value)}
-                className="text-xs border border-gray-300 rounded px-1.5 py-0.5 bg-white"
+                className="text-xs border border-gray-300 rounded px-2 py-1 bg-white focus:border-[#FF9900] focus:ring-1 focus:ring-[#FF9900] outline-none"
               >
                 {availableCreators.map(creator => (
                   <option key={creator} value={creator}>
-                    {creator === 'all' ? 'All Creators' : creator}
+                    {creator === 'all' ? 'All creators' : creator}
                   </option>
                 ))}
               </select>
             )}
             <button
               onClick={(e) => { e.stopPropagation(); refreshResourceDetails(expandedResource); }}
-              disabled={detailsLoading}
-              className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1 disabled:opacity-50"
+              className="text-xs text-[#0073BB] hover:text-[#005C99] flex items-center gap-1 font-medium"
             >
               <ArrowPathIcon className={`h-3 w-3 ${detailsLoading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
-            <button
-              onClick={() => setExpandedResource(null)}
-              className="text-xs text-gray-400 hover:text-gray-600"
-            >
-              Close
-            </button>
           </div>
         </div>
 
-        {/* Table */}
-        <div className="border border-gray-200 rounded overflow-hidden bg-white">
+        <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="bg-gray-100 border-b border-gray-200">
-                <th className="text-left px-2 py-1.5 font-semibold text-gray-600">Name</th>
-                <th className="text-left px-2 py-1.5 font-semibold text-gray-600">ID</th>
-                {hasState && <th className="text-left px-2 py-1.5 font-semibold text-gray-600">State</th>}
-                {hasCreated && <th className="text-left px-2 py-1.5 font-semibold text-gray-600">Created</th>}
-                {hasVpc && <th className="text-left px-2 py-1.5 font-semibold text-gray-600">VPC</th>}
-                <th className="text-left px-2 py-1.5 font-semibold text-gray-600">Tags</th>
+              <tr className="bg-[#FAFAFA] border-b border-gray-200">
+                <th onClick={() => handleSort('name')} className="text-left px-4 py-2 font-semibold text-[#545B64] cursor-pointer hover:text-[#232F3E] select-none">
+                  <span className="flex items-center gap-1">Name <SortIcon field="name" /></span>
+                </th>
+                <th onClick={() => handleSort('id')} className="text-left px-4 py-2 font-semibold text-[#545B64] cursor-pointer hover:text-[#232F3E] select-none">
+                  <span className="flex items-center gap-1">Resource ID <SortIcon field="id" /></span>
+                </th>
+                {hasState && (
+                  <th onClick={() => handleSort('state')} className="text-left px-4 py-2 font-semibold text-[#545B64] cursor-pointer hover:text-[#232F3E] select-none">
+                    <span className="flex items-center gap-1">Status <SortIcon field="state" /></span>
+                  </th>
+                )}
+                {hasCreated && (
+                  <th onClick={() => handleSort('created')} className="text-left px-4 py-2 font-semibold text-[#545B64] cursor-pointer hover:text-[#232F3E] select-none">
+                    <span className="flex items-center gap-1">Age <SortIcon field="created" /></span>
+                  </th>
+                )}
+                {hasVpc && <th className="text-left px-4 py-2 font-semibold text-[#545B64]">VPC</th>}
+                <th className="text-left px-4 py-2 font-semibold text-[#545B64]">Tags</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((resource, index) => {
+              {sorted.map((resource, index) => {
                 const created = resource.created_at || resource.launch_time;
                 const age = created ? (() => {
                   const d = Math.floor((new Date() - new Date(created)) / (1000 * 60 * 60 * 24));
-                  return d === 0 ? 'today' : d === 1 ? '1d ago' : `${d}d ago`;
+                  return d === 0 ? 'today' : d === 1 ? '1d' : `${d}d`;
                 })() : null;
                 const clusterTag = resource.tags?.['api.openshift.com/name'] || resource.tags?.['kubernetes.io/cluster'] || resource.tags?.['sigs.k8s.io/cluster-api-provider-aws/cluster-name'];
                 const creator = resource.tags?.CreatedBy || resource.tags?.ManagedBy;
                 const tagCount = resource.tags ? Object.keys(resource.tags).length : 0;
 
                 return (
-                  <tr key={index} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                    <td className="px-2 py-1.5">
-                      <span className="font-medium text-gray-900">{resource.name || 'Unnamed'}</span>
+                  <tr key={index} className={`border-b border-gray-100 last:border-0 hover:bg-[#F1F8FF] ${index % 2 === 0 ? 'bg-white' : 'bg-[#FAFAFA]'}`}>
+                    <td className="px-4 py-2">
+                      <span className="font-medium text-[#0073BB]">{resource.name || 'Unnamed'}</span>
                     </td>
-                    <td className="px-2 py-1.5">
-                      <span className="text-gray-500 font-mono">{resource.id ? resource.id.slice(-20) : '-'}</span>
+                    <td className="px-4 py-2">
+                      <span className="text-[#545B64] font-mono text-[11px]">{resource.id || '-'}</span>
                     </td>
                     {hasState && (
-                      <td className="px-2 py-1.5">
+                      <td className="px-4 py-2">
                         {resource.state && (
-                          <span className={`inline-block px-1.5 py-0.5 font-medium rounded ${resource.state === 'available' || resource.state === 'running' || resource.state === 'in-use' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium ${
+                            resource.state === 'available' || resource.state === 'running' || resource.state === 'in-use'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-gray-50 text-gray-600 border border-gray-200'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              resource.state === 'available' || resource.state === 'running' || resource.state === 'in-use'
+                                ? 'bg-emerald-500' : 'bg-gray-400'
+                            }`} />
                             {resource.state}
                           </span>
                         )}
                       </td>
                     )}
                     {hasCreated && (
-                      <td className="px-2 py-1.5">
-                        {age && <span className="text-gray-600">{age}</span>}
-                      </td>
+                      <td className="px-4 py-2 text-[#545B64]">{age || '-'}</td>
                     )}
                     {hasVpc && (
-                      <td className="px-2 py-1.5">
-                        <span className="text-gray-600">{resource.vpc_name || (resource.vpc_id ? resource.vpc_id.slice(-8) : '-')}</span>
+                      <td className="px-4 py-2">
+                        <span className="text-[#545B64] font-mono text-[11px]">{resource.vpc_name || (resource.vpc_id ? resource.vpc_id.slice(-12) : '-')}</span>
                       </td>
                     )}
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center gap-1 flex-wrap">
+                    <td className="px-4 py-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         {clusterTag && (
-                          <span className="inline-block px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium">{clusterTag}</span>
+                          <span className="inline-block px-1.5 py-0.5 bg-[#E8F4FD] text-[#0073BB] rounded text-[11px] font-medium border border-[#D4E8F7]">{clusterTag}</span>
                         )}
                         {creator && (
-                          <span className="inline-block px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-medium">{creator}</span>
+                          <span className="inline-block px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[11px] font-medium border border-purple-200">{creator}</span>
                         )}
                         {tagCount > 0 && !clusterTag && !creator && (
-                          <span className="text-gray-400">{tagCount} tags</span>
+                          <span className="text-[#545B64]">{tagCount} tags</span>
                         )}
-                        {tagCount === 0 && (
-                          <span className="text-gray-300">&mdash;</span>
-                        )}
+                        {tagCount === 0 && <span className="text-gray-300">-</span>}
                       </div>
                     </td>
                   </tr>
@@ -370,66 +502,114 @@ const AWSUsageDashboard = ({ inline = false }) => {
     );
   };
 
-  // Render a resource bar row with optional inline expansion
-  const ResourceBarRow = ({ resource, showCost }) => {
-    const count = usage[resource.key];
-    const cost = showCost ? calculateCost(resource) : null;
+  const toggleChartResource = (key) => {
+    setChartResources(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        if (next.size >= 3) {
+          const first = next.values().next().value;
+          next.delete(first);
+        }
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const MetricCard = ({ resource, showCost = false }) => {
+    const count = usage?.[resource.key];
     const isError = count === 'error';
     const usagePct = !isError && count !== undefined ? Math.round((count / resource.threshold) * 100) : 0;
-    const barColor = usagePct >= 90 ? 'bg-red-500' : usagePct >= 70 ? 'bg-yellow-400' : 'bg-blue-500';
-    const barBg = usagePct >= 90 ? 'bg-red-100' : usagePct >= 70 ? 'bg-yellow-100' : 'bg-blue-100';
+    const cost = showCost ? calculateCost(resource) : null;
     const isExpanded = expandedResource === resource.key;
+    const isCharted = chartResources.has(resource.key);
+    const sparkColor = RESOURCE_COLORS[resource.key] || '#0073BB';
+
+    const isEmpty = !isError && (count === 0 || count === undefined);
 
     return (
-      <div className={`${isExpanded ? 'bg-gray-50 rounded-lg border border-gray-200 -mx-1 px-1' : ''}`}>
+      <div className={`rounded-lg border transition-all ${isExpanded ? 'bg-white border-[#0073BB] shadow-md col-span-full' : isEmpty ? 'bg-gray-50/50 border-gray-200 opacity-60 hover:opacity-100 hover:bg-white' : 'bg-white border-gray-200 hover:shadow-sm'} ${!isExpanded ? 'hover:border-l-[#0073BB] hover:border-l-[3px]' : ''}`}>
         <div
           onClick={() => count > 0 && !isError && toggleResourceDetails(resource.key)}
-          className={`group ${count > 0 && !isError ? 'cursor-pointer' : 'cursor-default'}`}
+          className={`p-4 ${count > 0 && !isError ? 'cursor-pointer' : ''} group`}
         >
-          <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <span className="text-sm">{resource.icon}</span>
-              <span className="text-sm font-medium text-gray-900">{resource.label}</span>
+              <ServiceIcon resourceKey={resource.key} size={14} />
+              <StatusDot pct={usagePct} />
+              <span className="text-xs font-semibold text-[#545B64] uppercase tracking-wide">{resource.label}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={(e) => refreshSingleResource(e, resource.key)}
                 disabled={refreshingKey === resource.key}
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-600 disabled:opacity-100"
-                title="Refresh this resource"
+                className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-[#0073BB]"
+                title="Refresh"
               >
-                <ArrowPathIcon className={`h-3.5 w-3.5 ${refreshingKey === resource.key ? 'animate-spin text-blue-500' : ''}`} />
+                <ArrowPathIcon className={`h-3.5 w-3.5 ${refreshingKey === resource.key ? 'animate-spin text-[#0073BB]' : ''}`} />
               </button>
-              {count > 0 && !isError && !isExpanded && (
-                <span className="text-xs text-blue-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">Details &rarr;</span>
-              )}
-              {isExpanded && (
-                <span className="text-xs text-blue-600 font-semibold">&#x25BC;</span>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              {isError ? (
-                <span className="text-xs text-red-600 font-medium">Error</span>
-              ) : (
-                <>
-                  <span className="text-sm font-bold text-gray-900">{count?.toLocaleString() || '0'}</span>
-                  <span className="text-xs text-gray-400">/ {resource.threshold.toLocaleString()}</span>
-                  <span className={`text-xs font-semibold min-w-[32px] text-right ${usagePct >= 90 ? 'text-red-600' : usagePct >= 70 ? 'text-yellow-600' : 'text-gray-500'}`}>{usagePct}%</span>
-                  {showCost && resource.costType === 'fixed' && cost ? (
-                    <span className="text-xs font-bold text-orange-600 min-w-[70px] text-right">${cost}/mo</span>
-                  ) : showCost && resource.costType === 'variable' ? (
-                    <span className="text-xs font-semibold text-orange-600 min-w-[70px] text-right">Variable</span>
-                  ) : showCost ? (
-                    <span className="min-w-[70px]"></span>
-                  ) : null}
-                </>
-              )}
+              {isExpanded && <ChevronUpIcon className="h-3.5 w-3.5 text-[#0073BB]" />}
+              {!isExpanded && count > 0 && !isError && <ChevronDownIcon className="h-3.5 w-3.5 text-gray-300 group-hover:text-[#0073BB]" />}
             </div>
           </div>
+
+          <div className="flex items-end justify-between">
+            <div>
+              {isError ? (
+                <span className="text-2xl font-bold text-red-600">Error</span>
+              ) : (
+                <span className="text-3xl font-bold text-[#232F3E]"><CountUp value={count} /></span>
+              )}
+              <span className="text-sm text-[#879596] ml-1">/ {resource.threshold.toLocaleString()}</span>
+            </div>
+            {showCost && !isError && (
+              <div className="text-right">
+                {cost ? (
+                  <span className="text-sm font-bold text-[#FF9900]">${cost}<span className="text-xs font-normal text-[#879596]">/mo</span></span>
+                ) : resource.costType === 'variable' ? (
+                  <span className="text-xs font-medium text-[#879596]">Variable</span>
+                ) : null}
+              </div>
+            )}
+          </div>
+
           {!isError && (
-            <div className={`w-full ${barBg} rounded-full h-2 group-hover:h-2.5 transition-all`}>
-              <div className={`h-full rounded-full ${barColor} transition-all duration-500`} style={{ width: `${Math.max(Math.min(usagePct, 100), 1)}%` }}></div>
+            <div className="mt-3 w-full bg-gray-100 rounded-full h-1.5">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${usagePct >= 90 ? 'bg-red-500' : usagePct >= 70 ? 'bg-amber-500' : 'bg-[#0073BB]'}`}
+                style={{ width: `${Math.max(Math.min(usagePct, 100), 1)}%` }}
+              />
             </div>
           )}
+
+          <div className="flex items-center justify-between mt-1.5">
+            <div className="flex items-center gap-2">
+              <Sparkline data={trendData} dataKey={resource.key} color={sparkColor} width={64} height={20} />
+              <span className="text-[11px] text-[#879596]">{resource.description}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href={getConsoleUrl(resource.key, region)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-[#879596] hover:border-[#0073BB] hover:text-[#0073BB] transition-all opacity-0 group-hover:opacity-100"
+              >
+                AWS ↗
+              </a>
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleChartResource(resource.key); }}
+                className={`text-[10px] px-1.5 py-0.5 rounded border transition-all ${isCharted ? 'border-[#0073BB] bg-[#E8F4FD] text-[#0073BB] font-semibold' : 'border-gray-200 text-[#879596] hover:border-[#0073BB] hover:text-[#0073BB]'}`}
+              >
+                {isCharted ? 'Charted' : 'Chart'}
+              </button>
+              <span className={`text-[11px] font-semibold ${usagePct >= 90 ? 'text-red-600' : usagePct >= 70 ? 'text-amber-600' : 'text-[#879596]'}`}>{usagePct}%</span>
+            </div>
+          </div>
         </div>
+
         {isExpanded && <InlineDetailsTable />}
       </div>
     );
@@ -452,184 +632,76 @@ const AWSUsageDashboard = ({ inline = false }) => {
   };
 
   const contentBody = (
-        <div className={inline ? "" : "p-6"}>
-          {/* Description + Refresh */}
-          <div className="mb-4 flex items-start justify-between">
-            <div>
-              <p className="text-gray-600 text-sm">
-                Monitor your AWS resource counts across all services
-              </p>
-              <p className="text-gray-500 text-xs mt-1 flex items-center gap-1">
-                <span className="inline-block w-1 h-1 rounded-full bg-gray-400"></span>
-                {lastUpdated
-                  ? `Last updated: ${lastUpdated.toLocaleString()}`
-                  : 'Data may take a few minutes to load as it queries all AWS resources'}
-              </p>
-            </div>
-            {inline && (
-              <button
-                onClick={fetchUsage}
-                disabled={loading}
-                className={`
-                  flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm
-                  transition-all duration-200 shadow-sm whitespace-nowrap
-                  ${loading
-                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    : 'bg-orange-500 text-white hover:bg-orange-600 hover:shadow-md'
-                  }
-                `}
-              >
-                <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                {loading ? 'Loading...' : 'Refresh Data'}
-              </button>
-            )}
+    <div className={inline ? "" : "p-6"}>
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <p className="text-red-700 font-medium text-sm">Error</p>
+          <p className="text-red-600 text-xs mt-1">{error}</p>
+        </div>
+      )}
+
+      {configLoading && (
+        <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
+          <ArrowPathIcon className="h-8 w-8 animate-spin text-[#0073BB] mx-auto mb-3" />
+          <p className="text-[#232F3E] font-medium">Loading AWS resource configuration...</p>
+          <p className="text-[#545B64] text-sm mt-1">Fetching resource thresholds and quotas</p>
+        </div>
+      )}
+
+      {!configLoading && !usage && !loading && !error && (
+        <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
+          <div className="w-12 h-12 bg-[#FF9900]/10 rounded-full flex items-center justify-center mx-auto mb-4">
+            <ArrowPathIcon className="h-6 w-6 text-[#FF9900]" />
+          </div>
+          <p className="text-[#232F3E] text-lg font-semibold">Load AWS Resource Usage</p>
+          <p className="text-[#545B64] text-sm mt-2">Query your AWS account for current resource counts and quota usage</p>
+          <button
+            onClick={fetchUsage}
+            className="mt-4 px-6 py-2.5 bg-[#FF9900] text-white rounded-lg font-medium text-sm hover:bg-[#EC7211] transition-colors shadow-sm"
+          >
+            Refresh Data
+          </button>
+        </div>
+      )}
+
+      {usage && (
+        <>
+          {/* Summary + Resource Metric Cards */}
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-[#232F3E] uppercase tracking-wide">Service Quotas & Usage</h2>
+            <p className="text-xs text-[#879596]">
+              {resourceConfig.length} services monitored · <span className="text-[#232F3E] font-medium">{resourceConfig.filter(r => usage[r.key] > 0 && usage[r.key] !== 'error').length} with active resources</span>
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[...resourceConfig].sort((a, b) => {
+              const aCount = usage[a.key] || 0;
+              const bCount = usage[b.key] || 0;
+              const aActive = aCount > 0 && aCount !== 'error' ? 1 : 0;
+              const bActive = bCount > 0 && bCount !== 'error' ? 1 : 0;
+              if (aActive !== bActive) return bActive - aActive;
+              return 0;
+            }).map((resource) => (
+              <MetricCard
+                key={resource.key}
+                resource={resource}
+                showCost={billedResources.some(r => r.key === resource.key)}
+              />
+            ))}
           </div>
 
-          {error && (
-            <div className="bg-red-50 border border-red-300 rounded-lg p-4 mb-6">
-              <p className="text-red-700 font-medium">Error</p>
-              <p className="text-red-600 text-sm mt-1">{error}</p>
+          {/* Trend Chart — secondary, shows selected resources */}
+          {chartResources.size > 0 && (
+            <div className="bg-white border border-gray-200 rounded-lg p-4 mt-6">
+              <AWSUsageTrend
+                selectedResources={chartResources}
+                onToggleResource={toggleChartResource}
+              />
             </div>
           )}
-
-          {configLoading && (
-            <div className="bg-blue-50 border border-blue-300 rounded-lg p-8 text-center">
-              <p className="text-blue-700 text-lg font-medium">
-                Loading AWS resource configuration...
-              </p>
-              <p className="text-blue-600 text-sm mt-2">
-                Fetching resource thresholds and AWS quotas
-              </p>
-            </div>
-          )}
-
-          {!configLoading && !usage && !loading && !error && (
-            <div className="bg-blue-50 border border-blue-300 rounded-lg p-8 text-center">
-              <p className="text-blue-700 text-lg font-medium">
-                Click "Refresh Data" to load AWS resource usage
-              </p>
-              <p className="text-blue-600 text-sm mt-2">
-                This will query your AWS account for current resource counts
-              </p>
-              <p className="text-blue-500 text-xs mt-1 italic">
-                Note: Loading may take a few minutes as it queries all AWS services
-              </p>
-            </div>
-          )}
-
-          {usage && (
-            <>
-              {/* Top Row: Cost Summary (left) + Usage Trend (right) */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-                {/* Cost Summary */}
-                {(() => {
-                  const natCost = usage.nat_gateways > 0 ? calculateCost(resourceConfig.find(r => r.key === 'nat_gateways')) : null;
-                  const route53Cost = usage.route53_zones > 0 ? calculateCost(resourceConfig.find(r => r.key === 'route53_zones')) : null;
-                  const totalCost = (parseFloat(natCost || 0) + parseFloat(route53Cost || 0)).toFixed(2);
-
-                  return (
-                    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-lg">💰</span>
-                        <h2 className="text-base font-bold text-gray-900">Cost Summary</h2>
-                      </div>
-                      <div className="space-y-2">
-                        {natCost && (
-                          <div className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm">🌉</span>
-                              <div>
-                                <p className="text-sm font-medium text-gray-900">NAT Gateways</p>
-                                <p className="text-xs text-gray-500">{usage.nat_gateways} × $32.40/mo</p>
-                              </div>
-                            </div>
-                            <p className="text-base font-bold text-blue-600">${natCost}</p>
-                          </div>
-                        )}
-                        {route53Cost && (
-                          <div className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm">🌐</span>
-                              <div>
-                                <p className="text-sm font-medium text-gray-900">Route53 Zones</p>
-                                <p className="text-xs text-gray-500">{usage.route53_zones} × $0.50/mo</p>
-                              </div>
-                            </div>
-                            <p className="text-base font-bold text-cyan-600">${route53Cost}</p>
-                          </div>
-                        )}
-                        {!natCost && !route53Cost && (
-                          <p className="text-sm text-gray-500 text-center py-4">No billable resources</p>
-                        )}
-                        <div className="flex items-center justify-between py-2 px-3 bg-green-50 rounded border border-green-200">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm">💵</span>
-                            <p className="text-sm font-bold text-gray-900">Total</p>
-                          </div>
-                          <p className="text-lg font-bold text-green-700">${totalCost}/mo</p>
-                        </div>
-                      </div>
-                      {/* Status Guide */}
-                      <div className="mt-3 pt-3 border-t border-gray-200">
-                        <div className="flex items-center gap-3 flex-wrap">
-                          <span className="text-xs font-semibold text-gray-700">Status:</span>
-                          <div className="flex items-center gap-1">
-                            <div className="w-2.5 h-2.5 bg-green-100 border border-green-300 rounded"></div>
-                            <span className="text-xs text-gray-600">Safe</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <div className="w-2.5 h-2.5 bg-yellow-100 border border-yellow-300 rounded"></div>
-                            <span className="text-xs text-gray-600">Warning</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <div className="w-2.5 h-2.5 bg-red-100 border border-red-300 rounded"></div>
-                            <span className="text-xs text-gray-600">Critical</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Usage Trend Chart */}
-                <div className="lg:col-span-2">
-                  <AWSUsageTrend />
-                </div>
-              </div>
-
-              {/* Resources — side by side */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Billed Resources — horizontal bar chart */}
-              <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="text-lg">💰</span>
-                  <h3 className="text-base font-bold text-gray-900">Resources with Costs</h3>
-                  <span className="text-xs text-gray-500 italic">These resources incur monthly charges</span>
-                </div>
-                <div className="space-y-3">
-                  {billedResources.map((resource) => (
-                    <ResourceBarRow key={resource.key} resource={resource} showCost={true} />
-                  ))}
-                </div>
-              </div>
-
-              {/* Quota Management Resources — horizontal bar chart */}
-              <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="text-lg">📊</span>
-                  <h3 className="text-base font-bold text-gray-900">Quota Usage</h3>
-                  <span className="text-xs text-gray-500 italic">No direct costs — monitor for quota limits</span>
-                </div>
-                <div className="space-y-3">
-                  {freeResources.map((resource) => (
-                    <ResourceBarRow key={resource.key} resource={resource} showCost={false} />
-                  ))}
-                </div>
-              </div>
-              </div>
-            </>
-          )}
-        </div>
+        </>
+      )}
+    </div>
   );
 
   if (inline) {
@@ -643,36 +715,78 @@ const AWSUsageDashboard = ({ inline = false }) => {
         activeSection="aws-usage"
         environment="mce"
       />
-
-      <div className="flex-1 overflow-auto" style={{ backgroundColor: '#FFF5F0' }}>
-        {/* Header - Softer AWS Orange Theme */}
-        <div className="text-white px-6 py-4 shadow-lg flex items-center justify-between h-[72px]" style={{ background: 'linear-gradient(to right, #FF9900, #FF8C00)' }}>
-          <div>
-            <h1 className="text-2xl font-bold leading-tight tracking-tight">AWS Resource Usage</h1>
-            {lastUpdated && (
-              <p className="text-orange-100 text-xs mt-0.5">
-                Last updated: {lastUpdated.toLocaleString()}
-              </p>
-            )}
+      <div className="flex-1 overflow-auto bg-[#F2F3F3]">
+        {/* AWS-style Header */}
+        <div className="px-6 py-4 flex items-center justify-between h-[72px]" style={{ background: '#232F3E' }}>
+          <div className="flex items-center gap-4">
+            <div>
+              <div className="flex items-center gap-3">
+                <h1 className="text-xl font-bold text-white tracking-tight">AWS Resource Usage</h1>
+                {region && (
+                  <a
+                    href={`https://${region}.console.aws.amazon.com/console/home?region=${region}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-0.5 rounded text-xs font-medium bg-[#37475A] text-[#D5DBDB] border border-[#4A5568] hover:bg-[#4A5568] hover:text-white transition-colors"
+                  >
+                    {region}
+                  </a>
+                )}
+                {usage && (() => {
+                  const natCost = calculateCost(resourceConfig.find(r => r.key === 'nat_gateways'));
+                  const r53Cost = calculateCost(resourceConfig.find(r => r.key === 'route53_zones'));
+                  const total = (parseFloat(natCost || 0) + parseFloat(r53Cost || 0)).toFixed(2);
+                  return total > 0 ? (
+                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#FF9900]/20 text-[#FF9900] border border-[#FF9900]/30">
+                      ${total}/mo
+                    </span>
+                  ) : null;
+                })()}
+              </div>
+              {lastUpdated && (
+                <p className="text-[#879596] text-xs mt-0.5">
+                  Last updated {lastUpdated.toLocaleString()}
+                </p>
+              )}
+            </div>
           </div>
-          <button
-            onClick={fetchUsage}
-            disabled={loading}
-            className={`
-              flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium text-sm
-              transition-all duration-200 shadow-md
-              ${loading
-                ? 'bg-white/20 text-white/50 cursor-not-allowed'
-                : 'bg-white text-orange-600 hover:bg-orange-50 hover:shadow-lg'
-              }
-            `}
-          >
-            <ArrowPathIcon className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Loading...' : 'Refresh Data'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setAutoRefresh(prev => !prev)}
+              className={`px-3 py-2 rounded text-xs font-medium transition-all ${
+                autoRefresh
+                  ? 'bg-[#37475A] text-[#FF9900] border border-[#FF9900]/30'
+                  : 'bg-[#37475A] text-[#879596] border border-[#4A5568] hover:text-[#D5DBDB]'
+              }`}
+              title="Auto-refresh every 5 minutes"
+            >
+              {autoRefresh ? `Auto ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, '0')}` : 'Auto'}
+            </button>
+            <button
+              onClick={fetchUsage}
+              disabled={loading}
+              className={`flex items-center gap-2 px-5 py-2 rounded font-medium text-sm transition-all ${
+                loading
+                  ? 'bg-[#37475A] text-[#879596] cursor-not-allowed'
+                  : 'bg-[#FF9900] text-[#232F3E] hover:bg-[#EC7211] shadow-sm'
+              }`}
+              title="Refresh data (R)"
+            >
+              <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Loading...' : 'Refresh Data'}
+            </button>
+          </div>
         </div>
 
-        {/* Content */}
+        {/* Breadcrumb bar */}
+        <div className="bg-white border-b border-gray-200 px-6 py-2">
+          <div className="flex items-center gap-2 text-xs text-[#545B64]">
+            <span className="hover:text-[#0073BB] cursor-pointer" onClick={() => navigate('/mce')}>Home</span>
+            <span className="text-gray-300">/</span>
+            <span className="font-medium text-[#232F3E]">AWS Resource Usage</span>
+          </div>
+        </div>
+
         <div className="p-6">
           {contentBody}
         </div>
