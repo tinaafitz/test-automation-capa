@@ -88,11 +88,24 @@ def _get_mce_features_sync():
                 # If CRD check fails, assume CRDs not available
                 print(f"CRD check failed: {e}")
 
+            ocp_version = ""
+            try:
+                ocp_result = subprocess.run(
+                    ["oc", "get", "clusterversion", "version",
+                     "-o", "jsonpath={.status.desired.version}"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if ocp_result.returncode == 0:
+                    ocp_version = ocp_result.stdout.strip()
+            except Exception:
+                pass
+
             mce_info = {
                 "name": mce_name,
                 "version": mce_version,
                 "status": mce_status,
                 "available": mce_status == "Available",
+                "ocpVersion": ocp_version,
                 "capabilities": {
                     "rosaNetworkCrd": rosa_network_crd_available,
                     "rosaRoleConfigCrd": rosa_role_config_crd_available,

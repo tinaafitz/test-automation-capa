@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CheckCircleIcon, ExclamationCircleIcon, GlobeAltIcon, ClockIcon } from '@heroicons/react/24/outline';
 import PropTypes from 'prop-types';
 
-const ActiveEnvironmentBanner = ({ verificationTimestamp = null, environment = 'mce' }) => {
+const ActiveEnvironmentBanner = ({ verificationTimestamp = null, environment = 'mce', mceInfo = null }) => {
   const [credentials, setCredentials] = useState(null);
   const [minikubeInfo, setMinikubeInfo] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -183,6 +183,20 @@ const ActiveEnvironmentBanner = ({ verificationTimestamp = null, environment = '
             )}
             <CheckCircleIcon className="h-4 w-4 text-green-500 flex-shrink-0" />
           </div>
+          {mceInfo && (
+            <div className="flex items-center gap-2 mt-1.5 ml-11 flex-wrap">
+              {mceInfo.ocpVersion && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                  OCP {mceInfo.ocpVersion}
+                </span>
+              )}
+              {mceInfo.version && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-cyan-100 text-cyan-800">
+                  MCE {mceInfo.version}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -192,6 +206,7 @@ const ActiveEnvironmentBanner = ({ verificationTimestamp = null, environment = '
 ActiveEnvironmentBanner.propTypes = {
   verificationTimestamp: PropTypes.string,
   environment: PropTypes.oneOf(['mce', 'minikube']),
+  mceInfo: PropTypes.object,
 };
 
 export default ActiveEnvironmentBanner;

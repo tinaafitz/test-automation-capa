@@ -7,6 +7,7 @@ export const useApiStatus = () => {
   const [ocpStatus, setOcpStatus] = useState(null);
   const [mceFeatures, setMceFeatures] = useState([]);
   const [mceInfo, setMceInfo] = useState(null);
+  const [componentVersions, setComponentVersions] = useState(null);
   const [mceLastVerified, setMceLastVerified] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -66,6 +67,18 @@ export const useApiStatus = () => {
           setMceFeatures(mceData.features || []);
           setMceInfo(mceData.mce_info || null);
           setMceLastVerified(new Date().toISOString());
+
+          try {
+            const versionsResponse = await fetch(
+              `http://localhost:8000/api/capi/component-versions?environment=mce&t=${timestamp}`
+            );
+            const versionsData = await versionsResponse.json();
+            if (versionsData.components) {
+              setComponentVersions(versionsData.components);
+            }
+          } catch (versionsError) {
+            console.error('Failed to fetch component versions:', versionsError);
+          }
         } catch (mceError) {
           console.error('Failed to fetch MCE features:', mceError);
         }
@@ -96,6 +109,7 @@ export const useApiStatus = () => {
     ocpStatus,
     mceFeatures,
     mceInfo,
+    componentVersions,
     mceLastVerified,
 
     // Loading state
@@ -110,6 +124,7 @@ export const useApiStatus = () => {
     setOcpStatus,
     setMceFeatures,
     setMceInfo,
+    setComponentVersions,
     setMceLastVerified,
   };
 };

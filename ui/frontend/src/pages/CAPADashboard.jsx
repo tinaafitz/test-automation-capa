@@ -237,6 +237,7 @@ const CAPADashboardContent = () => {
     ocpStatus,
     mceFeatures,
     mceInfo,
+    componentVersions,
     mceLastVerified,
     loading: apiLoading,
     refreshAllStatus,
@@ -1236,7 +1237,7 @@ const CAPADashboardContent = () => {
                             className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                           />
                           <div>
-                            <span className="text-sm font-medium text-gray-900">Express create</span>
+                            <span className="text-sm font-medium text-gray-900">Express</span>
                             <p className="text-xs text-gray-500 mt-0.5">Use recommended defaults. Only specify a prefix and channel group.</p>
                           </div>
                         </label>
@@ -1251,7 +1252,7 @@ const CAPADashboardContent = () => {
                             className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                           />
                           <div>
-                            <span className="text-sm font-medium text-gray-900">Custom create</span>
+                            <span className="text-sm font-medium text-gray-900">Custom</span>
                             <p className="text-xs text-gray-500 mt-0.5">Set all configuration options including version, network, roles, FIPS, and log forwarding.</p>
                           </div>
                         </label>
@@ -2048,6 +2049,7 @@ const CAPADashboardContent = () => {
           <ActiveEnvironmentBanner
             key={credentialsRefreshKey}
             verificationTimestamp={mceLastVerified}
+            mceInfo={mceInfo}
           />
 
           {/* Toast Message */}
