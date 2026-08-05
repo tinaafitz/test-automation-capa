@@ -674,7 +674,7 @@ const AWSUsageDashboard = ({ inline = false }) => {
             </p>
           </div>
           {/* Quick Stats Row */}
-          <div className="grid grid-cols-6 gap-2.5 mb-5">
+          <div className="grid grid-cols-6 gap-2.5 mb-5 bg-gradient-to-r from-gray-50 via-white to-gray-50 rounded-lg p-2.5 border border-gray-100">
             {[
               { label: 'Est. Clusters', value: Math.round((usage.nat_gateways || 0) / 2), color: '#0073bb', bg: '#E8F4FD' },
               { label: 'Compute', value: usage.ec2_instances || 0, color: '#1b660f', bg: '#E9F5E9' },
@@ -701,13 +701,34 @@ const AWSUsageDashboard = ({ inline = false }) => {
                 if (aActive !== bActive) return bActive - aActive;
                 return 0;
               });
-              return sorted.map((resource) => (
-                <MetricCard
-                  key={resource.key}
-                  resource={resource}
-                  showCost={billedResources.some(r => r.key === resource.key)}
-                />
-              ));
+              const totalResources = Object.values(usage).reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+              const activeServices = sorted.filter(r => (usage[r.key] || 0) > 0 && usage[r.key] !== 'error').length;
+              const remainder = sorted.length % 4;
+              return (
+                <>
+                  {sorted.map((resource) => (
+                    <MetricCard
+                      key={resource.key}
+                      resource={resource}
+                      showCost={billedResources.some(r => r.key === resource.key)}
+                    />
+                  ))}
+                  {remainder > 0 && (
+                    <div className="rounded-lg border border-dashed border-gray-300 bg-gradient-to-br from-gray-50 to-white p-4 flex flex-col justify-center items-center text-center">
+                      <p className="text-3xl font-bold text-[#232F3E]">{totalResources}</p>
+                      <p className="text-[10px] uppercase tracking-wider text-[#879596] font-semibold mt-1">Total Resources</p>
+                      <p className="text-[11px] text-[#545B64] mt-2">{activeServices} of {sorted.length} services active</p>
+                      <div className="flex gap-1 mt-2">
+                        {sorted.map(r => {
+                          const count = usage[r.key] || 0;
+                          const active = count > 0 && count !== 'error';
+                          return <span key={r.key} className={`w-2 h-2 rounded-sm ${active ? 'bg-emerald-400' : 'bg-gray-200'}`} title={r.label} />;
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
             })()}
           </div>
 
@@ -855,25 +876,38 @@ const AWSUsageDashboard = ({ inline = false }) => {
                 </div>
 
                 {/* Top Cost Drivers */}
-                <div className="col-span-6">
-                  <p className="text-[10px] uppercase tracking-wider text-[#879596] font-semibold mb-2">Top Cost Drivers</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {costDrivers.length > 0 ? costDrivers.map(r => (
-                      <div key={r.key} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 flex items-center gap-2.5">
-                        <ServiceIcon resourceKey={r.key} size={18} />
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-[#232F3E] truncate">{r.label}</p>
-                          <p className="text-[11px] text-[#879596]">
-                            {usage[r.key]} x ${r.costPerMonth}
-                          </p>
-                          <p className="text-sm font-bold" style={{ color: '#FF9900' }}>${r.totalCost.toFixed(2)}<span className="text-[10px] font-normal text-[#879596]">/mo</span></p>
-                        </div>
+                {(() => {
+                  const variableResources = billedResources.filter(r => !r.costPerMonth && usage?.[r.key] > 0 && usage[r.key] !== 'error');
+                  const variableCount = variableResources.length;
+                  return (
+                    <div className="col-span-6">
+                      <p className="text-[10px] uppercase tracking-wider text-[#879596] font-semibold mb-2">Cost Breakdown</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {costDrivers.map(r => (
+                          <div key={r.key} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 flex items-center gap-2.5">
+                            <ServiceIcon resourceKey={r.key} size={18} />
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-[#232F3E] truncate">{r.label}</p>
+                              <p className="text-[11px] text-[#879596]">
+                                {usage[r.key]} x ${r.costPerMonth}
+                              </p>
+                              <p className="text-sm font-bold" style={{ color: '#FF9900' }}>${r.totalCost.toFixed(2)}<span className="text-[10px] font-normal text-[#879596]">/mo</span></p>
+                            </div>
+                          </div>
+                        ))}
+                        {costDrivers.length < 3 && (
+                          <div className="bg-gradient-to-br from-amber-50 to-white border border-amber-200 rounded-lg px-3 py-2.5">
+                            <p className="text-xs font-semibold text-[#232F3E]">Variable Costs</p>
+                            <p className="text-[11px] text-[#879596] mt-0.5">
+                              {variableCount} service{variableCount !== 1 ? 's' : ''} (EC2, EBS, LB, S3)
+                            </p>
+                            <p className="text-sm font-medium mt-0.5" style={{ color: '#d97706' }}>Usage-based pricing</p>
+                          </div>
+                        )}
                       </div>
-                    )) : (
-                      <p className="text-xs text-[#879596] col-span-3">No billed resources</p>
-                    )}
-                  </div>
-                </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Resource Health */}
                 <div className="col-span-3 bg-gray-50 border border-gray-200 rounded-lg p-4">
@@ -881,30 +915,43 @@ const AWSUsageDashboard = ({ inline = false }) => {
                   {quotaTotal > 0 ? (
                     <>
                       <div className="flex w-full h-3 rounded-full overflow-hidden bg-gray-200">
-                        {quotaBuckets.green > 0 && (
-                          <div className="bg-emerald-500 transition-all" style={{ width: `${(quotaBuckets.green / quotaTotal) * 100}%` }} />
-                        )}
-                        {quotaBuckets.amber > 0 && (
-                          <div className="bg-amber-400 transition-all" style={{ width: `${(quotaBuckets.amber / quotaTotal) * 100}%` }} />
-                        )}
-                        {quotaBuckets.red > 0 && (
-                          <div className="bg-red-500 transition-all" style={{ width: `${(quotaBuckets.red / quotaTotal) * 100}%` }} />
-                        )}
+                        {quotaBuckets.green > 0 && <div className="bg-emerald-500 transition-all" style={{ width: `${(quotaBuckets.green / quotaTotal) * 100}%` }} />}
+                        {quotaBuckets.amber > 0 && <div className="bg-amber-400 transition-all" style={{ width: `${(quotaBuckets.amber / quotaTotal) * 100}%` }} />}
+                        {quotaBuckets.red > 0 && <div className="bg-red-500 transition-all" style={{ width: `${(quotaBuckets.red / quotaTotal) * 100}%` }} />}
                       </div>
-                      <div className="flex items-center gap-3 mt-2">
-                        <span className="flex items-center gap-1 text-[11px] font-medium text-gray-600">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500" />{quotaBuckets.green} ok
+                      <div className="flex items-center gap-3 mt-1.5 mb-2">
+                        <span className="flex items-center gap-1 text-[10px] font-medium text-gray-600">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{quotaBuckets.green} ok
                         </span>
                         {quotaBuckets.amber > 0 && (
-                          <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-600">
-                            <span className="w-2 h-2 rounded-full bg-amber-400" />{quotaBuckets.amber} warn
+                          <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />{quotaBuckets.amber} warn
                           </span>
                         )}
                         {quotaBuckets.red > 0 && (
-                          <span className="flex items-center gap-1 text-[11px] font-bold text-red-600">
-                            <span className="w-2 h-2 rounded-full bg-red-500" />{quotaBuckets.red} critical
+                          <span className="flex items-center gap-1 text-[10px] font-bold text-red-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />{quotaBuckets.red} critical
                           </span>
                         )}
+                      </div>
+                      <div className="space-y-1">
+                        {allResources
+                          .filter(r => usage?.[r.key] > 0 && usage[r.key] !== 'error' && r.threshold)
+                          .sort((a, b) => ((usage[b.key] || 0) / b.threshold) - ((usage[a.key] || 0) / a.threshold))
+                          .slice(0, 5)
+                          .map(r => {
+                            const pct = Math.round(((usage[r.key] || 0) / r.threshold) * 100);
+                            const barColor = pct >= 80 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#22c55e';
+                            return (
+                              <div key={r.key} className="flex items-center gap-2">
+                                <span className="text-[10px] w-[60px] truncate" style={{ color: '#545B64' }}>{r.label?.split(' ')[0]}</span>
+                                <div className="flex-1 h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                                  <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: barColor }} />
+                                </div>
+                                <span className="text-[10px] font-semibold w-[30px] text-right" style={{ color: barColor }}>{pct}%</span>
+                              </div>
+                            );
+                          })}
                       </div>
                     </>
                   ) : (
