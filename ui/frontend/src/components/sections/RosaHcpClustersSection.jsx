@@ -747,6 +747,23 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
               <h3 className="text-lg font-semibold text-gray-900">
                 {isDeleting ? `Deleting ${deletionResults.clusterName}...` : deletionResults.success ? 'Deletion Completed' : 'Deletion Failed'}
               </h3>
+              {isDeleting && activeDeleteJobId.current && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await fetch(buildApiUrl(`/api/jobs/${activeDeleteJobId.current}/cancel`), { method: 'POST' });
+                      if (deletionAbortController.current) {
+                        deletionAbortController.current.abort();
+                      }
+                    } catch (e) {
+                      console.error('Failed to cancel deletion:', e);
+                    }
+                  }}
+                  className="ml-auto px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md transition-colors"
+                >
+                  Abort Deletion
+                </button>
+              )}
             </div>
 
             {/* AI Agent Summary */}

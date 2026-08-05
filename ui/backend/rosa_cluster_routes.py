@@ -315,10 +315,26 @@ async def get_rosa_clusters(context: str = None):
     return await asyncio.to_thread(_resolve("_get_rosa_clusters_sync"), context)
 
 
+def _get_capi_cluster_names():
+    """Get cluster names from ROSAControlPlane resources on the connected hub."""
+    try:
+        result = subprocess.run(
+            ["oc", "get", "rosacontrolplane", "--all-namespaces",
+             "-o", "jsonpath={.items[*].metadata.name}"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            names = result.stdout.strip()
+            return set(names.split()) if names else set()
+    except Exception:
+        pass
+    return None
+
+
 def _get_rosa_clusters_sync(context: str = None):
     """Get actual ROSA HCP clusters (sync — runs in thread pool to avoid blocking event loop)."""
-    # No CAPI filtering — show all ROSA HCP clusters from rosa CLI
-    capi_cluster_names = None
+    # Filter OCM clusters to only those with a ROSAControlPlane on this hub
+    capi_cluster_names = _get_capi_cluster_names()
 
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))

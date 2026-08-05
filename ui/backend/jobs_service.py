@@ -278,6 +278,11 @@ async def cancel_job(job_id: str):
             status_code=400, detail=f"Cannot cancel job with status: {job.get('status')}"
         )
 
+    # Kill the subprocess immediately — don't wait for next stdout line
+    from ansible_routes import kill_job_subprocess
+
+    killed = kill_job_subprocess(job_id)
+
     # Mark job as cancelled
     jobs[job_id]["status"] = "failed"
     jobs[job_id]["message"] = "Job cancelled by user"
@@ -288,7 +293,12 @@ async def cancel_job(job_id: str):
     # Persist agent stats before cleaning up session
     persist_agent_stats_on_completion(job_id)
 
-    return {"success": True, "message": "Job cancelled successfully", "job_id": job_id}
+    return {
+        "success": True,
+        "message": "Job cancelled successfully",
+        "job_id": job_id,
+        "process_killed": killed,
+    }
 
 
 @router.websocket("/ws/jobs/{job_id}")
