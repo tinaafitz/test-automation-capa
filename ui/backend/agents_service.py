@@ -150,6 +150,20 @@ def init_ai_agents(job_id: str, dry_run: bool = False, operation_type: str = "")
                     )
             # Store agent events for the stats API
             if job_id in jobs:
+                # Determine state from what happened in the pipeline
+                if diagnosis and diagnosis.get("confidence", 0) >= 0.7:
+                    _evt_state = "resolved" if success else "failed"
+                elif diagnosis:
+                    _evt_state = "diagnosing"
+                else:
+                    _evt_state = "detected"
+                # Format duration as human-readable
+                _evt_duration = _format_duration(_time.time() - _start)
+                # Extract cluster name from resource_key (e.g. "ns-rosa-hcp/foo-network" -> "foo")
+                _evt_cluster = _extract_cluster_name(resource_key)
+                # Determine which agent acted last
+                _evt_agent = "remediation" if remediation_msg else ("diagnostic" if diagnosis else "monitor")
+
                 jobs[job_id].setdefault("agent_events", [])
                 jobs[job_id]["agent_events"].append({
                     "type": "issue_detected",
@@ -160,6 +174,10 @@ def init_ai_agents(job_id: str, dry_run: bool = False, operation_type: str = "")
                     "remediation_result": remediation_msg,
                     "confidence": diagnosis.get("confidence", 0) if diagnosis else 0,
                     "timestamp": datetime.now().isoformat(),
+                    "state": _evt_state,
+                    "duration": _evt_duration,
+                    "cluster": _evt_cluster,
+                    "agent": _evt_agent,
                 })
 
         monitor.set_issue_callback(on_issue_detected)
@@ -205,6 +223,89 @@ def _save_agent_kb_file(filename: str, data):
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
+# ── Helpers ─────────────────────────────────────────────────────────
+
+def _format_duration(seconds: float) -> str:
+    """Format seconds into a human-readable duration string."""
+    if seconds is None or seconds < 0:
+        return "—"
+    if seconds < 1:
+        return "<1s"
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    if minutes < 60:
+        return f"{minutes}m {secs}s" if secs else f"{minutes}m"
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m" if mins else f"{hours}h"
+
+
+def _extract_cluster_name(resource_key: str) -> str:
+    """Extract a cluster name from a resource_key.
+
+    Handles patterns like:
+      - "ns-rosa-hcp/foo-rosa-hcp-network" -> "foo-rosa-hcp"
+      - "ROSANetwork" -> ""
+      - "iam/instance-profiles/cmb-worker-preflight" -> "cmb"
+      - "configure-capa-environment : Create..." -> ""
+    """
+    if not resource_key:
+        return ""
+    # namespace/resource pattern  e.g. "ns-rosa-hcp/foo-rosa-hcp-network"
+    if "/" in resource_key:
+        parts = resource_key.split("/")
+        resource = parts[-1]
+        # Strip common suffixes to get the cluster prefix
+        for suffix in ("-network", "-roles", "-rosa-network-stack"):
+            if resource.endswith(suffix):
+                return resource[: -len(suffix)]
+        return resource
+    # Bare resource type names like "ROSANetwork", "ROSARoleConfig"
+    if resource_key.startswith("ROSA"):
+        return ""
+    return ""
+
+
+def _enrich_pipeline_event(evt: dict) -> dict:
+    """Ensure a pipeline_activity event has all fields the frontend expects."""
+    # state: derive from success field if not already set
+    if "state" not in evt or not evt["state"]:
+        if "success" in evt:
+            evt["state"] = "resolved" if evt["success"] else "failed"
+        elif evt.get("remediation_result"):
+            evt["state"] = "resolved"
+        else:
+            evt["state"] = "detected"
+
+    # duration: format from duration_seconds if not already set
+    if "duration" not in evt or not evt["duration"]:
+        if "duration_seconds" in evt and evt["duration_seconds"] is not None:
+            evt["duration"] = _format_duration(evt["duration_seconds"])
+        else:
+            evt["duration"] = "—"
+
+    # cluster: extract from resource_key if not already set
+    if "cluster" not in evt or not evt["cluster"]:
+        evt["cluster"] = _extract_cluster_name(evt.get("resource_key", ""))
+
+    # agent: infer from context if not already set
+    if "agent" not in evt or not evt["agent"]:
+        if evt.get("remediation_result") or evt.get("recommended_fix"):
+            evt["agent"] = "remediation"
+        elif evt.get("diagnosis") or evt.get("root_cause"):
+            evt["agent"] = "diagnostic"
+        else:
+            evt["agent"] = "monitor"
+
+    # confidence: normalise field name (outcomes use confidence_used)
+    if "confidence" not in evt and "confidence_used" in evt:
+        evt["confidence"] = evt["confidence_used"]
+
+    return evt
+
+
 # ── Endpoints ───────────────────────────────────────────────────────────
 
 @router.get("/api/agents/dashboard")
@@ -223,29 +324,95 @@ async def get_agent_dashboard(since: str = "", operation_type: str = ""):
                 if session.get(agent_name):
                     agent_statuses[agent_name]["status"] = "active"
 
-    # Collect pipeline activity from all jobs (newest first, max 50)
+    # Collect pipeline activity from in-memory job events
     all_events = []
+    # Track dedup keys so historical outcomes don't duplicate in-memory events
+    _seen_keys = set()
+
     for jid, job in jobs.items():
         for event in job.get("agent_events", []):
             evt = dict(event)
             evt["job_id"] = jid
-            # Determine state from tracked issues if available
+            # Override state from live tracked issues when session is active
             session = ai_agent_sessions.get(jid)
             if session and session.get("monitor"):
                 tracking_key = f"{event.get('issue_type', '')}:{event.get('resource_key', '')}"
                 tracked = session["monitor"]._tracked_issues.get(tracking_key)
                 if tracked:
                     evt["state"] = tracked.state.value
+            _enrich_pipeline_event(evt)
             all_events.append(evt)
-    all_events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
-    pipeline_activity = all_events[:50]
+            _seen_keys.add(
+                f"{evt.get('issue_type', '')}:{evt.get('resource_key', '')}:{evt.get('timestamp', '')[:19]}"
+            )
 
-    # State distribution from outcomes
+    # Inject live tracked issues from active agent sessions so the frontend
+    # can display in-progress pipeline activity (detected/diagnosing/remediating)
+    # even before the callback produces a completed agent_event.
+    _active_states = {"detected", "diagnosing", "remediating"}
+    _state_to_agent = {
+        "detected": "monitoring",
+        "diagnosing": "diagnostic",
+        "remediating": "remediation",
+    }
+    _existing_keys = set()
+    for evt in all_events:
+        _existing_keys.add(f"{evt.get('job_id', '')}:{evt.get('issue_type', '')}:{evt.get('resource_key', '')}")
+
+    for jid, session in ai_agent_sessions.items():
+        monitor = session.get("monitor")
+        if not monitor:
+            continue
+        for tracking_key, tracked in monitor._tracked_issues.items():
+            state_val = tracked.state.value
+            if state_val not in _active_states:
+                continue
+            evt_key = f"{jid}:{tracked.issue_type}:{tracked.resource_key}"
+            if evt_key in _existing_keys:
+                continue
+            now = datetime.now()
+            detected_dt = datetime.fromtimestamp(tracked.detected_at)
+            elapsed = (now - detected_dt).total_seconds()
+            all_events.append({
+                "type": "issue_detected",
+                "issue_type": tracked.issue_type,
+                "resource_key": tracked.resource_key,
+                "state": state_val,
+                "cluster": _extract_cluster_name(tracked.resource_key) or tracked.resource_key,
+                "agent": _state_to_agent.get(state_val, "monitoring"),
+                "timestamp": detected_dt.isoformat(),
+                "duration": _format_duration(elapsed),
+                "job_id": jid,
+                "diagnosis": "",
+                "fix_applied": "",
+                "remediation_result": "",
+                "confidence": 0,
+                "live": True,
+            })
+
+    # Merge historical outcomes from remediation_outcomes.json so the
+    # timeline is populated even after server restarts when jobs dict is empty.
     outcomes = _load_agent_kb_file("remediation_outcomes.json")
     if since:
         outcomes = [o for o in outcomes if o.get("timestamp", "") >= since]
     if operation_type:
         outcomes = [o for o in outcomes if o.get("operation_type", "") == operation_type]
+
+    for outcome in outcomes:
+        dedup_key = (
+            f"{outcome.get('issue_type', '')}:{outcome.get('resource_key', '')}"
+            f":{outcome.get('timestamp', '')[:19]}"
+        )
+        if dedup_key in _seen_keys:
+            continue
+        evt = dict(outcome)
+        evt["type"] = "remediation_outcome"
+        _enrich_pipeline_event(evt)
+        all_events.append(evt)
+
+    all_events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+    pipeline_activity = all_events[:50]
+
     state_dist = {"detected": 0, "diagnosing": 0, "remediating": 0, "resolved": 0, "failed": 0}
     for o in outcomes:
         if o.get("success"):

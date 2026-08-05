@@ -59,6 +59,7 @@ const AgentDashboard = () => {
   const [knowledgeSortKey, setKnowledgeSortKey] = useState('hits');
   const [knowledgeSortDir, setKnowledgeSortDir] = useState('desc');
   const [knowledgeFilter, setKnowledgeFilter] = useState('all');
+  const [timelineSort, setTimelineSort] = useState('newest');
 
   const DATE_RANGES = [
     { key: '1h', label: '1h', hours: 1 },
@@ -248,11 +249,11 @@ const AgentDashboard = () => {
                     <div className="flex items-center gap-2.5 px-3.5 py-1.5 bg-white border border-gray-200 rounded-md"
                       style={{ borderLeft: `3px solid ${stage.color}` }}>
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: stage.color }}>{stage.label}</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: stage.color }}>{stage.label}</p>
                         <p className="text-xs text-[#879596]">{stage.unit}</p>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-lg font-bold text-[#232F3E]">{stage.value}</span>
+                        <span className="text-2xl font-bold text-[#232F3E]">{stage.value}</span>
                         {statuses[stage.key]?.status === 'active' && (
                           <span className="agent-dot-active"
                             style={{ width: 6, height: 6, backgroundColor: '#22c55e', display: 'inline-block' }} />
@@ -271,8 +272,8 @@ const AgentDashboard = () => {
                     color: (m?.success_rate || 0) >= 80 ? '#059669' : (m?.success_rate || 0) >= 50 ? '#d97706' : '#dc2626' },
                 ].map(tile => (
                   <div key={tile.label} className="bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5 text-center">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[#879596]">{tile.label}</p>
-                    <p className="text-sm font-bold" style={{ color: tile.color }}>{tile.value}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-[#879596]">{tile.label}</p>
+                    <p className="text-lg font-bold" style={{ color: tile.color }}>{tile.value}</p>
                   </div>
                 ))}
               </div>
@@ -306,10 +307,10 @@ const AgentDashboard = () => {
             <div className="flex flex-col" style={{ flex: '1.2 1 0', minHeight: 0 }}>
               <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden flex flex-col h-full">
                 <div className="px-4 py-2.5 border-b border-gray-200 bg-gray-50/50 flex items-center justify-between shrink-0">
-                  <span className="text-sm font-bold uppercase tracking-wider" style={{ color: '#232F3E' }}>Activity & Remediation</span>
+                  <span className="text-base font-bold uppercase tracking-wider" style={{ color: '#232F3E' }}>Activity & Remediation</span>
                   <div className="flex items-center gap-1.5">
                     {Object.entries(STATE_COLORS).map(([key, color]) => (
-                      <span key={key} className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border"
+                      <span key={key} className="inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded-full border"
                         style={{ color, borderColor: `${color}40`, backgroundColor: `${color}0A` }}>
                         <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
                         {dist?.[key] || 0}
@@ -326,8 +327,8 @@ const AgentDashboard = () => {
                     { label: 'Success Rate', value: `${m?.success_rate || 0}%`, color: confidenceColor(m?.success_rate || 0) },
                   ].map(tile => (
                     <div key={tile.label} className="bg-gray-50 border border-gray-200 rounded-md px-3 py-1.5 text-center flex-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5" style={{ color: '#879596' }}>{tile.label}</p>
-                      <p className="text-lg font-bold" style={{ color: tile.color }}>{tile.value}</p>
+                      <p className="text-xs font-semibold uppercase tracking-wider mb-0.5" style={{ color: '#879596' }}>{tile.label}</p>
+                      <p className="text-2xl font-bold" style={{ color: tile.color }}>{tile.value}</p>
                     </div>
                   ))}
                 </div>
@@ -339,19 +340,19 @@ const AgentDashboard = () => {
                       return (
                         <div className="flex items-center gap-2 py-1.5 px-2 rounded-md bg-gray-50 border border-gray-100">
                           <span className="w-2 h-2 rounded-full bg-gray-300 shrink-0" />
-                          <span className="text-[11px]" style={{ color: '#879596' }}>No active issues — pipeline idle</span>
+                          <span className="text-xs" style={{ color: '#879596' }}>No active issues — pipeline idle</span>
                         </div>
                       );
                     }
                     return (
                       <div className="space-y-1.5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#545B64' }}>Active Issues</span>
+                        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#545B64' }}>Active Issues</span>
                         {activeEvents.map((e, i) => {
                           const stateFlow = ['detected', 'diagnosing', e.state].filter((v, idx, arr) => arr.indexOf(v) === idx);
                           return (
                             <div key={`active-${i}`} className="flex items-center gap-2 py-1.5 px-2 rounded-md bg-amber-50/50 border border-amber-100">
                               <span className="w-2 h-2 rounded-full bg-green-400 shrink-0 agent-dot-active" />
-                              <span className="text-[12px] font-medium truncate" style={{ color: '#232F3E' }}>
+                              <span className="text-sm font-medium truncate" style={{ color: '#232F3E' }}>
                                 {(e.issue_type || '').replace(/_/g, ' ')}
                               </span>
                               <span className="flex items-center gap-0.5 ml-auto shrink-0">
@@ -361,7 +362,7 @@ const AgentDashboard = () => {
                                   return (
                                     <React.Fragment key={si}>
                                       {si > 0 && <ChevronRightIcon className="h-2.5 w-2.5 text-gray-300" />}
-                                      <span className={`text-[10px] ${isCurrent ? 'font-bold' : 'font-medium'} ${flowColor}`}>{st}</span>
+                                      <span className={`text-xs ${isCurrent ? 'font-bold' : 'font-medium'} ${flowColor}`}>{st}</span>
                                     </React.Fragment>
                                   );
                                 })}
@@ -376,50 +377,72 @@ const AgentDashboard = () => {
 
                 <div className="flex-1 overflow-hidden flex flex-col border-t border-gray-200" style={{ minHeight: 0 }}>
                   <div className="px-4 pt-2.5 pb-1.5 shrink-0 flex items-center justify-between">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#545B64' }}>Timeline</span>
-                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                      {Math.min((events || []).length, 20)}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#545B64' }}>Timeline</span>
+                      <span className="text-xs font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                        {Math.min((events || []).length, 20)}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setTimelineSort(prev => prev === 'newest' ? 'oldest' : 'newest')}
+                      className="text-xs font-medium px-2 py-0.5 rounded border border-gray-200 hover:bg-gray-50 transition-colors"
+                      style={{ color: '#545B64' }}>
+                      {timelineSort === 'newest' ? 'Newest first ▼' : 'Oldest first ▲'}
+                    </button>
                   </div>
                   <div className="flex-1 overflow-y-auto px-4 pb-3" style={{ minHeight: 0 }}>
                     {(!events || events.length === 0) ? (
                       <p className="text-xs py-2" style={{ color: '#879596' }}>No pipeline activity recorded</p>
                     ) : (
                       <div className="divide-y divide-gray-100">
-                        {events.slice(0, 20).map((e, i) => {
-                          const actKey = `activity-${i}`;
+                        {[...events]
+                          .sort((a, b) => {
+                            const ta = new Date(a.timestamp || 0).getTime();
+                            const tb = new Date(b.timestamp || 0).getTime();
+                            return timelineSort === 'newest' ? tb - ta : ta - tb;
+                          })
+                          .slice(0, 20).map((e, i) => {
+                          const actKey = `activity-${e.timestamp || ''}-${e.issue_type || ''}-${i}`;
                           const isExp = expandedActivity === actKey;
                           const patternInfo = (patterns || []).find(p => p.type === e.issue_type);
                           const duration = e.duration || (e.state === 'resolved' ? '~2m' : e.state === 'failed' ? '~3m' : '—');
                           const stateFlow = ['detected', 'diagnosing', e.state].filter((v, idx, arr) => arr.indexOf(v) === idx);
                           const dotColor = e.state === 'resolved' ? 'bg-emerald-400' : e.state === 'failed' ? 'bg-red-400' : 'bg-amber-400';
                           const stateBadge = { resolved: 'bg-emerald-50 text-emerald-700 border-emerald-200', failed: 'bg-red-50 text-red-700 border-red-200', remediating: 'bg-amber-50 text-amber-700 border-amber-200', diagnosing: 'bg-blue-50 text-blue-700 border-blue-200', detected: 'bg-gray-50 text-gray-600 border-gray-200' }[e.state] || 'bg-gray-50 text-gray-600 border-gray-200';
+                          const ts = e.timestamp ? new Date(e.timestamp) : null;
+                          const dateStr = ts ? ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+                          const timeStr = ts ? ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
                           return (
-                            <div key={i}>
-                              <div className={`flex items-center gap-2 px-1.5 py-2 cursor-pointer rounded transition-colors ${isExp ? 'bg-blue-50/40' : 'hover:bg-gray-50'}`}
+                            <div key={actKey}>
+                              <div className={`flex items-center gap-2 px-1.5 py-2.5 cursor-pointer rounded transition-colors ${isExp ? 'bg-blue-50/40' : 'hover:bg-gray-50'}`}
                                 onClick={() => setExpandedActivity(isExp ? null : actKey)}>
-                                <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
-                                <span className="text-[12px] font-medium truncate" style={{ color: '#232F3E', flex: 1 }}>
-                                  {(e.issue_type || '').replace(/_/g, ' ')}
-                                </span>
+                                <span className={`w-2.5 h-2.5 rounded-full ${dotColor} shrink-0`} />
+                                <div className="min-w-0 flex-1">
+                                  <span className="text-sm font-medium truncate block" style={{ color: '#232F3E' }}>
+                                    {(e.issue_type || '').replace(/_/g, ' ')}
+                                  </span>
+                                  {ts && (
+                                    <span className="text-xs" style={{ color: '#879596' }}>{dateStr} {timeStr}</span>
+                                  )}
+                                </div>
                                 <span className="flex items-center gap-0.5 shrink-0">
                                   {stateFlow.map((st, si) => {
                                     const flowColor = { resolved: 'text-emerald-600', failed: 'text-red-600', remediating: 'text-amber-600', diagnosing: 'text-blue-600', detected: 'text-gray-500' }[st] || 'text-gray-500';
                                     return (
                                       <React.Fragment key={si}>
                                         {si > 0 && <ChevronRightIcon className="h-2.5 w-2.5 text-gray-300" />}
-                                        <span className={`text-[10px] font-medium ${flowColor}`}>{st}</span>
+                                        <span className={`text-xs font-medium ${flowColor}`}>{st}</span>
                                       </React.Fragment>
                                     );
                                   })}
                                 </span>
-                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${stateBadge}`}>{e.state || 'unknown'}</span>
-                                <span className="text-[10px] font-mono shrink-0" style={{ color: '#879596' }}>{duration}</span>
-                                {isExp ? <ChevronDownIcon className="h-3 w-3 text-gray-400 shrink-0" /> : <ChevronRightIcon className="h-3 w-3 text-gray-400 shrink-0" />}
+                                <span className={`text-xs font-medium px-1.5 py-0.5 rounded border shrink-0 ${stateBadge}`}>{e.state || 'unknown'}</span>
+                                <span className="text-xs font-mono shrink-0" style={{ color: '#879596' }}>{duration}</span>
+                                {isExp ? <ChevronDownIcon className="h-3.5 w-3.5 text-gray-400 shrink-0" /> : <ChevronRightIcon className="h-3.5 w-3.5 text-gray-400 shrink-0" />}
                               </div>
                               {isExp && (
                                 <div className="ml-5 mr-1 mb-2 p-3 rounded-md bg-gray-50 border border-gray-100">
-                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                                     <div><span style={{ color: '#879596' }}>State:</span> <span className={`font-bold ${{ resolved: 'text-emerald-700', failed: 'text-red-700', remediating: 'text-amber-700', diagnosing: 'text-blue-700' }[e.state] || 'text-gray-600'}`}>{e.state || 'unknown'}</span></div>
                                     <div><span style={{ color: '#879596' }}>Issue:</span> <span className="font-semibold" style={{ color: '#232F3E' }}>{(e.issue_type || '').replace(/_/g, ' ')}</span></div>
                                     {e.cluster && <div><span style={{ color: '#879596' }}>Cluster:</span> <span className="font-semibold text-blue-600">{e.cluster}</span></div>}
@@ -432,9 +455,9 @@ const AgentDashboard = () => {
                                       </>
                                     )}
                                     <div><span style={{ color: '#879596' }}>Duration:</span> <span className="font-bold" style={{ color: '#232F3E' }}>{duration}</span></div>
+                                    {ts && <div><span style={{ color: '#879596' }}>Time:</span> <span className="font-semibold" style={{ color: '#232F3E' }}>{ts.toLocaleString()}</span></div>}
                                   </div>
-                                  {patternInfo?.description && <p className="text-[11px] mt-2" style={{ color: '#545B64' }}>{patternInfo.description}</p>}
-                                  {e.timestamp && <p className="text-[10px] mt-1" style={{ color: '#879596' }}>{e.timestamp}</p>}
+                                  {patternInfo?.description && <p className="text-xs mt-2" style={{ color: '#545B64' }}>{patternInfo.description}</p>}
                                 </div>
                               )}
                             </div>
@@ -452,22 +475,22 @@ const AgentDashboard = () => {
               <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden flex flex-col h-full">
                 <div className="px-4 py-2.5 border-b border-gray-200 bg-gray-50/50 flex items-center justify-between shrink-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold uppercase tracking-wider" style={{ color: '#232F3E' }}>Agent Knowledge</span>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                    <span className="text-base font-bold uppercase tracking-wider" style={{ color: '#232F3E' }}>Agent Knowledge</span>
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
                       {mergedPatterns?.length || 0}
                     </span>
                   </div>
                   <div className="flex rounded-md overflow-hidden border border-gray-300">
                     <button onClick={() => setKnowledgeFilter('all')}
-                      className={`text-[10px] font-semibold px-2.5 py-0.5 border-none cursor-pointer ${knowledgeFilter === 'all' ? 'bg-blue-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>All</button>
+                      className={`text-xs font-semibold px-2.5 py-0.5 border-none cursor-pointer ${knowledgeFilter === 'all' ? 'bg-blue-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>All</button>
                     <button onClick={() => setKnowledgeFilter('active')}
-                      className={`text-[10px] font-semibold px-2.5 py-0.5 border-none cursor-pointer ${knowledgeFilter === 'active' ? 'bg-blue-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                      className={`text-xs font-semibold px-2.5 py-0.5 border-none cursor-pointer ${knowledgeFilter === 'active' ? 'bg-blue-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
                       style={{ borderLeft: '1px solid #d1d5db' }}>Active</button>
                   </div>
                 </div>
 
                 <div className="shrink-0">
-                  <div className="grid text-[10px] font-semibold uppercase tracking-wider px-2 py-1.5 bg-gray-50 border-b border-gray-200"
+                  <div className="grid text-xs font-semibold uppercase tracking-wider px-2 py-1.5 bg-gray-50 border-b border-gray-200"
                     style={{ color: '#879596', gridTemplateColumns: '1fr 48px 60px 90px 52px' }}>
                     {[
                       { key: 'type', label: 'Pattern' },
@@ -524,34 +547,34 @@ const AgentDashboard = () => {
                             onClick={() => setExpandedKnowledge(isExpanded ? null : p.type)}>
                             <div className="flex items-center gap-1.5 min-w-0">
                               {isExpanded ? <ChevronDownIcon className="h-3 w-3 text-blue-400 shrink-0" /> : <ChevronRightIcon className="h-3 w-3 text-gray-400 shrink-0" />}
-                              <span className="text-[12px] font-medium truncate" style={{ color: '#232F3E' }} title={p.description || p.type}>{(p.type || '').replace(/_/g, ' ')}</span>
+                              <span className="text-sm font-medium truncate" style={{ color: '#232F3E' }} title={p.description || p.type}>{(p.type || '').replace(/_/g, ' ')}</span>
                             </div>
                             <span className="text-xs font-bold" style={{ color: (p.count || 0) > 0 ? '#232F3E' : '#879596' }}>{p.count || 0}</span>
                             <div>
                               {hasWinStreak ? (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">{'↑'}{p.consecutive_successes}W</span>
+                                <span className="text-xs font-bold px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">{'↑'}{p.consecutive_successes}W</span>
                               ) : hasFailStreak ? (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border bg-red-50 text-red-700 border-red-200">{'↓'}{p.consecutive_failures}F</span>
+                                <span className="text-xs font-bold px-1.5 py-0.5 rounded border bg-red-50 text-red-700 border-red-200">{'↓'}{p.consecutive_failures}F</span>
                               ) : (
-                                <span className="text-[10px]" style={{ color: '#879596' }}>--</span>
+                                <span className="text-xs" style={{ color: '#879596' }}>--</span>
                               )}
                             </div>
                             <div className="flex items-center gap-1.5">
                               <div className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
                                 <div className="h-full rounded-full" style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: confidenceColor(pct) }} />
                               </div>
-                              <span className="text-[11px] font-bold w-[28px] text-right" style={{ color: confidenceColor(pct) }}>{pct}%</span>
+                              <span className="text-xs font-bold w-[28px] text-right" style={{ color: confidenceColor(pct) }}>{pct}%</span>
                             </div>
-                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${p.auto_fix ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
+                            <span className={`text-xs font-semibold px-1.5 py-0.5 rounded border ${p.auto_fix ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
                               {p.auto_fix ? 'auto' : 'manual'}
                             </span>
                           </div>
 
                           {isExpanded && (
                             <div className="ml-6 border-l-2 border-blue-300 p-3 mb-2 mr-2">
-                              {p.description && <p className="text-[11px] mb-2.5 leading-relaxed" style={{ color: '#545B64' }}>{p.description}</p>}
-                              {p.pattern && <p className="text-[10px] font-mono mb-2.5 px-2 py-1.5 rounded bg-gray-50 border border-gray-200 break-all" style={{ color: '#545B64' }}>{p.pattern}</p>}
-                              <div className="grid grid-cols-3 gap-x-4 gap-y-2 text-[11px]">
+                              {p.description && <p className="text-xs mb-2.5 leading-relaxed" style={{ color: '#545B64' }}>{p.description}</p>}
+                              {p.pattern && <p className="text-xs font-mono mb-2.5 px-2 py-1.5 rounded bg-gray-50 border border-gray-200 break-all" style={{ color: '#545B64' }}>{p.pattern}</p>}
+                              <div className="grid grid-cols-3 gap-x-4 gap-y-2 text-xs">
                                 <div>
                                   <span className="font-medium" style={{ color: '#879596' }}>Severity</span>
                                   <p className="font-bold" style={{ color: sevColor }}>{p.severity || 'unknown'}</p>
@@ -591,12 +614,12 @@ const AgentDashboard = () => {
                                 </div>
                               </div>
                               {p.adjustment_reason && (
-                                <p className="text-[10px] mt-2.5" style={{ color: '#879596' }}>
+                                <p className="text-xs mt-2.5" style={{ color: '#879596' }}>
                                   Adjustment: {p.adjustment_reason}
                                   {p.last_adjusted && <span className="ml-1">({new Date(p.last_adjusted).toLocaleString()})</span>}
                                 </p>
                               )}
-                              <p className="text-[11px] mt-2 italic" style={{ color: '#879596' }}>
+                              <p className="text-xs mt-2 italic" style={{ color: '#879596' }}>
                                 {pct >= 80 ? 'High confidence — agent reliably resolves this pattern.'
                                   : pct >= 50 ? 'Moderate confidence — still learning, more outcomes needed.'
                                   : pct > 0 ? 'Low confidence — recent failures reduced trust. Will re-diagnose before remediating.'

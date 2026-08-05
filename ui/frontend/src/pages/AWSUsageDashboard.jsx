@@ -118,10 +118,32 @@ const AWSUsageDashboard = ({ inline = false }) => {
   const [chartResources, setChartResources] = useState(new Set());
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const [activeFilter, setActiveFilter] = useState(null);
   const countdownRef = useRef(null);
   const autoRefreshRef = useRef(null);
 
+  const STAT_RESOURCE_MAP = {
+    'Est. Clusters': ['nat_gateways'],
+    'Compute': ['ec2_instances'],
+    'Network': ['vpcs', 'security_groups', 'nat_gateways'],
+    'Storage': ['ebs_volumes', 's3_buckets'],
+    'IAM': ['iam_roles', 'instance_profiles'],
+    'Infra Stacks': ['cloudformation_stacks'],
+  };
+
   const resourceConfig = [...billedResources, ...freeResources];
+
+  // Pre-select top 3 resources by count when usage data first loads
+  useEffect(() => {
+    if (!usage || chartResources.size > 0) return;
+    const entries = Object.entries(usage)
+      .filter(([, v]) => typeof v === 'number' && v > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+    if (entries.length > 0) {
+      setChartResources(new Set(entries.map(([k]) => k)));
+    }
+  }, [usage]);
 
   useEffect(() => {
     const fetchTrend = async () => {
@@ -451,12 +473,12 @@ const AWSUsageDashboard = ({ inline = false }) => {
                       <span className="font-medium text-[#0073BB]">{resource.name || 'Unnamed'}</span>
                     </td>
                     <td className="px-4 py-2">
-                      <span className="text-[#545B64] font-mono text-[11px]">{resource.id || '-'}</span>
+                      <span className="text-[#545B64] font-mono text-xs">{resource.id || '-'}</span>
                     </td>
                     {hasState && (
                       <td className="px-4 py-2">
                         {resource.state && (
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium ${
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
                             resource.state === 'available' || resource.state === 'running' || resource.state === 'in-use'
                               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                               : 'bg-gray-50 text-gray-600 border border-gray-200'
@@ -475,16 +497,16 @@ const AWSUsageDashboard = ({ inline = false }) => {
                     )}
                     {hasVpc && (
                       <td className="px-4 py-2">
-                        <span className="text-[#545B64] font-mono text-[11px]">{resource.vpc_name || (resource.vpc_id ? resource.vpc_id.slice(-12) : '-')}</span>
+                        <span className="text-[#545B64] font-mono text-xs">{resource.vpc_name || (resource.vpc_id ? resource.vpc_id.slice(-12) : '-')}</span>
                       </td>
                     )}
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {clusterTag && (
-                          <span className="inline-block px-1.5 py-0.5 bg-[#E8F4FD] text-[#0073BB] rounded text-[11px] font-medium border border-[#D4E8F7]">{clusterTag}</span>
+                          <span className="inline-block px-1.5 py-0.5 bg-[#E8F4FD] text-[#0073BB] rounded text-xs font-medium border border-[#D4E8F7]">{clusterTag}</span>
                         )}
                         {creator && (
-                          <span className="inline-block px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[11px] font-medium border border-purple-200">{creator}</span>
+                          <span className="inline-block px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-xs font-medium border border-purple-200">{creator}</span>
                         )}
                         {tagCount > 0 && !clusterTag && !creator && (
                           <span className="text-[#545B64]">{tagCount} tags</span>
@@ -528,9 +550,11 @@ const AWSUsageDashboard = ({ inline = false }) => {
     const sparkColor = RESOURCE_COLORS[resource.key] || '#0073BB';
 
     const isEmpty = !isError && (count === 0 || count === undefined);
+    const matchesFilter = activeFilter ? (STAT_RESOURCE_MAP[activeFilter] || []).includes(resource.key) : true;
+    const isDimmed = activeFilter && !matchesFilter;
 
     return (
-      <div className={`rounded-lg border transition-all ${isExpanded ? 'bg-white border-[#0073BB] shadow-md col-span-full' : isEmpty ? 'bg-gray-50/50 border-gray-200 opacity-60 hover:opacity-100 hover:bg-white' : 'bg-white border-gray-200 hover:shadow-sm'} ${!isExpanded ? 'hover:border-l-[#0073BB] hover:border-l-[3px]' : ''}`}>
+      <div className={`rounded-lg border transition-all ${isDimmed ? 'opacity-30 pointer-events-none' : ''} ${isExpanded ? 'bg-white border-[#0073BB] shadow-md col-span-full' : isEmpty ? 'bg-gray-50/50 border-gray-200 opacity-60 hover:opacity-100 hover:bg-white' : 'bg-white border-gray-200 hover:shadow-sm'} ${!isExpanded ? 'hover:border-l-[#0073BB] hover:border-l-[3px]' : ''}`}>
         <div
           onClick={() => count > 0 && !isError && toggleResourceDetails(resource.key)}
           className={`p-4 ${count > 0 && !isError ? 'cursor-pointer' : ''} group`}
@@ -587,7 +611,7 @@ const AWSUsageDashboard = ({ inline = false }) => {
           <div className="flex items-center justify-between mt-1.5">
             <div className="flex items-center gap-2">
               <Sparkline data={trendData} dataKey={resource.key} color={sparkColor} width={64} height={20} />
-              <span className="text-[11px] text-[#879596]">{resource.description}</span>
+              <span className="text-xs text-[#879596]">{resource.description}</span>
             </div>
             <div className="flex items-center gap-2">
               <a
@@ -595,17 +619,17 @@ const AWSUsageDashboard = ({ inline = false }) => {
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
-                className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-[#879596] hover:border-[#0073BB] hover:text-[#0073BB] transition-all opacity-0 group-hover:opacity-100"
+                className="text-xs px-1.5 py-0.5 rounded border border-gray-200 text-[#879596] hover:border-[#0073BB] hover:text-[#0073BB] transition-all opacity-0 group-hover:opacity-100"
               >
                 AWS ↗
               </a>
               <button
                 onClick={(e) => { e.stopPropagation(); toggleChartResource(resource.key); }}
-                className={`text-[10px] px-1.5 py-0.5 rounded border transition-all ${isCharted ? 'border-[#0073BB] bg-[#E8F4FD] text-[#0073BB] font-semibold' : 'border-gray-200 text-[#879596] hover:border-[#0073BB] hover:text-[#0073BB]'}`}
+                className={`text-xs px-1.5 py-0.5 rounded border transition-all ${isCharted ? 'border-[#0073BB] bg-[#E8F4FD] text-[#0073BB] font-semibold' : 'border-gray-200 text-[#879596] hover:border-[#0073BB] hover:text-[#0073BB]'}`}
               >
                 {isCharted ? 'Charted' : 'Chart'}
               </button>
-              <span className={`text-[11px] font-semibold ${usagePct >= 90 ? 'text-red-600' : usagePct >= 70 ? 'text-amber-600' : 'text-[#879596]'}`}>{usagePct}%</span>
+              <span className={`text-xs font-semibold ${usagePct >= 90 ? 'text-red-600' : usagePct >= 70 ? 'text-amber-600' : 'text-[#879596]'}`}>{usagePct}%</span>
             </div>
           </div>
         </div>
@@ -668,7 +692,18 @@ const AWSUsageDashboard = ({ inline = false }) => {
         <>
           {/* Summary + Resource Metric Cards */}
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-[#232F3E] uppercase tracking-wide">Service Quotas & Usage</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-sm font-semibold text-[#232F3E] uppercase tracking-wide">Service Quotas & Usage</h2>
+              {activeFilter && (
+                <button
+                  onClick={() => setActiveFilter(null)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#E8F4FD] text-[#0073BB] border border-[#D4E8F7] hover:bg-[#D4E8F7] transition-colors"
+                >
+                  Filtered: {activeFilter}
+                  <span className="text-[#0073BB]/60 hover:text-[#0073BB] ml-0.5">&times;</span>
+                </button>
+              )}
+            </div>
             <p className="text-xs text-[#879596]">
               {resourceConfig.length} services monitored · <span className="text-[#232F3E] font-medium">{resourceConfig.filter(r => usage[r.key] > 0 && usage[r.key] !== 'error').length} with active resources</span>
             </p>
@@ -682,13 +717,45 @@ const AWSUsageDashboard = ({ inline = false }) => {
               { label: 'Storage', value: (usage.ebs_volumes || 0) + (usage.s3_buckets || 0), color: '#c23127', bg: '#FEECEB' },
               { label: 'IAM', value: (usage.iam_roles || 0) + (usage.instance_profiles || 0), color: '#7d2105', bg: '#FBE9E7' },
               { label: 'Infra Stacks', value: usage.cloudformation_stacks || 0, color: '#0073bb', bg: '#E8F4FD' },
-            ].map((stat) => (
-              <div key={stat.label} className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 text-center"
-                style={{ borderTop: `3px solid ${stat.color}` }}>
-                <p className="text-xl font-bold" style={{ color: stat.color }}>{stat.value}</p>
-                <p className="text-[10px] uppercase tracking-wider font-semibold mt-0.5" style={{ color: '#879596' }}>{stat.label}</p>
+            ].map((stat) => {
+              const isActive = activeFilter === stat.label;
+              const hasFilter = activeFilter !== null;
+              return (
+                <div
+                  key={stat.label}
+                  onClick={() => setActiveFilter(prev => prev === stat.label ? null : stat.label)}
+                  className={`bg-white border rounded-lg px-3 py-2.5 text-center cursor-pointer transition-all ${
+                    isActive
+                      ? 'border-transparent shadow-md ring-2'
+                      : hasFilter
+                        ? 'border-gray-200 opacity-50 hover:opacity-75'
+                        : 'border-gray-200 hover:shadow-sm'
+                  }`}
+                  style={{
+                    borderTop: `3px solid ${stat.color}`,
+                    ...(isActive ? { ringColor: stat.color, boxShadow: `0 0 0 2px ${stat.color}33, 0 4px 6px -1px rgba(0,0,0,0.1)` } : {}),
+                  }}
+                >
+                  <p className="text-xl font-bold" style={{ color: stat.color }}>{stat.value}</p>
+                  <p className="text-xs uppercase tracking-wider font-semibold mt-0.5" style={{ color: '#879596' }}>{stat.label}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Trend Chart — always visible between Quick Stats and card grid */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4 mb-5">
+            {chartResources.size > 0 ? (
+              <AWSUsageTrend
+                selectedResources={chartResources}
+                onToggleResource={toggleChartResource}
+                height={200}
+              />
+            ) : (
+              <div className="flex items-center justify-center" style={{ height: 200 }}>
+                <p className="text-sm text-[#879596]">Select resources to chart using the <span className="font-medium text-[#545B64]">Chart</span> button on resource cards below</p>
               </div>
-            ))}
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -714,10 +781,10 @@ const AWSUsageDashboard = ({ inline = false }) => {
                     />
                   ))}
                   {remainder > 0 && (
-                    <div className="rounded-lg border border-dashed border-gray-300 bg-gradient-to-br from-gray-50 to-white p-4 flex flex-col justify-center items-center text-center">
+                    <div className={`rounded-lg border border-dashed border-gray-300 bg-gradient-to-br from-gray-50 to-white p-4 flex flex-col justify-center items-center text-center transition-all ${activeFilter ? 'opacity-30 pointer-events-none' : ''}`}>
                       <p className="text-3xl font-bold text-[#232F3E]">{totalResources}</p>
-                      <p className="text-[10px] uppercase tracking-wider text-[#879596] font-semibold mt-1">Total Resources</p>
-                      <p className="text-[11px] text-[#545B64] mt-2">{activeServices} of {sorted.length} services active</p>
+                      <p className="text-xs uppercase tracking-wider text-[#879596] font-semibold mt-1">Total Resources</p>
+                      <p className="text-xs text-[#545B64] mt-2">{activeServices} of {sorted.length} services active</p>
                       <div className="flex gap-1 mt-2">
                         {sorted.map(r => {
                           const count = usage[r.key] || 0;
@@ -732,15 +799,6 @@ const AWSUsageDashboard = ({ inline = false }) => {
             })()}
           </div>
 
-          {/* Trend Chart — secondary, shows selected resources */}
-          {chartResources.size > 0 && (
-            <div className="bg-white border border-gray-200 rounded-lg p-4 mt-6">
-              <AWSUsageTrend
-                selectedResources={chartResources}
-                onToggleResource={toggleChartResource}
-              />
-            </div>
-          )}
         </>
       )}
     </div>
@@ -861,15 +919,15 @@ const AWSUsageDashboard = ({ inline = false }) => {
               <div className="grid grid-cols-12 gap-4 items-center">
                 {/* Cost + Health Summary */}
                 <div className="col-span-3 bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-lg p-4">
-                  <p className="text-[10px] uppercase tracking-wider text-emerald-600 font-semibold mb-1">Monthly Cost</p>
+                  <p className="text-xs uppercase tracking-wider text-emerald-600 font-semibold mb-1">Monthly Cost</p>
                   <p className="text-3xl font-bold" style={{ color: '#059669' }}>
                     ${totalMonthlyCost.toFixed(2)}
                   </p>
                   <div className="flex gap-2 mt-2">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-[#FFF3E0] text-[#FF9900] border border-[#FFE0B2]">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#FFF3E0] text-[#FF9900] border border-[#FFE0B2]">
                       {billedCount} billed
                     </span>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-[#545B64] border border-gray-200">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-[#545B64] border border-gray-200">
                       {freeCount} free
                     </span>
                   </div>
@@ -881,24 +939,24 @@ const AWSUsageDashboard = ({ inline = false }) => {
                   const variableCount = variableResources.length;
                   return (
                     <div className="col-span-6">
-                      <p className="text-[10px] uppercase tracking-wider text-[#879596] font-semibold mb-2">Cost Breakdown</p>
+                      <p className="text-xs uppercase tracking-wider text-[#879596] font-semibold mb-2">Cost Breakdown</p>
                       <div className="grid grid-cols-3 gap-2">
                         {costDrivers.map(r => (
                           <div key={r.key} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 flex items-center gap-2.5">
                             <ServiceIcon resourceKey={r.key} size={18} />
                             <div className="min-w-0">
                               <p className="text-xs font-semibold text-[#232F3E] truncate">{r.label}</p>
-                              <p className="text-[11px] text-[#879596]">
+                              <p className="text-xs text-[#879596]">
                                 {usage[r.key]} x ${r.costPerMonth}
                               </p>
-                              <p className="text-sm font-bold" style={{ color: '#FF9900' }}>${r.totalCost.toFixed(2)}<span className="text-[10px] font-normal text-[#879596]">/mo</span></p>
+                              <p className="text-sm font-bold" style={{ color: '#FF9900' }}>${r.totalCost.toFixed(2)}<span className="text-xs font-normal text-[#879596]">/mo</span></p>
                             </div>
                           </div>
                         ))}
                         {costDrivers.length < 3 && (
                           <div className="bg-gradient-to-br from-amber-50 to-white border border-amber-200 rounded-lg px-3 py-2.5">
                             <p className="text-xs font-semibold text-[#232F3E]">Variable Costs</p>
-                            <p className="text-[11px] text-[#879596] mt-0.5">
+                            <p className="text-xs text-[#879596] mt-0.5">
                               {variableCount} service{variableCount !== 1 ? 's' : ''} (EC2, EBS, LB, S3)
                             </p>
                             <p className="text-sm font-medium mt-0.5" style={{ color: '#d97706' }}>Usage-based pricing</p>
@@ -911,7 +969,7 @@ const AWSUsageDashboard = ({ inline = false }) => {
 
                 {/* Resource Health */}
                 <div className="col-span-3 bg-gray-50 border border-gray-200 rounded-lg p-4">
-                  <p className="text-[10px] uppercase tracking-wider text-[#879596] font-semibold mb-2">Resource Health</p>
+                  <p className="text-xs uppercase tracking-wider text-[#879596] font-semibold mb-2">Resource Health</p>
                   {quotaTotal > 0 ? (
                     <>
                       <div className="flex w-full h-3 rounded-full overflow-hidden bg-gray-200">
@@ -920,16 +978,16 @@ const AWSUsageDashboard = ({ inline = false }) => {
                         {quotaBuckets.red > 0 && <div className="bg-red-500 transition-all" style={{ width: `${(quotaBuckets.red / quotaTotal) * 100}%` }} />}
                       </div>
                       <div className="flex items-center gap-3 mt-1.5 mb-2">
-                        <span className="flex items-center gap-1 text-[10px] font-medium text-gray-600">
+                        <span className="flex items-center gap-1 text-xs font-medium text-gray-600">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{quotaBuckets.green} ok
                         </span>
                         {quotaBuckets.amber > 0 && (
-                          <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600">
+                          <span className="flex items-center gap-1 text-xs font-semibold text-amber-600">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />{quotaBuckets.amber} warn
                           </span>
                         )}
                         {quotaBuckets.red > 0 && (
-                          <span className="flex items-center gap-1 text-[10px] font-bold text-red-600">
+                          <span className="flex items-center gap-1 text-xs font-bold text-red-600">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-500" />{quotaBuckets.red} critical
                           </span>
                         )}
@@ -944,18 +1002,18 @@ const AWSUsageDashboard = ({ inline = false }) => {
                             const barColor = pct >= 80 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#22c55e';
                             return (
                               <div key={r.key} className="flex items-center gap-2">
-                                <span className="text-[10px] w-[60px] truncate" style={{ color: '#545B64' }}>{r.label?.split(' ')[0]}</span>
+                                <span className="text-xs w-[60px] truncate" style={{ color: '#545B64' }}>{r.label?.split(' ')[0]}</span>
                                 <div className="flex-1 h-1.5 rounded-full bg-gray-200 overflow-hidden">
                                   <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: barColor }} />
                                 </div>
-                                <span className="text-[10px] font-semibold w-[30px] text-right" style={{ color: barColor }}>{pct}%</span>
+                                <span className="text-xs font-semibold w-[30px] text-right" style={{ color: barColor }}>{pct}%</span>
                               </div>
                             );
                           })}
                       </div>
                     </>
                   ) : (
-                    <p className="text-[11px] text-[#879596]">No quota data</p>
+                    <p className="text-xs text-[#879596]">No quota data</p>
                   )}
                 </div>
               </div>
