@@ -56,6 +56,7 @@ const CapaSidebar = ({
   environment = 'mce' // 'mce' or 'minikube'
 }) => {
   const [isRecentTasksExpanded, setIsRecentTasksExpanded] = useState(true);
+  const [expandedSidebar, setExpandedSidebar] = useState(null);
   const recentOps = useRecentOperationsContext();
   const apiStatus = useApiStatusContext();
 
@@ -133,19 +134,6 @@ const CapaSidebar = ({
       label: 'CLUSTERS',
       items: [
         {
-          id: 'workflows',
-          label: 'Workflows',
-          icon: <QueueListIcon className="h-5 w-5" />,
-          onClick: onWorkflowsClick
-        },
-        {
-          id: 'orchestrator',
-          label: 'Workflow Orchestrator',
-          icon: <BoltIcon className="h-5 w-5" />,
-          onClick: onOrchestratorClick,
-          showInEnvironments: ['mce']
-        },
-        {
           id: 'rosa-hcp-clusters',
           label: 'ROSA HCP Clusters',
           icon: <CloudIcon className="h-5 w-5" />,
@@ -158,11 +146,14 @@ const CapaSidebar = ({
           onClick: onProvisionClick
         },
         {
-          id: 'cluster-actions',
-          label: 'Cluster Actions',
-          icon: <BoltIcon className="h-5 w-5" />,
-          onClick: onClusterActionsClick,
-          showInEnvironments: ['mce']
+          id: 'workflows',
+          label: 'Workflows',
+          icon: <QueueListIcon className="h-5 w-5" />,
+          onClick: onWorkflowsClick,
+          subItems: [
+            { id: 'workflow-builder', label: 'Workflow Builder', onClick: onWorkflowsClick },
+            { id: 'workflow-orchestrator', label: 'Workflow Orchestrator', onClick: onOrchestratorClick },
+          ],
         },
       ],
     },
@@ -279,28 +270,54 @@ const CapaSidebar = ({
                   {group.label}
                 </span>
               </div>
-              {group.items.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    if (typeof item.onClick === 'function') item.onClick();
-                  }}
-                  className={`
-                    w-full flex items-center gap-3 px-4 py-2 text-left text-sm
-                    transition-all duration-150 ease-in-out
-                    ${activeSection === item.id
-                      ? 'bg-blue-50 text-blue-700 border-l-4 border-blue-500 font-semibold'
-                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                    }
-                  `}
-                >
-                  <span className={activeSection === item.id
-                    ? 'text-blue-500' : 'text-gray-400'}>
-                    {item.icon}
-                  </span>
-                  <span className="flex-1">{item.label}</span>
-                </button>
-              ))}
+              {group.items.map((item) => {
+                const isActive = activeSection === item.id || (item.subItems && item.subItems.some(s => activeSection === s.id));
+                return (
+                  <div key={item.id}>
+                    <button
+                      onClick={() => {
+                        if (item.subItems) {
+                          setExpandedSidebar(prev => prev === item.id ? null : item.id);
+                        }
+                        if (typeof item.onClick === 'function') item.onClick();
+                      }}
+                      className={`
+                        w-full flex items-center gap-3 px-4 py-2 text-left text-sm
+                        transition-all duration-150 ease-in-out
+                        ${isActive
+                          ? 'bg-blue-50 text-blue-700 border-l-4 border-blue-500 font-semibold'
+                          : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                        }
+                      `}
+                    >
+                      <span className={isActive ? 'text-blue-500' : 'text-gray-400'}>
+                        {item.icon}
+                      </span>
+                      <span className="flex-1">{item.label}</span>
+                    </button>
+                    {item.subItems && (isActive || expandedSidebar === item.id) && (
+                      <div className="ml-8 border-l border-gray-200">
+                        {item.subItems.map(sub => (
+                          <button
+                            key={sub.id}
+                            onClick={() => { if (typeof sub.onClick === 'function') sub.onClick(); }}
+                            className={`
+                              w-full flex items-center gap-2 pl-3 pr-4 py-1.5 text-left text-xs
+                              transition-all duration-150 ease-in-out
+                              ${activeSection === sub.id
+                                ? 'text-blue-700 font-semibold'
+                                : 'text-gray-500 hover:text-gray-900'
+                              }
+                            `}
+                          >
+                            {sub.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ))}
         </nav>
