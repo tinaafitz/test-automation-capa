@@ -673,21 +673,42 @@ const AWSUsageDashboard = ({ inline = false }) => {
               {resourceConfig.length} services monitored · <span className="text-[#232F3E] font-medium">{resourceConfig.filter(r => usage[r.key] > 0 && usage[r.key] !== 'error').length} with active resources</span>
             </p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[...resourceConfig].sort((a, b) => {
-              const aCount = usage[a.key] || 0;
-              const bCount = usage[b.key] || 0;
-              const aActive = aCount > 0 && aCount !== 'error' ? 1 : 0;
-              const bActive = bCount > 0 && bCount !== 'error' ? 1 : 0;
-              if (aActive !== bActive) return bActive - aActive;
-              return 0;
-            }).map((resource) => (
-              <MetricCard
-                key={resource.key}
-                resource={resource}
-                showCost={billedResources.some(r => r.key === resource.key)}
-              />
+          {/* Quick Stats Row */}
+          <div className="grid grid-cols-6 gap-2.5 mb-5">
+            {[
+              { label: 'Est. Clusters', value: Math.round((usage.nat_gateways || 0) / 2), color: '#0073bb', bg: '#E8F4FD' },
+              { label: 'Compute', value: usage.ec2_instances || 0, color: '#1b660f', bg: '#E9F5E9' },
+              { label: 'Network', value: (usage.vpcs || 0) + (usage.security_groups || 0) + (usage.nat_gateways || 0), color: '#8c6800', bg: '#FFF8E1' },
+              { label: 'Storage', value: (usage.ebs_volumes || 0) + (usage.s3_buckets || 0), color: '#c23127', bg: '#FEECEB' },
+              { label: 'IAM', value: (usage.iam_roles || 0) + (usage.instance_profiles || 0), color: '#7d2105', bg: '#FBE9E7' },
+              { label: 'Infra Stacks', value: usage.cloudformation_stacks || 0, color: '#0073bb', bg: '#E8F4FD' },
+            ].map((stat) => (
+              <div key={stat.label} className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 text-center"
+                style={{ borderTop: `3px solid ${stat.color}` }}>
+                <p className="text-xl font-bold" style={{ color: stat.color }}>{stat.value}</p>
+                <p className="text-[10px] uppercase tracking-wider font-semibold mt-0.5" style={{ color: '#879596' }}>{stat.label}</p>
+              </div>
             ))}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {(() => {
+              const sorted = [...resourceConfig].sort((a, b) => {
+                const aCount = usage[a.key] || 0;
+                const bCount = usage[b.key] || 0;
+                const aActive = aCount > 0 && aCount !== 'error' ? 1 : 0;
+                const bActive = bCount > 0 && bCount !== 'error' ? 1 : 0;
+                if (aActive !== bActive) return bActive - aActive;
+                return 0;
+              });
+              return sorted.map((resource) => (
+                <MetricCard
+                  key={resource.key}
+                  resource={resource}
+                  showCost={billedResources.some(r => r.key === resource.key)}
+                />
+              ));
+            })()}
           </div>
 
           {/* Trend Chart — secondary, shows selected resources */}
@@ -786,6 +807,114 @@ const AWSUsageDashboard = ({ inline = false }) => {
             <span className="font-medium text-[#232F3E]">AWS Resource Usage</span>
           </div>
         </div>
+
+        {/* Cost & Health Summary Strip */}
+        {usage && (() => {
+          const totalMonthlyCost = billedResources.reduce(
+            (sum, r) => sum + (r.costPerMonth && usage?.[r.key] && usage[r.key] !== 'error' ? r.costPerMonth * usage[r.key] : 0), 0
+          );
+          const billedCount = billedResources.filter(r => usage?.[r.key] > 0 && usage[r.key] !== 'error').length;
+          const freeCount = freeResources.filter(r => usage?.[r.key] > 0 && usage[r.key] !== 'error').length;
+
+          const costDrivers = billedResources
+            .map(r => ({ ...r, totalCost: r.costPerMonth && usage?.[r.key] && usage[r.key] !== 'error' ? r.costPerMonth * usage[r.key] : 0 }))
+            .filter(r => r.totalCost > 0)
+            .sort((a, b) => b.totalCost - a.totalCost)
+            .slice(0, 3);
+
+          const allResources = [...billedResources, ...freeResources];
+          const quotaBuckets = allResources.reduce((acc, r) => {
+            const count = usage?.[r.key];
+            if (!count || count === 'error' || !r.threshold) return acc;
+            const pct = (count / r.threshold) * 100;
+            if (pct >= 80) acc.red++;
+            else if (pct >= 50) acc.amber++;
+            else acc.green++;
+            return acc;
+          }, { green: 0, amber: 0, red: 0 });
+          const quotaTotal = quotaBuckets.green + quotaBuckets.amber + quotaBuckets.red;
+          const atRisk = quotaBuckets.amber + quotaBuckets.red;
+
+          return (
+            <div className="bg-white border-b border-gray-200 px-6 py-4 shrink-0">
+              <div className="grid grid-cols-12 gap-4 items-center">
+                {/* Cost + Health Summary */}
+                <div className="col-span-3 bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-lg p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-emerald-600 font-semibold mb-1">Monthly Cost</p>
+                  <p className="text-3xl font-bold" style={{ color: '#059669' }}>
+                    ${totalMonthlyCost.toFixed(2)}
+                  </p>
+                  <div className="flex gap-2 mt-2">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-[#FFF3E0] text-[#FF9900] border border-[#FFE0B2]">
+                      {billedCount} billed
+                    </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-[#545B64] border border-gray-200">
+                      {freeCount} free
+                    </span>
+                  </div>
+                </div>
+
+                {/* Top Cost Drivers */}
+                <div className="col-span-6">
+                  <p className="text-[10px] uppercase tracking-wider text-[#879596] font-semibold mb-2">Top Cost Drivers</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {costDrivers.length > 0 ? costDrivers.map(r => (
+                      <div key={r.key} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 flex items-center gap-2.5">
+                        <ServiceIcon resourceKey={r.key} size={18} />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-[#232F3E] truncate">{r.label}</p>
+                          <p className="text-[11px] text-[#879596]">
+                            {usage[r.key]} x ${r.costPerMonth}
+                          </p>
+                          <p className="text-sm font-bold" style={{ color: '#FF9900' }}>${r.totalCost.toFixed(2)}<span className="text-[10px] font-normal text-[#879596]">/mo</span></p>
+                        </div>
+                      </div>
+                    )) : (
+                      <p className="text-xs text-[#879596] col-span-3">No billed resources</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Resource Health */}
+                <div className="col-span-3 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-[#879596] font-semibold mb-2">Resource Health</p>
+                  {quotaTotal > 0 ? (
+                    <>
+                      <div className="flex w-full h-3 rounded-full overflow-hidden bg-gray-200">
+                        {quotaBuckets.green > 0 && (
+                          <div className="bg-emerald-500 transition-all" style={{ width: `${(quotaBuckets.green / quotaTotal) * 100}%` }} />
+                        )}
+                        {quotaBuckets.amber > 0 && (
+                          <div className="bg-amber-400 transition-all" style={{ width: `${(quotaBuckets.amber / quotaTotal) * 100}%` }} />
+                        )}
+                        {quotaBuckets.red > 0 && (
+                          <div className="bg-red-500 transition-all" style={{ width: `${(quotaBuckets.red / quotaTotal) * 100}%` }} />
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-2">
+                        <span className="flex items-center gap-1 text-[11px] font-medium text-gray-600">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" />{quotaBuckets.green} ok
+                        </span>
+                        {quotaBuckets.amber > 0 && (
+                          <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-600">
+                            <span className="w-2 h-2 rounded-full bg-amber-400" />{quotaBuckets.amber} warn
+                          </span>
+                        )}
+                        {quotaBuckets.red > 0 && (
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-red-600">
+                            <span className="w-2 h-2 rounded-full bg-red-500" />{quotaBuckets.red} critical
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-[#879596]">No quota data</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="p-6">
           {contentBody}

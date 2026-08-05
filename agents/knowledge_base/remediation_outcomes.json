@@ -7,7 +7,8 @@
     "confidence_used": 0.95,
     "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
     "resource_key": "ns-rosa-hcp/ish-rosa-hcp-network",
-    "details": "Cleaned up VPC dependencies for ish-rosa-hcp-rosa-network-stack; Deleted security group sg-0607fa5c4b42bbdeb (2pcqj0tkrt6tbd989ooo1a5gfdkfco6o-vpce-private-router)"
+    "details": "Cleaned up VPC dependencies for ish-rosa-hcp-rosa-network-stack; Deleted security group sg-0607fa5c4b42bbdeb (2pcqj0tkrt6tbd989ooo1a5gfdkfco6o-vpce-private-router)",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-03-31T14:29:20.248689",
@@ -17,7 +18,8 @@
     "confidence_used": 0.8,
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/ish-rosa-hcp-network",
-    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-03-31T16:08:33.967817",
@@ -27,7 +29,8 @@
     "confidence_used": 0.95,
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
-    "details": "Cleaned up VPC dependencies for foo-rosa-hcp-rosa-network-stack; Deleted security group sg-048df72cfb7e78c16 (2pcs2d8mc03unakfs6fg9nkaj2rpga1m-vpce-private-router)"
+    "details": "Cleaned up VPC dependencies for foo-rosa-hcp-rosa-network-stack; Deleted security group sg-048df72cfb7e78c16 (2pcs2d8mc03unakfs6fg9nkaj2rpga1m-vpce-private-router)",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-03-31T16:10:21.497864",
@@ -37,7 +40,8 @@
     "confidence_used": 0.8,
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/foo-rosa-hcp-network",
-    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-03-31T17:44:19.251190",
@@ -47,7 +51,8 @@
     "confidence_used": 1.0,
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
-    "details": "Cleaned up VPC dependencies for pry-rosa-hcp-rosa-network-stack; Deleted security group sg-0a832518efa47ab75 (2pcua45fs58hiaufnb19nnq94c1otb8f-vpce-private-router)"
+    "details": "Cleaned up VPC dependencies for pry-rosa-hcp-rosa-network-stack; Deleted security group sg-0a832518efa47ab75 (2pcua45fs58hiaufnb19nnq94c1otb8f-vpce-private-router)",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-03-31T17:46:26.522659",
@@ -57,7 +62,8 @@
     "confidence_used": 1.0,
     "root_cause": "rosanetwork has finalizers preventing deletion",
     "resource_key": "ROSANetwork",
-    "details": "Successfully removed finalizers from rosanetwork/pry-rosa-hcp-network"
+    "details": "Successfully removed finalizers from rosanetwork/pry-rosa-hcp-network",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-03-31T17:46:38.427748",
@@ -67,7 +73,8 @@
     "confidence_used": 0.9,
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/pry-rosa-hcp-network",
-    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-03-31T17:59:15.648083",
@@ -77,7 +84,8 @@
     "confidence_used": 0.9,
     "root_cause": "Hitting API rate limits (AWS/OCM/Kubernetes)",
     "resource_key": "Attempt OCP login with kubeadmin",
-    "details": "Rate limit advisory: wait 60s before retrying (max 3 retries)"
+    "details": "Rate limit advisory: wait 60s before retrying (max 3 retries)",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-01T10:48:33.085013",
@@ -87,7 +95,8 @@
     "confidence_used": 0.9,
     "root_cause": "Hitting API rate limits (AWS/OCM/Kubernetes)",
     "resource_key": "configure-capa-environment : Create or update rosa-creds-secret in multicluster-engine namespace",
-    "details": "Rate limit advisory: wait 60s before retrying (max 3 retries)"
+    "details": "Rate limit advisory: wait 60s before retrying (max 3 retries)",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-01T12:14:58.347325",
@@ -97,7 +106,8 @@
     "confidence_used": 1.0,
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
-    "details": "Cleaned up VPC dependencies for pst-rosa-test-rosa-network-stack; Deleted security group sg-0b82641a843e4b4b7 (2pde9hppj41b2va98h9418221ioii77a-vpce-private-router)"
+    "details": "Cleaned up VPC dependencies for pst-rosa-test-rosa-network-stack; Deleted security group sg-0b82641a843e4b4b7 (2pde9hppj41b2va98h9418221ioii77a-vpce-private-router)",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-01T12:17:06.900202",
@@ -107,7 +117,8 @@
     "confidence_used": 1.0,
     "root_cause": "rosanetwork has finalizers preventing deletion",
     "resource_key": "ROSANetwork",
-    "details": "Successfully removed finalizers from rosanetwork/pst-rosa-test-network"
+    "details": "Successfully removed finalizers from rosanetwork/pst-rosa-test-network",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-01T12:17:16.965247",
@@ -117,7 +128,8 @@
     "confidence_used": 0.9,
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/pst-rosa-test-network",
-    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-01T14:00:40.396507",
@@ -127,7 +139,8 @@
     "confidence_used": 1.0,
     "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
     "resource_key": "ns-rosa-hcp/sow-rosa-hcp-network",
-    "details": "Timeout during CloudFormation retry"
+    "details": "Timeout during CloudFormation retry",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-01T14:02:58.724440",
@@ -137,7 +150,8 @@
     "confidence_used": 1.0,
     "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
     "resource_key": "ns-rosa-hcp/sow-rosa-hcp-network",
-    "details": "Cleaned up VPC dependencies for sow-rosa-hcp-rosa-network-stack; Deleted security group sg-0f7b61d3f8d2ff004 (2pdg2fg11trrjc49qvgouvg15pmtm38h-vpce-private-router)"
+    "details": "Cleaned up VPC dependencies for sow-rosa-hcp-rosa-network-stack; Deleted security group sg-0f7b61d3f8d2ff004 (2pdg2fg11trrjc49qvgouvg15pmtm38h-vpce-private-router)",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-01T14:04:18.006782",
@@ -147,7 +161,8 @@
     "confidence_used": 0.9,
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/sow-rosa-hcp-network",
-    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-01T14:04:23.207773",
@@ -157,7 +172,8 @@
     "confidence_used": 0.7,
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ROSANetwork",
-    "details": "Resource rosaroleconfig/unknown-cluster already deleted (no finalizer removal needed)"
+    "details": "Resource rosaroleconfig/unknown-cluster already deleted (no finalizer removal needed)",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-01T14:16:01.901154",
@@ -167,7 +183,8 @@
     "confidence_used": 1.0,
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ROSARoleConfig",
-    "details": "Successfully removed finalizers from rosaroleconfig/sow-rosa-hcp-roles"
+    "details": "Successfully removed finalizers from rosaroleconfig/sow-rosa-hcp-roles",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-02T11:17:23.812506",
@@ -177,7 +194,8 @@
     "confidence_used": 1.0,
     "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
     "resource_key": "ns-rosa-hcp/zoo-rosa-hcp-network",
-    "details": "Cleaned up VPC dependencies for zoo-rosa-hcp-rosa-network-stack; Deleted security group sg-05680a5b299f71080 (zoo-rosa-hcp-rosa-network-stack-SecurityGroup-HUUkdmlNQBXP); Deleted security group sg-0dc84b9ca5ec77280 (2pe389ebq5t2dhf7dps60b650vsbmfs4-vpce-private-router); Deleted subnet subnet-0dc7822a52b7e0116; Deleted subnet subnet-0e0b31d6d1313547f"
+    "details": "Cleaned up VPC dependencies for zoo-rosa-hcp-rosa-network-stack; Deleted security group sg-05680a5b299f71080 (zoo-rosa-hcp-rosa-network-stack-SecurityGroup-HUUkdmlNQBXP); Deleted security group sg-0dc84b9ca5ec77280 (2pe389ebq5t2dhf7dps60b650vsbmfs4-vpce-private-router); Deleted subnet subnet-0dc7822a52b7e0116; Deleted subnet subnet-0e0b31d6d1313547f",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-02T11:17:54.970047",
@@ -187,7 +205,8 @@
     "confidence_used": 0.9,
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/zoo-rosa-hcp-network",
-    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-05T04:57:40.817710",
@@ -197,7 +216,8 @@
     "confidence_used": 0.85,
     "root_cause": "OCM credentials expired or invalid",
     "resource_key": "configure-capa-environment : Create or update rosa-creds-secret in target namespace",
-    "details": "OCM token refresh requires manual intervention - credentials need to be updated"
+    "details": "OCM token refresh requires manual intervention - credentials need to be updated",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-06T07:26:16.669767",
@@ -207,7 +227,8 @@
     "confidence_used": 1.0,
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
-    "details": "Cleaned up VPC dependencies for sun-rosa-hcp-rosa-network-stack; Deleted security group sg-03502b36b3c256b06 (2pfusvdaplf24m90lor4p7t7nave662k-vpce-private-router)"
+    "details": "Cleaned up VPC dependencies for sun-rosa-hcp-rosa-network-stack; Deleted security group sg-03502b36b3c256b06 (2pfusvdaplf24m90lor4p7t7nave662k-vpce-private-router)",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-06T07:30:08.819248",
@@ -217,7 +238,8 @@
     "confidence_used": 0.9,
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/sun-rosa-hcp-network",
-    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-09T12:13:33.331084",
@@ -227,7 +249,8 @@
     "confidence_used": 1.0,
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
-    "details": "Cleaned up VPC dependencies for lol-rosa-hcp-rosa-network-stack; Deleted security group sg-0ab497635c94607f9 (2pimqk3h8sn69m0egcr23pefrer0te99-vpce-private-router)"
+    "details": "Cleaned up VPC dependencies for lol-rosa-hcp-rosa-network-stack; Deleted security group sg-0ab497635c94607f9 (2pimqk3h8sn69m0egcr23pefrer0te99-vpce-private-router)",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-09T12:15:44.807200",
@@ -237,7 +260,8 @@
     "confidence_used": 1.0,
     "root_cause": "rosanetwork has finalizers preventing deletion",
     "resource_key": "ROSANetwork",
-    "details": "Successfully removed finalizers from rosanetwork/lol-rosa-hcp-network"
+    "details": "Successfully removed finalizers from rosanetwork/lol-rosa-hcp-network",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-09T12:15:56.167668",
@@ -247,7 +271,8 @@
     "confidence_used": 0.9,
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/lol-rosa-hcp-network",
-    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup"
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-20T14:48:47.728623",
@@ -258,7 +283,8 @@
     "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
     "resource_key": "ROSANetwork",
     "details": "Timeout during CloudFormation retry",
-    "duration_seconds": 28.58
+    "duration_seconds": 28.58,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-20T14:50:51.329800",
@@ -269,7 +295,8 @@
     "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
     "resource_key": "ROSANetwork",
     "details": "Cleaned up VPC dependencies for new-rosa-hcp-rosa-network-stack; Deleted security group sg-0a6d51bc162863563 (2pq1gpp690ro1rn1dco9op4vlftj8bbs-vpce-private-router)",
-    "duration_seconds": 55.2
+    "duration_seconds": 55.2,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-20T14:52:36.779560",
@@ -280,7 +307,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/new-rosa-hcp-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 10.56
+    "duration_seconds": 10.56,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-20T14:52:44.390778",
@@ -291,7 +319,8 @@
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ns-rosa-hcp/new-rosa-hcp-roles",
     "details": "Resource rosaroleconfig/new-rosa-hcp-roles already deleted (no finalizer removal needed)",
-    "duration_seconds": 2.24
+    "duration_seconds": 2.24,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-20T16:20:22.273000",
@@ -302,7 +331,8 @@
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
     "details": "Cleaned up VPC dependencies for upg1-rosa-hcp-rosa-network-stack; Deleted security group sg-05e7fab9dee3e0639 (2ppte113ai4oob9r19tss8nm8lcijqp2-vpce-private-router)",
-    "duration_seconds": 28.74
+    "duration_seconds": 28.74,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-20T16:21:16.077501",
@@ -313,7 +343,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/upg1-rosa-hcp-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.42
+    "duration_seconds": 1.42,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-20T16:21:20.939726",
@@ -324,7 +355,8 @@
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ns-rosa-hcp/upg1-rosa-hcp-roles",
     "details": "Resource rosaroleconfig/upg1-rosa-hcp-roles already deleted (no finalizer removal needed)",
-    "duration_seconds": 0.79
+    "duration_seconds": 0.79,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-22T10:01:18.547523",
@@ -335,7 +367,8 @@
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
     "details": "Cleaned up VPC dependencies for sp2-rosa-hcp-rosa-network-stack; Deleted security group sg-08dd02a9dde996381 (2pr7es9p9bldn3pafh2p65viv61j13h4-vpce-private-router)",
-    "duration_seconds": 36.21
+    "duration_seconds": 36.21,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-22T10:02:23.884125",
@@ -346,7 +379,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/sp2-rosa-hcp-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.93
+    "duration_seconds": 1.93,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-22T16:36:55.819000",
@@ -357,7 +391,8 @@
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
     "details": "Cleaned up VPC dependencies for mpa-rosa-hcp-rosa-network-stack; Deleted security group sg-0581aa6df1bc3789b (2pr98lr2vvaktacnp7dfimoj51lhnd7g-vpce-private-router)",
-    "duration_seconds": 25.15
+    "duration_seconds": 25.15,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-04-22T16:37:06.452937",
@@ -368,7 +403,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/mpa-rosa-hcp-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.71
+    "duration_seconds": 1.71,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-06-23T12:19:55.463044",
@@ -379,7 +415,8 @@
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
     "details": "Cleaned up VPC dependencies for goo-rosa-hcp-rosa-network-stack; Deleted security group sg-0cb24986517f7b6a4 (2r45afm3g8h94euvn1ie7usqjmbmh3ri-vpce-private-router)",
-    "duration_seconds": 19.86
+    "duration_seconds": 19.86,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-06-23T12:22:00.020280",
@@ -390,7 +427,8 @@
     "root_cause": "rosanetwork has finalizers preventing deletion",
     "resource_key": "ROSANetwork",
     "details": "Successfully removed finalizers from rosanetwork/goo-rosa-hcp-network",
-    "duration_seconds": 2.33
+    "duration_seconds": 2.33,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-06-23T12:22:11.934103",
@@ -401,7 +439,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/goo-rosa-hcp-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.23
+    "duration_seconds": 1.23,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-06-24T11:43:17.505119",
@@ -412,7 +451,8 @@
     "root_cause": "Hitting API rate limits (AWS/OCM/Kubernetes)",
     "resource_key": "configure-capa-environment : Create or update rosa-creds-secret in target namespace",
     "details": "Rate limit advisory: wait 60s before retrying (max 3 retries)",
-    "duration_seconds": 0.0
+    "duration_seconds": 0.0,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-06-24T14:28:11.085202",
@@ -423,7 +463,8 @@
     "root_cause": "Hitting API rate limits (AWS/OCM/Kubernetes)",
     "resource_key": "Attempt OCP login with kubeadmin",
     "details": "Rate limit advisory: wait 60s before retrying (max 3 retries)",
-    "duration_seconds": 0.0
+    "duration_seconds": 0.0,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-06-24T14:28:32.244080",
@@ -434,7 +475,8 @@
     "root_cause": "OCM credentials expired or invalid",
     "resource_key": "configure-capa-environment : Create or update rosa-creds-secret in target namespace",
     "details": "OCM token refresh requires manual intervention - credentials need to be updated",
-    "duration_seconds": 0.0
+    "duration_seconds": 0.0,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:23:13.758968",
@@ -445,7 +487,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 2.74
+    "duration_seconds": 2.74,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:25:23.618815",
@@ -456,7 +499,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.5
+    "duration_seconds": 1.5,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:27:32.319233",
@@ -467,7 +511,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 2.42
+    "duration_seconds": 2.42,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:30:39.084647",
@@ -478,7 +523,8 @@
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-roles",
     "details": "Failed to remove finalizers: Unable to connect to the server: dial tcp: lookup api.qe1-vmware-ibm.dev09.red-chesterfield.com: no such host\n",
-    "duration_seconds": 0.3
+    "duration_seconds": 0.3,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:31:39.543391",
@@ -489,7 +535,8 @@
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-roles",
     "details": "Failed to remove finalizers: Unable to connect to the server: dial tcp: lookup api.qe1-vmware-ibm.dev09.red-chesterfield.com: no such host\n",
-    "duration_seconds": 0.29
+    "duration_seconds": 0.29,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:32:41.992389",
@@ -500,7 +547,8 @@
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-roles",
     "details": "Failed to remove finalizers: Unable to connect to the server: dial tcp: lookup api.qe1-vmware-ibm.dev09.red-chesterfield.com: no such host\n",
-    "duration_seconds": 0.3
+    "duration_seconds": 0.3,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:34:42.568045",
@@ -511,7 +559,8 @@
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-roles",
     "details": "Failed to remove finalizers: Unable to connect to the server: dial tcp: lookup api.qe1-vmware-ibm.dev09.red-chesterfield.com: no such host\n",
-    "duration_seconds": 0.29
+    "duration_seconds": 0.29,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:36:45.192851",
@@ -522,7 +571,8 @@
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-roles",
     "details": "Failed to remove finalizers: Unable to connect to the server: dial tcp: lookup api.qe1-vmware-ibm.dev09.red-chesterfield.com: no such host\n",
-    "duration_seconds": 0.29
+    "duration_seconds": 0.29,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:38:47.871541",
@@ -533,7 +583,8 @@
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-roles",
     "details": "Failed to remove finalizers: Unable to connect to the server: dial tcp: lookup api.qe1-vmware-ibm.dev09.red-chesterfield.com: no such host\n",
-    "duration_seconds": 0.28
+    "duration_seconds": 0.28,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:41:28.695748",
@@ -544,7 +595,8 @@
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-roles",
     "details": "Failed to remove finalizers: Unable to connect to the server: dial tcp: lookup api.qe1-vmware-ibm.dev09.red-chesterfield.com: no such host\n",
-    "duration_seconds": 0.34
+    "duration_seconds": 0.34,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-22T16:43:33.331585",
@@ -555,7 +607,8 @@
     "root_cause": "rosaroleconfig has finalizers preventing deletion",
     "resource_key": "ns-rosa-hcp/man-422-rosa-test-roles",
     "details": "Failed to remove finalizers: Unable to connect to the server: dial tcp: lookup api.qe1-vmware-ibm.dev09.red-chesterfield.com: no such host\n",
-    "duration_seconds": 0.29
+    "duration_seconds": 0.29,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-23T10:43:06.493704",
@@ -566,7 +619,8 @@
     "root_cause": "Hitting API rate limits (AWS/OCM/Kubernetes)",
     "resource_key": "Check for OCM cluster name collision",
     "details": "Rate limit advisory: wait 60s before retrying (max 3 retries)",
-    "duration_seconds": 0.0
+    "duration_seconds": 0.0,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-23T10:42:03.938053",
@@ -577,7 +631,8 @@
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
     "details": "Cleaned up VPC dependencies for aut-rosa-hcp-rosa-network-stack; Deleted security group sg-0984471b41c9ccb42 (2rncdp2dlrehmsk1ovcqk1mb6gbccs5j-vpce-private-router); Deleted security group sg-0f2c9f866b6a6fcaf (2rnsp8d89n51nrhavhhvgf5ugc0b87m0-vpce-private-router)",
-    "duration_seconds": 23.42
+    "duration_seconds": 23.42,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-23T10:43:08.053436",
@@ -588,7 +643,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/aut-rosa-hcp-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.39
+    "duration_seconds": 1.39,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-23T12:03:40.627811",
@@ -599,7 +655,8 @@
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
     "details": "Cleaned up VPC dependencies for tfm-422-rosa-test-rosa-network-stack; Deleted security group sg-07ecfa23f05b642dd (2rntpmdkoc2b117iab2htsi75jgvkhjp-vpce-private-router)",
-    "duration_seconds": 20.73
+    "duration_seconds": 20.73,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-23T12:05:49.737861",
@@ -610,7 +667,8 @@
     "root_cause": "rosanetwork has finalizers preventing deletion",
     "resource_key": "ROSANetwork",
     "details": "Successfully removed finalizers from rosanetwork/tfm-422-rosa-test-network",
-    "duration_seconds": 2.9
+    "duration_seconds": 2.9,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-23T12:06:00.537318",
@@ -621,7 +679,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/tfm-422-rosa-test-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.3
+    "duration_seconds": 1.3,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-24T10:41:34.307658",
@@ -632,7 +691,8 @@
     "root_cause": "OCM credentials expired or invalid",
     "resource_key": "Check for OCM cluster name collision",
     "details": "OCM token refresh requires manual intervention - credentials need to be updated",
-    "duration_seconds": 0.0
+    "duration_seconds": 0.0,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-24T10:41:44.179293",
@@ -643,7 +703,8 @@
     "root_cause": "OCM credentials expired or invalid",
     "resource_key": "Unlink stale OCM role if linked role doesn't exist in AWS",
     "details": "OCM token refresh requires manual intervention - credentials need to be updated",
-    "duration_seconds": 0.0
+    "duration_seconds": 0.0,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-25T05:20:11.768372",
@@ -654,7 +715,8 @@
     "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
     "resource_key": "ROSANetwork",
     "details": "Cleaned up VPC dependencies for tfy-422-test-rosa-network-stack; Deleted security group sg-0dfc22fcd277d8ca5 (2roirssfc5476l9do2b74nbq45ljln50-vpce-private-router)",
-    "duration_seconds": 16.91
+    "duration_seconds": 16.91,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-25T05:22:23.596516",
@@ -665,7 +727,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/tfy-422-test-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.41
+    "duration_seconds": 1.41,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-27T14:31:49.507142",
@@ -676,7 +739,8 @@
     "root_cause": "Hitting API rate limits (AWS/OCM/Kubernetes)",
     "resource_key": "configure-capa-environment : Create or update rosa-creds-secret in multicluster-engine namespace",
     "details": "Rate limit advisory: wait 60s before retrying (max 3 retries)",
-    "duration_seconds": 0.0
+    "duration_seconds": 0.0,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-27T16:11:12.712436",
@@ -687,7 +751,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/try-422-test-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.35
+    "duration_seconds": 1.35,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-27T16:13:22.277549",
@@ -698,7 +763,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/try-422-test-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.34
+    "duration_seconds": 1.34,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-27T16:15:31.852678",
@@ -709,7 +775,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/try-422-test-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.35
+    "duration_seconds": 1.35,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-28T13:11:30.117776",
@@ -720,7 +787,8 @@
     "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
     "resource_key": "ROSANetwork",
     "details": "Cleaned up VPC dependencies for ttt-422-test-rosa-network-stack; Deleted security group sg-09b4b1eb085f2a7de (2rr7faa982787uk8vc1hi725bkvg3ju0-vpce-private-router)",
-    "duration_seconds": 21.31
+    "duration_seconds": 21.31,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-28T13:13:39.515100",
@@ -731,7 +799,8 @@
     "root_cause": "rosanetwork has finalizers preventing deletion",
     "resource_key": "ROSANetwork",
     "details": "Successfully removed finalizers from rosanetwork/ttt-422-test-network",
-    "duration_seconds": 3.21
+    "duration_seconds": 3.21,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-28T13:13:50.943704",
@@ -742,7 +811,8 @@
     "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
     "resource_key": "ns-rosa-hcp/ttt-422-test-network",
     "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
-    "duration_seconds": 1.36
+    "duration_seconds": 1.36,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-29T15:00:00.000000",
@@ -764,7 +834,8 @@
     "root_cause": "OCM credentials expired or invalid",
     "resource_key": "Unlink stale OCM role if linked role doesn't exist in AWS",
     "details": "OCM token refresh requires manual intervention - credentials need to be updated",
-    "duration_seconds": 0.0
+    "duration_seconds": 0.0,
+    "operation_type": "delete"
   },
   {
     "timestamp": "2026-07-30T13:32:10.656159",
@@ -775,6 +846,103 @@
     "root_cause": "OCM credentials expired or invalid",
     "resource_key": "configure-capa-environment : Create or update rosa-creds-secret in multicluster-engine namespace",
     "details": "OCM token refresh requires manual intervention - credentials need to be updated",
-    "duration_seconds": 0.0
+    "duration_seconds": 0.0,
+    "operation_type": "delete"
+  },
+  {
+    "timestamp": "2026-07-30T14:27:17.316704",
+    "issue_type": "ocm_auth_failure",
+    "recommended_fix": "refresh_ocm_token",
+    "success": false,
+    "confidence_used": 0.75,
+    "root_cause": "OCM credentials expired or invalid",
+    "resource_key": "${NAMESPACE}/${CLUSTER}",
+    "details": "OCM token refresh requires manual intervention - credentials need to be updated",
+    "duration_seconds": 0.0,
+    "operation_type": "delete"
+  },
+  {
+    "timestamp": "2026-08-03T13:50:47.407389",
+    "issue_type": "rosanetwork_stuck_deletion",
+    "recommended_fix": "retry_cloudformation_delete",
+    "success": true,
+    "confidence_used": 1.0,
+    "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
+    "resource_key": "ns-rosa-hcp/foo-rosa-hcp-network",
+    "details": "Cleaned up VPC dependencies for foo-rosa-hcp-rosa-network-stack; Deleted security group sg-0f047aa0df6112044 (foo-rosa-hcp-rosa-network-stack-SecurityGroup-hL0K1fregvVs); Deleted security group sg-0bca16488a4014859 (2rv83kub2vd21inms1o2nsalt7q2nbga-vpce-private-router); Deleted subnet subnet-064f4fb63c7d99b0a; Deleted subnet subnet-0d901a8962f4cb326",
+    "duration_seconds": 29.83,
+    "operation_type": "delete"
+  },
+  {
+    "timestamp": "2026-08-03T13:51:24.255794",
+    "issue_type": "cloudformation_deletion_failure",
+    "recommended_fix": "manual_cloudformation_cleanup",
+    "success": true,
+    "confidence_used": 0.9,
+    "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+    "resource_key": "ns-rosa-hcp/foo-rosa-hcp-network",
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "duration_seconds": 1.32,
+    "operation_type": "delete"
+  },
+  {
+    "timestamp": "2026-08-03T14:42:37.018966",
+    "issue_type": "rosanetwork_stuck_deletion",
+    "recommended_fix": "retry_cloudformation_delete",
+    "success": true,
+    "confidence_used": 1.0,
+    "root_cause": "CloudFormation stack stuck in DELETE_IN_PROGRESS due to ROSA-created VPC dependencies",
+    "resource_key": "ns-rosa-hcp/uia-rosa-hcp-network",
+    "details": "Cleaned up VPC dependencies for uia-rosa-hcp-rosa-network-stack; Deleted security group sg-0971c9ce5d09ae674 (2rv8qbq6sb5m1vilhg0noq18pk7oq8ar-vpce-private-router)",
+    "duration_seconds": 18.52,
+    "operation_type": "delete"
+  },
+  {
+    "timestamp": "2026-08-03T14:44:17.537828",
+    "issue_type": "cloudformation_deletion_failure",
+    "recommended_fix": "manual_cloudformation_cleanup",
+    "success": true,
+    "confidence_used": 0.9,
+    "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+    "resource_key": "ns-rosa-hcp/uia-rosa-hcp-network",
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "duration_seconds": 1.34,
+    "operation_type": "delete"
+  },
+  {
+    "timestamp": "2026-08-04T17:36:56.069778",
+    "issue_type": "rosanetwork_stuck_deletion",
+    "recommended_fix": "retry_cloudformation_delete",
+    "success": true,
+    "confidence_used": 1.0,
+    "root_cause": "CloudFormation stack deletion failed, blocking ROSANetwork cleanup",
+    "resource_key": "ROSANetwork",
+    "details": "Cleaned up VPC dependencies for jem-rosa-hcp-rosa-network-stack; Deleted security group sg-0933d3acaa951df16 (2rvvll2qn0s15o7l23juu9uqruak3aun-vpce-private-router)",
+    "duration_seconds": 23.86,
+    "operation_type": "delete"
+  },
+  {
+    "timestamp": "2026-08-04T17:39:15.075523",
+    "issue_type": "cloudformation_deletion_failure",
+    "recommended_fix": "manual_cloudformation_cleanup",
+    "success": true,
+    "confidence_used": 0.9,
+    "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+    "resource_key": "ns-rosa-hcp/jem-rosa-hcp-network",
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "duration_seconds": 1.62,
+    "operation_type": "delete"
+  },
+  {
+    "timestamp": "2026-08-05T09:22:03.807562",
+    "issue_type": "cloudformation_deletion_failure",
+    "recommended_fix": "manual_cloudformation_cleanup",
+    "success": true,
+    "confidence_used": 0.9,
+    "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
+    "resource_key": "ns-rosa-hcp/uw1-rosa-hcp-network",
+    "details": "Logged for manual review: CloudFormation stack requires manual inspection and cleanup",
+    "duration_seconds": 1.28,
+    "operation_type": "delete"
   }
 ]
