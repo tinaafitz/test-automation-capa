@@ -54,7 +54,7 @@ export const Sparkline = ({ data, dataKey, width = 80, height = 24, color }) => 
   );
 };
 
-const AWSUsageTrend = ({ selectedResources: externalSelected, onToggleResource }) => {
+const AWSUsageTrend = ({ selectedResources: externalSelected, onToggleResource, height: propHeight }) => {
   const [trendData, setTrendData] = useState([]);
   const [resourceKeys, setResourceKeys] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -121,7 +121,7 @@ const AWSUsageTrend = ({ selectedResources: externalSelected, onToggleResource }
     }
   };
 
-  const chartHeight = 300;
+  const chartHeight = propHeight || 300;
   const chartPadding = { top: 15, right: 20, bottom: 30, left: 45 };
   const chartWidth = 1400;
   const innerWidth = chartWidth - chartPadding.left - chartPadding.right;
