@@ -1754,7 +1754,10 @@ const CAPADashboardContent = () => {
 
       case 'orchestrator':
         return (
-          <WorkflowOrchestratorView />
+          <div className="space-y-6">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">Workflow Orchestrator</h2>
+            <WorkflowOrchestratorView />
+          </div>
         );
 
       case 'terminal':
