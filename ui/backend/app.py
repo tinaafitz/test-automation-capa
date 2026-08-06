@@ -237,6 +237,9 @@ from rosa_cluster_routes import (
 
 app.include_router(rosa_cluster_router)
 
+from must_gather_routes import router as must_gather_router
+app.include_router(must_gather_router)
+
 
 @app.on_event("startup")
 async def start_trigger_scheduler():

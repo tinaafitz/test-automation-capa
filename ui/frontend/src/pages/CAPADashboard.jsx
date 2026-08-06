@@ -15,6 +15,7 @@ import NotificationSettingsInline from '../components/NotificationSettingsInline
 import WorkflowBuilder from '../components/WorkflowBuilder';
 import ClusterActions from '../components/ClusterActions';
 import WorkflowOrchestratorView from '../components/WorkflowOrchestratorView';
+import DiagnosticsPanel from '../components/DiagnosticsPanel';
 import {
   useApiStatusContext,
   useRecentOperationsContext,
@@ -1306,6 +1307,7 @@ const CAPADashboardContent = () => {
                     setProvisionResults({
                       success: true,
                       timestamp: new Date().toISOString(),
+                      clusterName: config.clusterName,
                       output: `🚀 Starting provisioning for ${config.clusterName}...\n\nInitializing ROSA HCP cluster provisioning...\nCluster: ${config.clusterName}\nVersion: ${config.openShiftVersion}\nRegion: ${config.awsRegion}\n\nConnecting to backend...`,
                       isRunning: true,
                     });
@@ -1529,6 +1531,17 @@ const CAPADashboardContent = () => {
                     </pre>
                   </div>
                 </div>
+
+                {/* Cluster Diagnostics Panel */}
+                {provisionResults.clusterName && (
+                  <div className="mt-4">
+                    <DiagnosticsPanel
+                      clusterName={provisionResults.clusterName}
+                      isRunning={provisionResults.isRunning}
+                      autoRefresh={true}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
