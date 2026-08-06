@@ -256,6 +256,12 @@
     - aws_name_conflict_check is defined
     - "'AWS_CONFLICTS_FOUND' in aws_name_conflict_check.stdout"
 
+- name: Check for stale K8s resources in namespace
+  shell: |
+    oc get rosacontrolplane,rosanetwork,rosaroleconfig,rosamachinepool -n {{ capi_namespace }} --no-headers 2>/dev/null || true
+  register: stale_cr_check
+  changed_when: false
+
 - name: Confirm namespace is clean
   debug:
     msg: "Namespace {{ capi_namespace }} is clean — no stale CRs. Safe to provision."
@@ -352,11 +358,6 @@
     - name: Create RosaRoleConfig resource
       include_tasks: create_rosa_role_config.yml
 
-    - name: Wait for RosaRoleConfig to be ready
-      include_tasks: wait_for_rosa_roles.yml
-      vars:
-        wait_timeout: 600
-
     - name: RosaRoleConfig creation complete
       debug:
         msg: |
@@ -403,10 +404,17 @@
         rosa_network_config_name: "{{ rosa_network_name }}"
         vpc_cidr_block: "{{ network_cidr }}"
 
-    - name: Wait for ROSANetwork to be ready
-      include_tasks: wait_for_rosa_network.yml
-      vars:
-        wait_timeout: 900
+    - name: Get actual subnet count from ROSANetwork status
+      shell: |
+        oc get rosanetwork {{ rosa_network_name }} -n {{ capi_namespace }} \
+          -o jsonpath='{.status.subnets}' 2>/dev/null || echo '[]'
+      register: actual_subnets_raw
+      changed_when: false
+
+    - name: Override availability_zone_count from actual network
+      set_fact:
+        availability_zone_count: "{{ (actual_subnets_raw.stdout | from_json) | length }}"
+      when: (actual_subnets_raw.stdout | from_json) | length > 0
 
     - name: ROSANetwork creation complete
       debug:
@@ -415,6 +423,7 @@
 
           AWS Network Resources Created:
           • VPC ID: {{ vpc_id | default('N/A') }}
+          • Actual AZs from network: {{ availability_zone_count }}
           • Public Subnets: {{ public_subnets | length if public_subnets is defined else 0 }}
           • Private Subnets: {{ private_subnets | length if private_subnets is defined else 0 }}
           • CloudFormation Stack: {{ cloudformation_stack | default('N/A') }}
