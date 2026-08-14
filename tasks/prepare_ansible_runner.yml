@@ -4,11 +4,11 @@
 # For local development, this can be skipped with: -e skip_ansible_runner=true
 
 - name: Display Ansible Runner preparation message
-  debug:
+  ansible.builtin.debug:
     msg: "Preparing Ansible runner host environment..."
 
 - name: Ensure output directory exists
-  file:
+  ansible.builtin.file:
     path: "{{ output_dir | default('~/output') }}"
     state: directory
     mode: '0755'

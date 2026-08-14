@@ -1309,7 +1309,7 @@ export function ExpressProvision({ onSubmit }) {
         createRosaNetwork: true,
         createRosaRoleConfig: true,
         vpcCidrBlock: '10.0.0.0/16',
-        availabilityZoneCount: 1,
+        availabilityZoneCount: 2,
         rolePrefix: prefix,
         domainPrefix: prefix,
         channelGroup,

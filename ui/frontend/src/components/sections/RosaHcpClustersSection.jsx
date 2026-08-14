@@ -22,6 +22,7 @@ import {
   extractSafeErrorMessage,
 } from '../../config/api';
 import ProvisionFailureAgentPanel from '../agents/ProvisionFailureAgentPanel';
+import DiagnosticsPanel from '../DiagnosticsPanel';
 
 const RosaHcpClustersSection = ({ theme = 'mce' }) => {
   const app = useApp();
@@ -912,6 +913,17 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
               </div>
             </div>
           </div>
+
+          {/* Cluster Diagnostics Panel */}
+          {deletionResults.clusterName && (
+            <div className="mt-4">
+              <DiagnosticsPanel
+                clusterName={deletionResults.clusterName}
+                isRunning={isDeleting}
+                autoRefresh={true}
+              />
+            </div>
+          )}
 
           {/* AI Agent Panel - Show when deletion fails */}
           {!deletionResults.success && !isDeleting && (
