@@ -955,7 +955,8 @@ async def delete_rosa_cluster(
 async def list_clusters():
     """List all ROSA HCP clusters with their status"""
     try:
-        result = subprocess.run(
+        result = await asyncio.to_thread(
+            subprocess.run,
             ["kubectl", "get", "rosacontrolplane", "-n", "ns-rosa-hcp", "-o", "json"],
             capture_output=True,
             text=True,
