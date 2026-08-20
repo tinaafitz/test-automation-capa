@@ -12,7 +12,7 @@ spec:
   hubAcceptsClient: true
 ---
 {% endif %}
-apiVersion: cluster.x-k8s.io/v1beta1
+apiVersion: cluster.x-k8s.io/v1beta2
 kind: Cluster
 metadata:
   name: {{ cluster_name }}
@@ -26,15 +26,13 @@ spec:
     pods:
       cidrBlocks: ["{{ cluster_network.pod_cidr | default('10.128.0.0/14') }}"]
   infrastructureRef:
-    apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+    apiGroup: infrastructure.cluster.x-k8s.io
     kind: ROSACluster
     name: {{ cluster_name }}
-    namespace: {{ rosa_hcp_namespace }}
   controlPlaneRef:
-    apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+    apiGroup: controlplane.cluster.x-k8s.io
     kind: ROSAControlPlane
     name: {{ cluster_name }}
-    namespace: {{ rosa_hcp_namespace }}
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ROSACluster
@@ -220,7 +218,7 @@ spec:
 {% endif %}
 
 ---
-apiVersion: cluster.x-k8s.io/v1beta1
+apiVersion: cluster.x-k8s.io/v1beta2
 kind: MachinePool
 metadata:
   name: {{ cluster_name }}
@@ -238,10 +236,9 @@ spec:
       bootstrap:
         dataSecretName: ""
       infrastructureRef:
-        name: {{ cluster_name }}
-        apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+        apiGroup: infrastructure.cluster.x-k8s.io
         kind: ROSAMachinePool
-        namespace: {{ rosa_hcp_namespace }}
+        name: {{ cluster_name }}
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ROSAMachinePool
@@ -271,3 +268,39 @@ spec:
     - {{ sg }}
 {% endfor %}
 {% endif %}
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ROSANetwork
+metadata:
+  name: {{ cluster_name }}-network
+  namespace: {{ rosa_hcp_namespace }}
+  labels:
+    cluster.x-k8s.io/cluster-name: {{ cluster_name }}
+    automation.acm.redhat.com/network-automation: "true"
+spec:
+  identityRef:
+    kind: AWSClusterControllerIdentity
+    name: {{ rosa_network_config.identity_name | default('default') }}
+  region: {{ aws_region | default('us-west-2') }}
+  stackName: {{ cluster_name }}-rosa-network-stack
+  availabilityZones:
+{% for az in rosa_network_config.availability_zones %}
+    - {{ az }}
+{% endfor %}
+  cidrBlock: {{ rosa_network_config.cidr_block | default('10.0.0.0/16') }}
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ROSARoleConfig
+metadata:
+  name: {{ cluster_name }}-roles
+  namespace: {{ rosa_hcp_namespace }}
+  labels:
+    cluster.x-k8s.io/cluster-name: {{ cluster_name }}
+    automation.acm.redhat.com/role-automation: "true"
+spec:
+  oidcProviderType: Managed
+  accountRoleConfig:
+    prefix: "{{ (rosa_role_config.prefix | default('test'))[:4] | regex_replace('-$', '') }}"
+    version: "{{ rcp_version | default(openshift_version) | default('4.22.0') }}"
+  operatorRoleConfig:
+    prefix: "{{ (rosa_role_config.prefix | default('test'))[:4] | regex_replace('-$', '') }}"

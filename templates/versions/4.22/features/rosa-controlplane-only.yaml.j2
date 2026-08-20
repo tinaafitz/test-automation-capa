@@ -12,7 +12,7 @@ spec:
   hubAcceptsClient: true
 ---
 {% endif %}
-apiVersion: cluster.x-k8s.io/v1beta1
+apiVersion: cluster.x-k8s.io/v1beta2
 kind: Cluster
 metadata:
   name: {{ cluster_name }}
@@ -26,15 +26,13 @@ spec:
     pods:
       cidrBlocks: ["{{ cluster_network.pod_cidr | default('10.128.0.0/14') }}"]
   infrastructureRef:
-    apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+    apiGroup: infrastructure.cluster.x-k8s.io
     kind: ROSACluster
     name: {{ cluster_name }}
-    namespace: {{ rosa_hcp_namespace }}
   controlPlaneRef:
-    apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+    apiGroup: controlplane.cluster.x-k8s.io
     kind: ROSAControlPlane
     name: {{ cluster_name }}
-    namespace: {{ rosa_hcp_namespace }}
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ROSACluster
@@ -220,7 +218,7 @@ spec:
   # References to automation resources created separately
   # No inline ROSANetwork or ROSARoleConfig definitions
 ---
-apiVersion: cluster.x-k8s.io/v1beta1
+apiVersion: cluster.x-k8s.io/v1beta2
 kind: MachinePool
 metadata:
   name: {{ cluster_name }}
@@ -238,10 +236,9 @@ spec:
       bootstrap:
         dataSecretName: ""
       infrastructureRef:
-        name: {{ cluster_name }}
-        apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+        apiGroup: infrastructure.cluster.x-k8s.io
         kind: ROSAMachinePool
-        namespace: {{ rosa_hcp_namespace }}
+        name: {{ cluster_name }}
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ROSAMachinePool
