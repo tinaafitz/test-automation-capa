@@ -165,6 +165,88 @@ def get_profile_status(profile_name: str) -> Dict[str, Any]:
         return {"exists": False, "status": None, "message": f"Error: {str(e)}"}
 
 
+_POD_NETWORK_FIX_DS = """
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: pod-network-fix
+  namespace: kube-system
+  labels:
+    app: pod-network-fix
+spec:
+  selector:
+    matchLabels:
+      app: pod-network-fix
+  template:
+    metadata:
+      labels:
+        app: pod-network-fix
+    spec:
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+      initContainers:
+        - name: fix-iptables
+          image: busybox:1.28
+          command:
+            - /bin/sh
+            - -c
+            - |
+              iptables -C FORWARD -s 10.244.0.0/16 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -s 10.244.0.0/16 -j ACCEPT
+              iptables -C FORWARD -d 10.244.0.0/16 -j ACCEPT 2>/dev/null || iptables -I FORWARD 2 -d 10.244.0.0/16 -j ACCEPT
+              iptables -t nat -C POSTROUTING -s 10.244.0.0/16 ! -d 10.244.0.0/16 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.244.0.0/16 ! -d 10.244.0.0/16 -j MASQUERADE
+              sysctl -w net.ipv4.ip_forward=1
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: xtables-lock
+              mountPath: /run/xtables.lock
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.9
+          resources:
+            requests:
+              cpu: "1m"
+              memory: "2Mi"
+            limits:
+              cpu: "10m"
+              memory: "10Mi"
+      volumes:
+        - name: xtables-lock
+          hostPath:
+            path: /run/xtables.lock
+            type: FileOrCreate
+"""
+
+
+def _apply_pod_network_fix(profile_name: str, on_output=None) -> None:
+    """Apply iptables FORWARD accept rules for pod CIDR via a privileged DaemonSet.
+
+    Needed because kube-proxy sets FORWARD chain policy to DROP on podman rootless
+    minikube, which blocks pod-to-pod and pod-to-service traffic even with kindnet.
+    """
+    if on_output:
+        on_output("Applying pod network fix (iptables FORWARD rules)...")
+    try:
+        result = subprocess.run(
+            ["kubectl", "apply", "--context", profile_name, "-f", "-"],
+            input=_POD_NETWORK_FIX_DS,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if on_output:
+            if result.stdout:
+                on_output(result.stdout.strip())
+            if result.returncode != 0 and result.stderr:
+                on_output(f"Warning: pod-network-fix: {result.stderr.strip()}")
+    except Exception as e:
+        if on_output:
+            on_output(f"Warning: could not apply pod-network-fix DaemonSet: {e}")
+
+
 def create_profile(profile_name: str, cpus: int = 2, memory: int = 4096,
                    on_output=None) -> Dict[str, Any]:
     """Create a minikube profile. Streams output via on_output callback if provided."""
@@ -195,7 +277,7 @@ def create_profile(profile_name: str, cpus: int = 2, memory: int = 4096,
     try:
         process = subprocess.Popen(
             ["minikube", "start", "--profile", profile_name,
-             f"--cpus={cpus}", f"--memory={memory}"],
+             f"--cpus={cpus}", f"--memory={memory}", "--cni=kindnet"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -215,6 +297,11 @@ def create_profile(profile_name: str, cpus: int = 2, memory: int = 4096,
                 "success": False,
                 "message": f"Failed to create cluster '{profile_name}'",
             }
+
+        # Fix pod networking: kindnet uses ptp CNI with ipMasq=true, but kube-proxy sets
+        # FORWARD chain policy to DROP. We need to ACCEPT pod CIDR traffic explicitly.
+        # Also add a masquerade rule for pod egress. These are idempotent (checked before insert).
+        _apply_pod_network_fix(profile_name, on_output)
 
         # Verify
         kubectl_test = subprocess.run(
