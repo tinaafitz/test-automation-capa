@@ -226,7 +226,7 @@ async def generate_provisioning_yaml(request: Request):
             "machine_pool": {
                 "instance_type": "m5.xlarge",
                 "min_replicas": 2,
-                "max_replicas": 3,
+                "max_replicas": availability_zone_count * 2,
                 "replicas": 2,
                 "node_pool_name": node_pool_name,
             },

@@ -861,6 +861,25 @@ def configure_capi(profile_name: str, project_root: str,
         env["CUSTOM_CAPA_IMAGE_TAG"] = custom_capa_image.get("tag", "")
         env["CUSTOM_CAPA_SOURCE_PATH"] = custom_capa_image.get("sourcePath", "")
 
+        # Pre-load the custom image into Minikube so the controller pod doesn't
+        # hit ImagePullBackOff when the registry is unreachable from inside the VM.
+        full_image = f"{custom_capa_image.get('repository', '')}:{custom_capa_image.get('tag', '')}"
+        if on_output:
+            on_output(f"Loading custom image into Minikube (this may take a minute): {full_image}")
+        try:
+            load_result = subprocess.run(
+                ["minikube", "image", "load", full_image, "-p", profile_name],
+                capture_output=True, text=True, timeout=300,
+            )
+            if on_output:
+                if load_result.returncode == 0:
+                    on_output(f"✓ Image loaded into Minikube: {full_image}")
+                else:
+                    on_output(f"Warning: image load failed (will try pull from registry): {load_result.stderr.strip()}")
+        except Exception as e:
+            if on_output:
+                on_output(f"Warning: could not pre-load image: {e}")
+
     # Build command — credentials are already in env, no need to expose on CLI
     cmd = ["ansible-playbook", playbook_path, "-vv"]
 
