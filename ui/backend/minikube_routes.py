@@ -113,7 +113,7 @@ def _run_minikube_create(cluster_name: str, job_id: str):
     try:
         jobs[job_id]["status"] = "running"
         jobs[job_id]["logs"].append(f"Starting minikube cluster '{cluster_name}'...")
-        jobs[job_id]["logs"].append(f"Running: minikube start --profile {cluster_name} --cpus=2 --memory=4096")
+        jobs[job_id]["logs"].append(f"Running: minikube start --profile {cluster_name} --cpus=2 --memory=4096 --cni=kindnet")
         jobs[job_id]["logs"].append("")
 
         result = minikube_ops.create_profile(
