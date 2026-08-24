@@ -160,7 +160,12 @@ class DiagnosticAgent(BaseAgent):
                 stack_name = resource_info.get("spec", {}).get("stackName")
             if not stack_name:
                 # Convention: <cluster-name>-rosa-network-stack
-                stack_name = f"{resource_name.replace('-network', '')}-rosa-network-stack"
+                if resource_name.endswith("-rosa-network-stack"):
+                    stack_name = resource_name
+                elif resource_name.endswith("-network"):
+                    stack_name = resource_name.replace("-network", "-rosa-network-stack")
+                else:
+                    stack_name = f"{resource_name}-rosa-network-stack"
 
         # Check CloudFormation stack status
         cfn_status = self._get_cloudformation_stack_status(stack_name, resource_info)
@@ -582,7 +587,12 @@ class DiagnosticAgent(BaseAgent):
         resource_name = context.get("resource_name", "")
         namespace = context.get("namespace", "default")
         if not stack_name and resource_name:
-            stack_name = f"{resource_name.replace('-network', '')}-rosa-network-stack"
+            if resource_name.endswith("-rosa-network-stack"):
+                stack_name = resource_name
+            elif resource_name.endswith("-network"):
+                stack_name = resource_name.replace("-network", "-rosa-network-stack")
+            else:
+                stack_name = f"{resource_name}-rosa-network-stack"
 
         if stack_name:
             # Check actual stack status to confirm
