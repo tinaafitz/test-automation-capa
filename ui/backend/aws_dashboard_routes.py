@@ -564,16 +564,14 @@ async def get_aws_usage():
 
 
 @router.get("/api/aws/usage-trend")
-async def get_aws_usage_trend(days: int = 30, hours: int = None):
+async def get_aws_usage_trend(days: int = 30):
     """Get AWS resource usage trend data over time"""
     try:
         db_path = _resolve("_get_aws_history_db")()
         conn = _get_sqlite3().connect(db_path)
 
-        if hours is not None:
-            cutoff = (datetime.now() - __import__('datetime').timedelta(hours=hours)).isoformat()
-        else:
-            cutoff = (datetime.now() - __import__('datetime').timedelta(days=days)).isoformat()
+        # Get snapshots from the last N days
+        cutoff = (datetime.now() - __import__('datetime').timedelta(days=days)).isoformat()
         rows = conn.execute(
             """SELECT timestamp, resource_key, count FROM usage_snapshots
                WHERE timestamp >= ? ORDER BY timestamp ASC""",
