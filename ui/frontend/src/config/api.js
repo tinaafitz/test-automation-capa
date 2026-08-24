@@ -27,6 +27,9 @@ export const API_ENDPOINTS = {
   ANSIBLE_RUN_TASK: '/api/ansible/run-task',
   ANSIBLE_RUN_PLAYBOOK: '/api/ansible/run-playbook',
 
+  // Minikube endpoints
+  MINIKUBE_INITIALIZE_CAPI: '/api/minikube/initialize-capi',
+
   // MCE endpoints
   MCE_YAML: '/api/mce/yaml',
 
