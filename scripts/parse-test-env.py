@@ -189,7 +189,7 @@ class TestEnvParser:
         output.append("  oc logs -n multicluster-engine deployment/capi-controller-manager --tail=50")
         output.append("")
         output.append("  # Check MCE components")
-        output.append("  oc get mce multiclusterengine -o jsonpath='{.spec.overrides.components}' | jq")
+        output.append("  oc get mce $(oc get mce -ojsonpath='{.items[0].metadata.name}') -o jsonpath='{.spec.overrides.components}' | jq")
         output.append("")
 
         # Save to file option

@@ -136,7 +136,7 @@
       "commands": [
         "oc get deployment -n multicluster-engine | grep -E '(capi|capa)'",
         "oc get pods -n multicluster-engine | grep -E '(capi|capa)'",
-        "oc get mce multiclusterengine -n multicluster-engine -o yaml",
+        "oc get mce $(oc get mce -ojsonpath='{.items[0].metadata.name}') -n multicluster-engine -o yaml",
         "oc get rosacontrolplane,rosamachinepool,rosanetwork --all-namespaces"
       ],
       "description": "Use these commands to monitor environment status after validation"

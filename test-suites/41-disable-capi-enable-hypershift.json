@@ -54,24 +54,24 @@
       "No errors in MCE operator logs"
     ],
     "monitoring": [
-      "oc get mce multiclusterengine -n multicluster-engine -o yaml",
+      "oc get mce $(oc get mce -ojsonpath='{.items[0].metadata.name}') -n multicluster-engine -o yaml",
       "oc get deployment -n multicluster-engine | grep -E '(hypershift|cluster-api)'",
       "oc logs -n multicluster-engine deployment/multicluster-engine-operator"
     ],
     "troubleshooting": {
       "component_not_enabled": {
         "symptom": "Hypershift components not showing as enabled",
-        "check": "oc get mce multiclusterengine -n multicluster-engine -o jsonpath='{.spec.overrides.components[?(@.name==\"hypershift\")].enabled}'",
+        "check": "oc get mce $(oc get mce -ojsonpath='{.items[0].metadata.name}') -n multicluster-engine -o jsonpath='{.spec.overrides.components[?(@.name==\"hypershift\")].enabled}'",
         "solution": "Check MCE operator logs for reconciliation errors. May need to restart MCE operator."
       },
       "component_not_disabled": {
         "symptom": "CAPI components not showing as disabled",
-        "check": "oc get mce multiclusterengine -n multicluster-engine -o jsonpath='{.spec.overrides.components[?(@.name==\"cluster-api\")].enabled}'",
+        "check": "oc get mce $(oc get mce -ojsonpath='{.items[0].metadata.name}') -n multicluster-engine -o jsonpath='{.spec.overrides.components[?(@.name==\"cluster-api\")].enabled}'",
         "solution": "Verify no CAPI-managed clusters exist. Delete any remaining CAPI resources before disabling."
       },
       "mce_not_reconciling": {
         "symptom": "MCE configuration changes not applied",
-        "check": "oc get mce multiclusterengine -n multicluster-engine -o jsonpath='{.status.conditions[?(@.type==\"Available\")]}'",
+        "check": "oc get mce $(oc get mce -ojsonpath='{.items[0].metadata.name}') -n multicluster-engine -o jsonpath='{.status.conditions[?(@.type==\"Available\")]}'",
         "solution": "Increase pause_duration to allow more time. Check MCE operator status."
       }
     },
@@ -101,8 +101,8 @@
       "description": "To switch back from Hypershift to CAPI/CAPA",
       "note": "A reverse test suite (06-enable-capi-disable-hypershift) can be created following the same pattern",
       "manual_steps": [
-        "1. Disable Hypershift: oc patch mce multiclusterengine --type=merge -p '{\"spec\":{\"overrides\":{\"components\":[{\"name\":\"hypershift\",\"enabled\":false},{\"name\":\"hypershift-local-hosting\",\"enabled\":false}]}}}'",
-        "2. Enable CAPI: oc patch mce multiclusterengine --type=merge -p '{\"spec\":{\"overrides\":{\"components\":[{\"name\":\"cluster-api\",\"enabled\":true},{\"name\":\"cluster-api-provider-aws\",\"enabled\":true}]}}}'",
+        "1. Disable Hypershift: oc patch mce $(oc get mce -ojsonpath='{.items[0].metadata.name}') --type=merge -p '{\"spec\":{\"overrides\":{\"components\":[{\"name\":\"hypershift\",\"enabled\":false},{\"name\":\"hypershift-local-hosting\",\"enabled\":false}]}}}'",
+        "2. Enable CAPI: oc patch mce $(oc get mce -ojsonpath='{.items[0].metadata.name}') --type=merge -p '{\"spec\":{\"overrides\":{\"components\":[{\"name\":\"cluster-api\",\"enabled\":true},{\"name\":\"cluster-api-provider-aws\",\"enabled\":true}]}}}'",
         "3. Run: ./run-test-suite.py 01-configure-mce-environment"
       ]
     }
