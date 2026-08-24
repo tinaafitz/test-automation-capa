@@ -92,7 +92,12 @@ class RosaHcpDiagnosticAgent(DiagnosticAgent):
             if not stack_name:
                 stack_name = resource_info.get("spec", {}).get("stackName")
             if not stack_name:
-                stack_name = f"{resource_name.replace('-network', '')}-rosa-network-stack"
+                if resource_name.endswith("-rosa-network-stack"):
+                    stack_name = resource_name
+                elif resource_name.endswith("-network"):
+                    stack_name = resource_name.replace("-network", "-rosa-network-stack")
+                else:
+                    stack_name = f"{resource_name}-rosa-network-stack"
 
         cfn_status = self._get_cloudformation_stack_status(stack_name, resource_info)
 
@@ -309,20 +314,71 @@ class RosaHcpDiagnosticAgent(DiagnosticAgent):
         self.log("Analyzing CloudFormation failure...", "debug")
         resource_name = context.get("resource_name", "unknown")
         namespace = context.get("namespace", "ns-rosa-hcp")
-        stack_name = resource_name.replace("-network", "") + "-rosa-network-stack" if resource_name != "unknown" else ""
-        
+        if resource_name != "unknown":
+            if resource_name.endswith("-rosa-network-stack"):
+                stack_name = resource_name
+            elif resource_name.endswith("-network"):
+                stack_name = resource_name.replace("-network", "-rosa-network-stack")
+            else:
+                stack_name = f"{resource_name}-rosa-network-stack"
+        else:
+            stack_name = ""
+
+        if stack_name:
+            cfn_status = self._get_cloudformation_stack_status(stack_name)
+            if cfn_status in ("GONE", "DELETE_COMPLETE"):
+                self.log(f"CloudFormation stack {stack_name} already deleted", "info")
+                return {
+                    "issue_type": "cloudformation_deletion_failure",
+                    "root_cause": "CloudFormation stack already deleted",
+                    "severity": "low",
+                    "confidence": 1.0,
+                    "evidence": [f"CloudFormation stack {stack_name} no longer exists"],
+                    "recommended_fix": "log_and_continue",
+                    "fix_parameters": {}
+                }
+            if cfn_status == "DELETE_IN_PROGRESS":
+                self.log(f"CloudFormation stack {stack_name} deletion in progress", "info")
+                return {
+                    "issue_type": "cloudformation_deletion_failure",
+                    "root_cause": f"CloudFormation stack {stack_name} deletion already in progress",
+                    "severity": "low",
+                    "confidence": 0.95,
+                    "evidence": [f"CloudFormation stack {stack_name} status: DELETE_IN_PROGRESS"],
+                    "recommended_fix": "increase_timeout_and_monitor",
+                    "fix_parameters": {
+                        "stack_name": stack_name,
+                        "resource_name": resource_name,
+                        "namespace": namespace,
+                    }
+                }
+            if cfn_status == "DELETE_FAILED":
+                self.log(f"CloudFormation stack {stack_name} DELETE_FAILED — triggering cleanup", "warning")
+                return {
+                    "issue_type": "cloudformation_deletion_failure",
+                    "root_cause": f"CloudFormation stack {stack_name} in DELETE_FAILED due to orphaned VPC dependencies",
+                    "severity": "high",
+                    "confidence": 0.95,
+                    "evidence": [f"CloudFormation stack {stack_name} status: DELETE_FAILED"],
+                    "recommended_fix": "retry_cloudformation_delete",
+                    "fix_parameters": {
+                        "stack_name": stack_name,
+                        "region": context.get("region", "us-west-2"),
+                        "resource_name": resource_name,
+                        "namespace": namespace,
+                    }
+                }
+
         return {
             "issue_type": "cloudformation_deletion_failure",
-            "root_cause": "CloudFormation stack failed to delete, likely due to orphaned VPC dependencies",
+            "root_cause": "CloudFormation stack failed to delete, likely due to orphaned resources",
             "severity": "high",
-            "confidence": 0.9,
-            "evidence": ["CloudFormation deletion failure detected"],
-            "recommended_fix": "retry_cloudformation_delete",
+            "confidence": 0.8,
+            "evidence": ["CloudFormation deletion failure detected in logs"],
+            "recommended_fix": "manual_cloudformation_cleanup",
             "fix_parameters": {
-                "stack_name": stack_name,
-                "region": context.get("region", "us-west-2"),
-                "resource_name": resource_name,
-                "namespace": namespace,
+                "action": "inspect_and_report",
+                "message": "CloudFormation stack requires manual inspection and cleanup"
             }
         }
 

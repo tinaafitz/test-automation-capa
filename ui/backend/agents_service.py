@@ -153,6 +153,8 @@ def init_ai_agents(job_id: str, dry_run: bool = False, operation_type: str = "")
                 # Determine state from what happened in the pipeline
                 if diagnosis and diagnosis.get("confidence", 0) >= 0.7:
                     _evt_state = "resolved" if success else "failed"
+                elif diagnosis and diagnosis.get("recommended_fix") == "log_and_continue":
+                    _evt_state = "resolved"
                 elif diagnosis:
                     _evt_state = "diagnosing"
                 else:
@@ -278,6 +280,9 @@ def _enrich_pipeline_event(evt: dict) -> dict:
             evt["state"] = "resolved"
         else:
             evt["state"] = "detected"
+    # log_and_continue is a deliberate no-op — not stuck in diagnosing
+    if evt.get("state") == "diagnosing" and evt.get("fix_applied") == "log_and_continue":
+        evt["state"] = "resolved"
 
     # duration: format from duration_seconds if not already set
     if "duration" not in evt or not evt["duration"]:
