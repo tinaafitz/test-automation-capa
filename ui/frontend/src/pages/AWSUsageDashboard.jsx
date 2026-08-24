@@ -119,6 +119,7 @@ const AWSUsageDashboard = ({ inline = false }) => {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [activeFilter, setActiveFilter] = useState(null);
+  const [chartCollapsed, setChartCollapsed] = useState(false);
   const countdownRef = useRef(null);
   const autoRefreshRef = useRef(null);
 
@@ -743,17 +744,31 @@ const AWSUsageDashboard = ({ inline = false }) => {
             })}
           </div>
 
-          {/* Trend Chart — always visible between Quick Stats and card grid */}
-          <div className="bg-white border border-gray-200 rounded-lg p-4 mb-5">
-            {chartResources.size > 0 ? (
-              <AWSUsageTrend
-                selectedResources={chartResources}
-                onToggleResource={toggleChartResource}
-                height={200}
-              />
-            ) : (
-              <div className="flex items-center justify-center" style={{ height: 200 }}>
-                <p className="text-sm text-[#879596]">Select resources to chart using the <span className="font-medium text-[#545B64]">Chart</span> button on resource cards below</p>
+          {/* Trend Chart — collapsible */}
+          <div className="bg-white border border-gray-200 rounded-lg mb-5">
+            <div
+              onClick={() => setChartCollapsed(prev => !prev)}
+              className="flex items-center justify-between px-4 py-2.5 cursor-pointer select-none hover:bg-gray-50 transition-colors rounded-t-lg"
+            >
+              <span className="text-xs font-semibold text-[#545B64] uppercase tracking-wide">Usage Trend</span>
+              {chartCollapsed
+                ? <ChevronDownIcon className="h-4 w-4 text-[#879596]" />
+                : <ChevronUpIcon className="h-4 w-4 text-[#879596]" />
+              }
+            </div>
+            {!chartCollapsed && (
+              <div className="px-4 pb-4">
+                {chartResources.size > 0 ? (
+                  <AWSUsageTrend
+                    selectedResources={chartResources}
+                    onToggleResource={toggleChartResource}
+                    height={200}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center" style={{ height: 200 }}>
+                    <p className="text-sm text-[#879596]">Select resources to chart using the <span className="font-medium text-[#545B64]">Chart</span> button on resource cards below</p>
+                  </div>
+                )}
               </div>
             )}
           </div>

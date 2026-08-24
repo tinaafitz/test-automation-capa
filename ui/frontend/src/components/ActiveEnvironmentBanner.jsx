@@ -190,9 +190,27 @@ const ActiveEnvironmentBanner = ({ verificationTimestamp = null, environment = '
                   OCP {mceInfo.ocpVersion}
                 </span>
               )}
+              {mceInfo.acmVersion && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                  ACM {mceInfo.acmVersion}
+                </span>
+              )}
               {mceInfo.version && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-cyan-100 text-cyan-800">
                   MCE {mceInfo.version}
+                </span>
+              )}
+              {(mceInfo.capiImage || mceInfo.capaImage) && (
+                <span className="text-gray-300 mx-0.5">|</span>
+              )}
+              {mceInfo.capiImage && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono text-gray-500 bg-gray-100" title={mceInfo.capiImage}>
+                  CAPI: {mceInfo.capiImage.split('/').pop().split('@')[0]}
+                </span>
+              )}
+              {mceInfo.capaImage && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono text-gray-500 bg-gray-100" title={mceInfo.capaImage}>
+                  CAPA: {mceInfo.capaImage.split('/').pop().split('@')[0]}
                 </span>
               )}
             </div>

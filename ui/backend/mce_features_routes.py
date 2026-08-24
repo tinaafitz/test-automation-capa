@@ -100,12 +100,47 @@ def _get_mce_features_sync():
             except Exception:
                 pass
 
+            acm_version = ""
+            try:
+                acm_result = subprocess.run(
+                    ["oc", "get", "multiclusterhub", "--all-namespaces",
+                     "-o", "jsonpath={.items[0].status.currentVersion}"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if acm_result.returncode == 0 and acm_result.stdout.strip():
+                    acm_version = acm_result.stdout.strip()
+            except Exception:
+                pass
+
+            capi_image = ""
+            capa_image = ""
+            try:
+                for deploy, key in [
+                    ("capi-controller-manager", "capi"),
+                    ("capa-controller-manager", "capa"),
+                ]:
+                    img_result = subprocess.run(
+                        ["oc", "get", "deployment", deploy, "-n", "multicluster-engine",
+                         "-o", "jsonpath={.spec.template.spec.containers[0].image}"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if img_result.returncode == 0 and img_result.stdout.strip():
+                        if key == "capi":
+                            capi_image = img_result.stdout.strip()
+                        else:
+                            capa_image = img_result.stdout.strip()
+            except Exception:
+                pass
+
             mce_info = {
                 "name": mce_name,
                 "version": mce_version,
                 "status": mce_status,
                 "available": mce_status == "Available",
                 "ocpVersion": ocp_version,
+                "acmVersion": acm_version,
+                "capiImage": capi_image,
+                "capaImage": capa_image,
                 "capabilities": {
                     "rosaNetworkCrd": rosa_network_crd_available,
                     "rosaRoleConfigCrd": rosa_role_config_crd_available,
