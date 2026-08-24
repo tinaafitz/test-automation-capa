@@ -10,7 +10,9 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import yaml
@@ -820,6 +822,83 @@ def get_capi_resources(context: str, namespace: str = "ns-rosa-hcp") -> Dict[str
 # ---------------------------------------------------------------------------
 # CAPI configuration (clusterctl install)
 # ---------------------------------------------------------------------------
+
+# GitHub "tree" URL: https://github.com/<owner>/<repo>/tree/<branch>/<subpath>
+# NOTE: <branch> may itself contain slashes (e.g. feat/rosaeng-8275-...), so we
+# capture everything after /tree/ and strip the known CRD subpath to recover it.
+_GITHUB_TREE_RE = re.compile(
+    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/tree/(?P<rest>.+)$"
+)
+
+# The playbook globs {SOURCE_PATH}/config/crd/bases/*.yaml, so the URL's CRD
+# subpath is always this. Stripping it from <rest> yields the full branch name.
+_CRD_SUBPATH = "config/crd/bases"
+
+
+def _resolve_crd_source_path(crd_location: str, on_output=None) -> Optional[str]:
+    """Resolve a CRD location to a local filesystem path.
+
+    If crd_location is a GitHub /tree/<branch>/config/crd/bases URL, shallow-clone
+    the repo at that branch into a temp dir and return the repo root (the playbook
+    globs ``{path}/config/crd/bases/*.yaml``). If it is already a local path,
+    return it as-is. Returns None if it cannot be resolved.
+
+    Branch names may contain slashes, so we strip the known CRD subpath rather
+    than assume the branch is a single path segment.
+
+    The caller is responsible for cleaning up the returned temp clone.
+    """
+    if not crd_location:
+        return None
+
+    crd_location = crd_location.strip()
+
+    # Already a local path.
+    if not crd_location.startswith(("http://", "https://")):
+        return crd_location if os.path.exists(crd_location) else None
+
+    m = _GITHUB_TREE_RE.match(crd_location.rstrip("/"))
+    if not m:
+        if on_output:
+            on_output(f"Warning: unsupported CRD URL (expected a GitHub /tree/ URL): {crd_location}")
+        return None
+
+    owner, repo, rest = m.group("owner"), m.group("repo"), m.group("rest")
+    # rest = "<branch>/config/crd/bases" (or just "<branch>"); strip the subpath.
+    branch = rest
+    if branch.endswith("/" + _CRD_SUBPATH):
+        branch = branch[: -(len(_CRD_SUBPATH) + 1)]
+    elif "/" + _CRD_SUBPATH + "/" in branch:
+        branch = branch.split("/" + _CRD_SUBPATH + "/", 1)[0]
+    if not branch:
+        if on_output:
+            on_output(f"Warning: could not parse branch from CRD URL: {crd_location}")
+        return None
+
+    clone_url = f"https://github.com/{owner}/{repo}.git"
+    tmp_dir = tempfile.mkdtemp(prefix="capa-crd-")
+    if on_output:
+        on_output(f"Cloning CRDs from {owner}/{repo}@{branch} ...")
+    try:
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", "--branch", branch, clone_url, tmp_dir],
+            capture_output=True, text=True, timeout=180,
+        )
+        if result.returncode != 0:
+            if on_output:
+                on_output(f"Warning: CRD clone failed: {result.stderr.strip()}")
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return None
+        if on_output:
+            on_output(f"✓ CRDs cloned to {tmp_dir}")
+        return tmp_dir
+    except Exception as e:
+        if on_output:
+            on_output(f"Warning: could not clone CRDs: {e}")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return None
+
+
 def configure_capi(profile_name: str, project_root: str,
                    custom_capa_image: Optional[Dict] = None,
                    on_output=None) -> Dict[str, Any]:
@@ -831,12 +910,16 @@ def configure_capi(profile_name: str, project_root: str,
         custom_capa_image: Optional dict with repository, tag, sourcePath
         on_output: Optional callback for streaming output lines
     """
-    playbook_path = os.path.join(project_root, "tasks", "clusterctl_install_capi.yml")
+    # Run the top-level playbook, NOT tasks/clusterctl_install_capi.yml directly:
+    # the latter is a task file (no play header) and `ansible-playbook` rejects it
+    # with "'shell' is not a valid attribute for a Play". The root playbook
+    # include_tasks it with a proper play (hosts, vars_files).
+    playbook_path = os.path.join(project_root, "initialize-minikube-capi.yml")
     if not os.path.exists(playbook_path):
         return {
             "success": False,
             "message": f"Initialization playbook not found at: {playbook_path}",
-            "suggestion": "Ensure clusterctl installation task file exists",
+            "suggestion": "Ensure initialize-minikube-capi.yml exists at the project root",
         }
 
     # Switch context first
@@ -855,15 +938,29 @@ def configure_capi(profile_name: str, project_root: str,
     if credentials:
         env.update(credentials)
 
+    # Track a temp CRD clone so we can clean it up after the run.
+    crd_clone_dir = None
+
     if custom_capa_image:
+        repository = (custom_capa_image.get("repository") or "").strip()
+        tag = (custom_capa_image.get("tag") or "").strip()
         env["CUSTOM_CAPA_IMAGE"] = "true"
-        env["CUSTOM_CAPA_IMAGE_REPO"] = custom_capa_image.get("repository", "")
-        env["CUSTOM_CAPA_IMAGE_TAG"] = custom_capa_image.get("tag", "")
-        env["CUSTOM_CAPA_SOURCE_PATH"] = custom_capa_image.get("sourcePath", "")
+        env["CUSTOM_CAPA_IMAGE_REPO"] = repository
+        env["CUSTOM_CAPA_IMAGE_TAG"] = tag
+
+        # Resolve the CRD location. The UI sends `crdLocation` (a GitHub /tree/
+        # URL); older callers may pass a local `sourcePath`. Either resolves to a
+        # local dir the playbook globs as {path}/config/crd/bases/*.yaml.
+        crd_location = custom_capa_image.get("crdLocation") or custom_capa_image.get("sourcePath") or ""
+        source_path = _resolve_crd_source_path(crd_location, on_output=on_output) or ""
+        env["CUSTOM_CAPA_SOURCE_PATH"] = source_path
+        # If we cloned it (URL case), remember it for cleanup.
+        if source_path and source_path != crd_location.strip():
+            crd_clone_dir = source_path
 
         # Pre-load the custom image into Minikube so the controller pod doesn't
         # hit ImagePullBackOff when the registry is unreachable from inside the VM.
-        full_image = f"{custom_capa_image.get('repository', '')}:{custom_capa_image.get('tag', '')}"
+        full_image = f"{repository}:{tag}"
         if on_output:
             on_output(f"Loading custom image into Minikube (this may take a minute): {full_image}")
         try:
@@ -880,8 +977,13 @@ def configure_capi(profile_name: str, project_root: str,
             if on_output:
                 on_output(f"Warning: could not pre-load image: {e}")
 
-    # Build command — credentials are already in env, no need to expose on CLI
-    cmd = ["ansible-playbook", playbook_path, "-vv"]
+    # Build command — credentials are already in env, no need to expose on CLI.
+    # The root playbook reads cluster_name/install_method as extra-vars.
+    cmd = [
+        "ansible-playbook", playbook_path, "-vv",
+        "-e", f"cluster_name={profile_name}",
+        "-e", "install_method=clusterctl",
+    ]
 
     try:
         process = subprocess.Popen(
@@ -905,6 +1007,9 @@ def configure_capi(profile_name: str, project_root: str,
         return {"success": False, "message": "CAPI configuration timed out after 10 minutes"}
     except Exception as e:
         return {"success": False, "message": f"Error: {str(e)}"}
+    finally:
+        if crd_clone_dir:
+            shutil.rmtree(crd_clone_dir, ignore_errors=True)
 
 
 def _load_credentials(project_root: str) -> Dict[str, str]:

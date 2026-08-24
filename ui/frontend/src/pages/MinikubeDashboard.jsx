@@ -689,11 +689,11 @@ const MinikubeDashboardContent = () => {
   // Handle reconfiguration submission
   const handleReconfigureSubmit = () => {
     // If custom image is enabled and fields are filled, pass to handleConfigure
-    if (useCustomImage && customImageRepo && customImageTag) {
+    if (useCustomImage && customImageRepo.trim() && customImageTag.trim()) {
       const customImageConfig = {
-        repository: customImageRepo,
-        tag: customImageTag,
-        crdLocation: crdLocation,
+        repository: customImageRepo.trim(),
+        tag: customImageTag.trim(),
+        crdLocation: crdLocation.trim(),
       };
       handleConfigure(customImageConfig);
     } else {
@@ -743,19 +743,19 @@ const MinikubeDashboardContent = () => {
         output: `Starting Minikube CAPI/CAPA configuration...\nCluster: ${targetClusterName}\nMethod: ${methodInfo.name}`,
       });
 
-      const response = await fetch(buildApiUrl(API_ENDPOINTS.ANSIBLE_RUN_PLAYBOOK), {
+      // Route through the dedicated Minikube endpoint so the custom image is
+      // wired via env vars (CUSTOM_CAPA_IMAGE*), the image is pre-loaded into
+      // Minikube, and CRDs are applied. The generic run-playbook endpoint does
+      // none of that and silently skips all custom-image tasks.
+      const response = await fetch(buildApiUrl(API_ENDPOINTS.MINIKUBE_INITIALIZE_CAPI), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          playbook: 'initialize-minikube-capi.yml',
-          description: `Configure Minikube CAPI/CAPA (${methodInfo.name})`,
-          extra_vars: {
-            cluster_name: targetClusterName,
-            install_method: installMethod,
-            custom_capa_image: customImage,
-          },
+          cluster_name: targetClusterName,
+          install_method: installMethod,
+          custom_capa_image: customImage,
         }),
       });
 
