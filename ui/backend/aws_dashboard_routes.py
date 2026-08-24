@@ -196,6 +196,34 @@ def _collect_aws_usage_data():
     except Exception as e:
         usage_data["ec2_instances"] = "error"
 
+    # Spot Instances — scoped to our own provisioned (Red Hat-managed) clusters,
+    # not the whole account. Count non-terminated spot instances only, since
+    # terminated instances don't consume quota.
+    try:
+        result = subprocess.run(
+            [
+                "aws", "ec2", "describe-instances",
+                "--filters",
+                "Name=instance-lifecycle,Values=spot",
+                "Name=tag:red-hat-managed,Values=true",
+                "Name=instance-state-name,Values=pending,running,stopping,stopped",
+                "--output", "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            spot_count = 0
+            for reservation in data.get("Reservations", []):
+                spot_count += len(reservation.get("Instances", []))
+            usage_data["spot_instances"] = spot_count
+        else:
+            usage_data["spot_instances"] = "error"
+    except Exception as e:
+        usage_data["spot_instances"] = "error"
+
     # EBS Volumes
     try:
         result = subprocess.run(
@@ -638,6 +666,22 @@ async def get_single_resource_usage(resource_key: str):
                 count = len(json.loads(r.stdout).get("SecurityGroups", []))
         elif resource_key == "ec2_instances":
             r = subprocess.run(["aws", "ec2", "describe-instances", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                count = sum(len(res.get("Instances", [])) for res in data.get("Reservations", []))
+        elif resource_key == "spot_instances":
+            # Only our own provisioned (Red Hat-managed) spot instances, excluding terminated.
+            r = subprocess.run(
+                [
+                    "aws", "ec2", "describe-instances",
+                    "--filters",
+                    "Name=instance-lifecycle,Values=spot",
+                    "Name=tag:red-hat-managed,Values=true",
+                    "Name=instance-state-name,Values=pending,running,stopping,stopped",
+                    "--output", "json",
+                ],
+                capture_output=True, text=True, timeout=30
+            )
             if r.returncode == 0:
                 data = json.loads(r.stdout)
                 count = sum(len(res.get("Instances", [])) for res in data.get("Reservations", []))
