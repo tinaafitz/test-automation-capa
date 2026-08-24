@@ -42,6 +42,17 @@ billed_resources:
     cost_type: "variable"
     cost_notes: "Varies by instance type, region, and usage (on-demand vs reserved)"
 
+  spot_instances:
+    label: "Spot Instances"
+    icon: "🎰"
+    description: "Our spot instances (Standard family)"
+    default_threshold: 512
+    use_aws_quota: true
+    quota_service_code: "ec2"
+    quota_code: "L-34B43A08"  # All Standard (A, C, D, H, I, M, R, T, Z) Spot Instance Requests (vCPUs)
+    cost_type: "variable"
+    cost_notes: "Spot pricing is ~60-90% off on-demand but interruptible. Count is scoped to red-hat-managed clusters only; excludes terminated instances. Quota is vCPU-based (a single m5.xlarge = 4 vCPUs)."
+
   ebs_volumes:
     label: "EBS Volumes"
     icon: "💾"

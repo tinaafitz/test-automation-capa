@@ -196,6 +196,34 @@ def _collect_aws_usage_data():
     except Exception as e:
         usage_data["ec2_instances"] = "error"
 
+    # Spot Instances — scoped to our own provisioned (Red Hat-managed) clusters,
+    # not the whole account. Count non-terminated spot instances only, since
+    # terminated instances don't consume quota.
+    try:
+        result = subprocess.run(
+            [
+                "aws", "ec2", "describe-instances",
+                "--filters",
+                "Name=instance-lifecycle,Values=spot",
+                "Name=tag:red-hat-managed,Values=true",
+                "Name=instance-state-name,Values=pending,running,stopping,stopped",
+                "--output", "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            spot_count = 0
+            for reservation in data.get("Reservations", []):
+                spot_count += len(reservation.get("Instances", []))
+            usage_data["spot_instances"] = spot_count
+        else:
+            usage_data["spot_instances"] = "error"
+    except Exception as e:
+        usage_data["spot_instances"] = "error"
+
     # EBS Volumes
     try:
         result = subprocess.run(
@@ -536,14 +564,16 @@ async def get_aws_usage():
 
 
 @router.get("/api/aws/usage-trend")
-async def get_aws_usage_trend(days: int = 30):
+async def get_aws_usage_trend(days: int = 30, hours: int = None):
     """Get AWS resource usage trend data over time"""
     try:
         db_path = _resolve("_get_aws_history_db")()
         conn = _get_sqlite3().connect(db_path)
 
-        # Get snapshots from the last N days
-        cutoff = (datetime.now() - __import__('datetime').timedelta(days=days)).isoformat()
+        if hours is not None:
+            cutoff = (datetime.now() - __import__('datetime').timedelta(hours=hours)).isoformat()
+        else:
+            cutoff = (datetime.now() - __import__('datetime').timedelta(days=days)).isoformat()
         rows = conn.execute(
             """SELECT timestamp, resource_key, count FROM usage_snapshots
                WHERE timestamp >= ? ORDER BY timestamp ASC""",
@@ -638,6 +668,22 @@ async def get_single_resource_usage(resource_key: str):
                 count = len(json.loads(r.stdout).get("SecurityGroups", []))
         elif resource_key == "ec2_instances":
             r = subprocess.run(["aws", "ec2", "describe-instances", "--output", "json"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                count = sum(len(res.get("Instances", [])) for res in data.get("Reservations", []))
+        elif resource_key == "spot_instances":
+            # Only our own provisioned (Red Hat-managed) spot instances, excluding terminated.
+            r = subprocess.run(
+                [
+                    "aws", "ec2", "describe-instances",
+                    "--filters",
+                    "Name=instance-lifecycle,Values=spot",
+                    "Name=tag:red-hat-managed,Values=true",
+                    "Name=instance-state-name,Values=pending,running,stopping,stopped",
+                    "--output", "json",
+                ],
+                capture_output=True, text=True, timeout=30
+            )
             if r.returncode == 0:
                 data = json.loads(r.stdout)
                 count = sum(len(res.get("Instances", [])) for res in data.get("Reservations", []))
