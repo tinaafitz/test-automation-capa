@@ -54,24 +54,23 @@
   "ocm_auth_failure": {
     "name": "Refresh OCM Token",
     "strategy": "refresh_ocm_token",
-    "automated": false,
+    "automated": true,
     "steps": [
-      "Check OCM token expiration",
-      "Obtain fresh token from OCM",
-      "Update credentials in test environment",
+      "Invalidate cached OCM token",
+      "Obtain fresh token via client_credentials or refresh_token grant",
+      "Verify new token with whoami call",
       "Retry operation"
     ],
     "commands": [
-      "rosa whoami",
-      "rosa login --token={new_token}"
+      "OCMClient.invalidate_token()",
+      "OCMClient.whoami()"
     ],
     "prerequisites": [
-      "Valid OCM account",
-      "Access to obtain new OCM token"
+      "Valid OCM credentials (client_credentials or ocm.json refresh_token)"
     ],
-    "success_criteria": "'rosa whoami' succeeds",
+    "success_criteria": "OCMClient.whoami() returns success with authenticated user",
     "rollback": "Keep old token until new one is verified",
-    "notes": "OCM tokens typically expire after 24 hours. Consider using client credentials for automation."
+    "notes": "Uses OCMClient with 3 auth methods: client_credentials, refresh_token from ocm.json, rosa CLI fallback."
   },
   "capi_not_installed": {
     "name": "Install/Verify CAPI/CAPA",
