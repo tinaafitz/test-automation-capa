@@ -1,7 +1,14 @@
-# Verify MCE version supports CAPI components (requires 2.8+)
+- name: Discover MCE resource name
+  shell: |
+    oc get mce -ojsonpath='{.items[0].metadata.name}'
+  register: mce_name_result
+
+- set_fact:
+    mce_resource_name: "{{ mce_name_result.stdout }}"
+
 - name: Get MCE version
   shell: |
-    oc get mce multiclusterengine -n {{ mce_namespace | default('multicluster-engine') }} -ojsonpath='{.status.currentVersion}'
+    oc get mce {{ mce_resource_name }} -ojsonpath='{.status.currentVersion}'
   register: mce_version_result
 
 - name: Parse MCE major.minor version

@@ -203,7 +203,7 @@ oc get rosacontrolplane -n ns-rosa-hcp -o jsonpath='{range .items[*]}{.metadata.
 ### Check MCE Components
 ```bash
 # View MCE configuration
-oc get mce multiclusterengine -n multicluster-engine -o yaml
+oc get mce $(oc get mce -ojsonpath='{.items[0].metadata.name}') -n multicluster-engine -o yaml
 
 # Check CAPA controller logs
 oc logs -n multicluster-engine deployment/capa-controller-manager
