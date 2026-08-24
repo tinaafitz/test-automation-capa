@@ -133,11 +133,27 @@ class RemediationAgent(BaseAgent):
 
     def _fix_refresh_ocm_token(self, params: Dict) -> Tuple[bool, str]:
         """Refresh OCM authentication token."""
-        self.log("Refreshing OCM token", "info")
+        self.log("Attempting OCM token refresh via OCMClient", "info")
 
-        # This would integrate with OCM credential refresh logic
-        # For now, we log that intervention is needed
-        return False, "OCM token refresh requires manual intervention - credentials need to be updated"
+        try:
+            from .ocm_client import OCMClient
+            client = OCMClient(log_fn=self.log)
+
+            if not client.available:
+                return False, "No OCM credentials available (set OCM_CLIENT_ID/OCM_CLIENT_SECRET or configure ocm.json)"
+
+            client.invalidate_token()
+            result = client.whoami()
+
+            if result and result.get("success"):
+                user_info = result.get("user_info", {})
+                email = user_info.get("ocm_account_email", "unknown")
+                self.log(f"OCM token refreshed successfully (authenticated as {email})", "info")
+                return True, f"OCM token refreshed successfully (authenticated as {email})"
+
+            return False, f"OCM token refresh failed: whoami returned {result}"
+        except Exception as e:
+            return False, f"OCM token refresh failed: {e}"
 
     def _fix_backoff_retry(self, params: Dict) -> Tuple[bool, str]:
         """Recommend backoff for rate limiting (advisory, non-blocking)."""
