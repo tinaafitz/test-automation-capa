@@ -1385,7 +1385,7 @@ export function ExpressProvision({ onSubmit }) {
           <span className="mx-1.5 text-gray-300">&middot;</span>
           <span>us-west-2</span>
           <span className="mx-1.5 text-gray-300">&middot;</span>
-          <span>1 AZ</span>
+          <span>2 AZ</span>
           <span className="mx-1.5 text-gray-300">&middot;</span>
           <span>auto roles</span>
         </p>
