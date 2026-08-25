@@ -36,10 +36,20 @@ router = APIRouter()
 
 def _resolve(name: str):
     """Look up *name* via the app module so that unittest.mock.patch on
-    ``app.<name>`` takes effect even though the endpoint lives here."""
-    app_mod = sys.modules.get("app")
-    if app_mod is not None:
-        return getattr(app_mod, name)
+    ``app.<name>`` takes effect even though the endpoint lives here.
+
+    The backend may be started either as a module (``uvicorn app:app``,
+    registered as ``app``) or as a script (``python app.py``, registered as
+    ``__main__``). Check both, then fall back to shared_state (the single
+    source of truth for these globals) so ``jobs`` resolves regardless of how
+    the process was launched."""
+    for mod_name in ("app", "__main__"):
+        app_mod = sys.modules.get(mod_name)
+        if app_mod is not None and hasattr(app_mod, name):
+            return getattr(app_mod, name)
+    import shared_state
+    if hasattr(shared_state, name):
+        return getattr(shared_state, name)
     return globals()[name]
 
 

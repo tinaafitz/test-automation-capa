@@ -7,7 +7,7 @@ import RosaHcpClustersSection from '../components/sections/RosaHcpClustersSectio
 import MCEEnvironmentSelector from '../components/MCEEnvironmentSelector';
 import ActiveEnvironmentBanner from '../components/ActiveEnvironmentBanner';
 import { YamlEditorModal } from '../components/YamlEditorModal';
-import { RosaProvisionModal } from '../components/RosaProvisionModal';
+import { RosaProvisionModal, ExpressProvision } from '../components/RosaProvisionModal';
 import ResourcesViewer from '../components/ResourcesViewer';
 import {
   useMinikubeContext,
@@ -637,6 +637,7 @@ const MinikubeDashboardContent = () => {
   const [configurationResults, setConfigurationResults] = useState(null); // Configuration output results
   const [configurationLiveLogs, setConfigurationLiveLogs] = useState(''); // Live logs during configuration
   const [provisionResults, setProvisionResults] = useState(null); // Provision output results
+  const [provisionViewMode, setProvisionViewMode] = useState('express'); // 'express' or 'form'
   const [isProvisioning, setIsProvisioning] = useState(false); // Track provisioning state
   const [bannerRefreshKey, setBannerRefreshKey] = useState(0); // Force banner refresh
 
@@ -1831,33 +1832,65 @@ const MinikubeDashboardContent = () => {
                 />
               </div>
             ) : (
-              /* Provision Form - Inline (not modal) */
+              /* Express / Custom creation method */
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xl font-semibold text-gray-900">Configure ROSA HCP Cluster</h3>
-                  <button
-                    onClick={() => {
-                      // Clear the provision section and return to main view
-                      setProvisionResults(null);
-                      setYamlEditorData(null);
-                    }}
-                    className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors text-sm font-medium"
-                  >
-                    Cancel
-                  </button>
+                <div className="mb-6">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Choose a creation method</h3>
+                  <div className="space-y-2">
+                    <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                      provisionViewMode === 'express' ? 'border-purple-400 bg-purple-50 ring-1 ring-purple-200' : 'border-gray-200 hover:bg-gray-50'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="minikubeProvisionMode"
+                        checked={provisionViewMode === 'express'}
+                        onChange={() => setProvisionViewMode('express')}
+                        className="mt-0.5 h-4 w-4 text-purple-600 border-gray-300 focus:ring-purple-500"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-gray-900">Express</span>
+                        <p className="text-xs text-gray-500 mt-0.5">Use recommended defaults. Only specify a prefix and channel group.</p>
+                      </div>
+                    </label>
+                    <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                      provisionViewMode === 'form' ? 'border-purple-400 bg-purple-50 ring-1 ring-purple-200' : 'border-gray-200 hover:bg-gray-50'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="minikubeProvisionMode"
+                        checked={provisionViewMode === 'form'}
+                        onChange={() => setProvisionViewMode('form')}
+                        className="mt-0.5 h-4 w-4 text-purple-600 border-gray-300 focus:ring-purple-500"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-gray-900">Custom</span>
+                        <p className="text-xs text-gray-500 mt-0.5">Set all configuration options including version, network, roles, FIPS, and log forwarding.</p>
+                      </div>
+                    </label>
+                  </div>
                 </div>
-                <RosaProvisionModal
-                  isOpen={true}
-                  inline={true}
-                  onClose={() => {
-                    // Clear the provision section and return to main view
-                    setProvisionResults(null);
-                    setYamlEditorData(null);
-                  }}
-                  onSubmit={handleProvisionSubmit}
-                  mceInfo={{ version: 'N/A' }} // Minikube environment - enable all latest features
-                  theme="minikube"
-                />
+
+                <div className="border-t border-gray-200 pt-6">
+                  {provisionViewMode === 'express' ? (
+                    <ExpressProvision
+                      onSubmit={handleProvisionSubmit}
+                    />
+                  ) : (
+                    <RosaProvisionModal
+                      isOpen={true}
+                      inline={true}
+                      onClose={() => {
+                        // Return to the express default; clear any in-progress state
+                        setProvisionViewMode('express');
+                        setProvisionResults(null);
+                        setYamlEditorData(null);
+                      }}
+                      onSubmit={handleProvisionSubmit}
+                      mceInfo={{ version: 'N/A' }} // Minikube environment - enable all latest features
+                      theme="minikube"
+                    />
+                  )}
+                </div>
               </div>
             )}
           </div>

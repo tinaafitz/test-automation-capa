@@ -190,7 +190,9 @@ from aws_dashboard_routes import (
 
 app.include_router(aws_dashboard_router)
 
-from aws_orphan_report import daily_orphan_report_loop as _daily_orphan_report_loop
+# NOTE: aws_orphan_report module was never committed (see commit f794635 which
+# added this import but not the file). Disabled until the module is restored.
+# from aws_orphan_report import daily_orphan_report_loop as _daily_orphan_report_loop
 
 # MCE features routes
 from mce_features_routes import router as mce_features_router, _get_mce_features_sync
@@ -265,9 +267,10 @@ async def start_aws_snapshot_collector():
     asyncio.create_task(_aws_usage_snapshot_loop())
 
 
-@app.on_event("startup")
-async def start_daily_orphan_report():
-    asyncio.create_task(_daily_orphan_report_loop())
+# Disabled: aws_orphan_report module is missing (see import note above).
+# @app.on_event("startup")
+# async def start_daily_orphan_report():
+#     asyncio.create_task(_daily_orphan_report_loop())
 
 
 @app.on_event("startup")

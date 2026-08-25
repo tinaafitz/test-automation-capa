@@ -1,6 +1,10 @@
 # Credentials and secrets
 vars/user_vars.yml
 vars/trigger_state.json
+
+# Runtime SQLite stores (job/execution/report state)
+vars/*.db
+ui/backend/*.db
 *.pem
 *.key
 *.crt
