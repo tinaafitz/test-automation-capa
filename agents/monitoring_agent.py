@@ -293,12 +293,29 @@ class MonitoringAgent(BaseAgent):
 
         Format: #AGENT_CONTEXT: resource_name=my-cluster namespace=my-ns resource_type=rosanetwork
         """
-        match = AGENT_CONTEXT_PATTERN.search(line.strip())
-        if match:
+        # A single Ansible result line can contain the marker more than once:
+        # first in the unexpanded `cmd` field (e.g. resource_name=$NETWORK_NAME)
+        # and again in the expanded `stdout`/`stdout_lines`. Take the LAST
+        # occurrence, which is the expanded one with real values.
+        matches = list(AGENT_CONTEXT_PATTERN.finditer(line.strip()))
+        if matches:
+            match = matches[-1]
             pairs = match.group(1)
             for pair in pairs.split():
                 if '=' in pair:
                     key, value = pair.split('=', 1)
+                    # The marker may be matched from Ansible's JSON-serialized
+                    # `cmd` field rather than expanded stdout, so values can
+                    # carry trailing escape artifacts (e.g. the backslash of a
+                    # literal "\n" continuation) or surrounding quotes. Strip
+                    # them so downstream exact-match logic (resource_type ==
+                    # "rosanetwork") works reliably.
+                    value = value.strip().rstrip('\\').strip('"\'')
+                    # Skip unexpanded shell placeholders like $NETWORK_NAME —
+                    # they're never a real resource identity and would poison
+                    # the tracking key.
+                    if value.startswith('$'):
+                        continue
                     self._structured_context[key] = value
             # Preserve this context across the next TASK boundary so the
             # immediately following wait task can use it.

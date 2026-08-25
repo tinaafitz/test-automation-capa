@@ -204,6 +204,25 @@ def test_structured_context_marker():
     assert monitor._structured_context.get("resource_name") == "bar-rosa-hcp-network", \
         f"Expected 'bar-rosa-hcp-network', got '{monitor._structured_context.get('resource_name')}'"
     assert monitor._structured_context.get("namespace") == "ns-rosa-hcp"
+
+    # Real-world Ansible result line: the marker appears TWICE — first in the
+    # unexpanded `cmd` field (with $VARS and a literal "\n" continuation), then
+    # again in expanded `stdout`. The parser must pick the expanded occurrence
+    # and must not leave a trailing backslash on resource_type. This is the
+    # regression that caused resource_type="rosanetwork\" in CI.
+    monitor._structured_context.clear()
+    real_line = (
+        '"cmd": "echo \\"#AGENT_CONTEXT: resource_name=$NETWORK_NAME '
+        'namespace=$NAMESPACE resource_type=rosanetwork\\n\\" | tee -a \\"$LOGFILE\\"\\n", '
+        '"stdout": "#AGENT_CONTEXT: resource_name=jnk-rosa-hcp-network '
+        'namespace=ns-rosa-hcp resource_type=rosanetwork", "rc": 0'
+    )
+    monitor.process_line(real_line)
+    assert monitor._structured_context.get("resource_type") == "rosanetwork", \
+        f"Expected clean 'rosanetwork', got {monitor._structured_context.get('resource_type')!r}"
+    assert monitor._structured_context.get("resource_name") == "jnk-rosa-hcp-network", \
+        f"Expected expanded name, got {monitor._structured_context.get('resource_name')!r}"
+    assert monitor._structured_context.get("namespace") == "ns-rosa-hcp"
     print("PASSED")
 
 

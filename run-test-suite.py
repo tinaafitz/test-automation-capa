@@ -274,7 +274,7 @@ class TestSuiteRunner:
             return {**base_result, "success": True, "duration": duration, "output": output}
         elif "Timeout" in result.get("error", ""):
             print(f"{Colors.RED}✗ Timeout after {self._format_duration(duration)}{Colors.ENDC}")
-            return {**base_result, "success": False, "error": result["error"], "duration": duration}
+            return {**base_result, "success": False, "is_error": True, "error": result["error"], "duration": duration}
         else:
             print(f"{Colors.RED}✗ Failed with exit code {result.get('returncode', -1)}{Colors.ENDC}")
             return {**base_result, "success": False, "error": output, "duration": duration, "output": output}
@@ -681,13 +681,26 @@ class TestSuiteRunner:
         import xml.etree.ElementTree as ET
         from xml.dom import minidom
 
+        # A testcase is an ERROR (infrastructure/timeout) rather than a
+        # FAILURE (assertion) when it carries is_error. Compute the top-level
+        # totals from the actual playbook results so the XML never misreports
+        # (previously errors/skipped were hardcoded to 0, which masked timeouts
+        # and could confuse CI health reporting).
+        all_playbooks = [
+            p for suite in self.results.get('suites', [])
+            for p in suite['playbooks']
+        ]
+        total_errors = sum(1 for p in all_playbooks if not p['success'] and p.get('is_error'))
+        total_failures = sum(1 for p in all_playbooks if not p['success'] and not p.get('is_error'))
+        total_skipped = sum(1 for p in all_playbooks if p.get('skipped'))
+
         # Create root testsuites element
         testsuites = ET.Element('testsuites')
         testsuites.set('name', 'ROSA HCP Test Suite')
         testsuites.set('tests', str(self.results['total_tests']))
-        testsuites.set('failures', str(self.results['failed']))
-        testsuites.set('errors', '0')
-        testsuites.set('skipped', str(self.results.get('skipped', 0)))
+        testsuites.set('failures', str(total_failures))
+        testsuites.set('errors', str(total_errors))
+        testsuites.set('skipped', str(total_skipped))
         testsuites.set('time', str(round(self.results['duration'], 3)))
 
         # Add each suite as a testsuite element
@@ -698,11 +711,13 @@ class TestSuiteRunner:
             testsuite.set('tests', str(len(suite['playbooks'])))
             testsuite.set('time', str(round(suite['duration'], 3)))
 
-            # Count failures in this suite
-            suite_failures = sum(1 for p in suite['playbooks'] if not p['success'])
+            # Count failures/errors/skipped in this suite from real results.
+            suite_errors = sum(1 for p in suite['playbooks'] if not p['success'] and p.get('is_error'))
+            suite_failures = sum(1 for p in suite['playbooks'] if not p['success'] and not p.get('is_error'))
+            suite_skipped = sum(1 for p in suite['playbooks'] if p.get('skipped'))
             testsuite.set('failures', str(suite_failures))
-            testsuite.set('errors', '0')
-            testsuite.set('skipped', '0')
+            testsuite.set('errors', str(suite_errors))
+            testsuite.set('skipped', str(suite_skipped))
 
             # Add each playbook as a testcase
             for playbook in suite['playbooks']:
@@ -723,18 +738,22 @@ class TestSuiteRunner:
                 testcase.set('classname', f"{suite['name']} {testcase_name}")
                 testcase.set('time', str(round(playbook['duration'], 3)))
 
-                # If failed, add failure element with error details
+                # If failed, add a <failure> (assertion) or <error>
+                # (infrastructure/timeout) element with details.
                 if not playbook['success']:
-                    failure = ET.SubElement(testcase, 'failure')
-                    failure.set('type', 'TestFailure')
-                    failure.set('message', playbook.get('error', 'Test failed'))
+                    tag = 'error' if playbook.get('is_error') else 'failure'
+                    elem = ET.SubElement(testcase, tag)
+                    elem.set('type', 'TestError' if tag == 'error' else 'TestFailure')
+                    elem.set('message', playbook.get('error', 'Test failed'))
 
                     # Add full error details as text content
                     error_text = f"Playbook: {playbook['name']}\n"
                     error_text += f"Error: {playbook.get('error', 'Unknown error')}\n"
                     if 'output' in playbook and playbook['output']:
                         error_text += f"\nOutput:\n{playbook['output']}"
-                    failure.text = error_text
+                    elem.text = error_text
+                elif playbook.get('skipped'):
+                    ET.SubElement(testcase, 'skipped')
 
         # Pretty print XML
         xml_str = ET.tostring(testsuites, encoding='unicode')
@@ -1090,6 +1109,17 @@ Examples:
         if args.format in ["junit", "all"]:
             junit_file = runner.save_results(format="junit")
             print(f"{Colors.CYAN}📄 JUnit XML: {junit_file}{Colors.ENDC}")
+            # Surface the exact counts this XML reports so a Jenkins UNSTABLE
+            # verdict can be traced to the right file/stage instead of being
+            # blamed on benign 'FAILED - RETRYING' log lines. If failures or
+            # errors are >0 here, THIS file is why the build is UNSTABLE; if
+            # they're 0, the culprit is a different XML in the junit glob
+            # (e.g. a prior stage or stale results from an earlier build).
+            _all = [p for s in runner.results.get('suites', []) for p in s['playbooks']]
+            _err = sum(1 for p in _all if not p['success'] and p.get('is_error'))
+            _fail = sum(1 for p in _all if not p['success'] and not p.get('is_error'))
+            print(f"{Colors.CYAN}   ↳ Reports: {len(_all)} tests, "
+                  f"{_fail} failures, {_err} errors{Colors.ENDC}")
 
     # Return exit code for CI/CD
     return 0 if success else 1
