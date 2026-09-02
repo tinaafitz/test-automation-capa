@@ -96,6 +96,11 @@
         role_prefix: ""
       when: create_rosa_role_config is not defined
 
+    - name: Set default OCM-role linkage validation (ROSA-637)
+      set_fact:
+        validate_ocm_role_linkage: false
+      when: validate_ocm_role_linkage is not defined
+
     - name: Set default domain prefix
       set_fact:
         domain_prefix: "test-{{ 99999 | random }}"

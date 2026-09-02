@@ -64,10 +64,16 @@
     create_rosa_network: false
   when: create_rosa_network is not defined
 
+- name: Set default value for validate_ocm_role_linkage
+  set_fact:
+    validate_ocm_role_linkage: false
+  when: validate_ocm_role_linkage is not defined
+
 - name: Ensure boolean types for flags
   set_fact:
     create_rosa_roles: "{{ create_rosa_roles | bool }}"
     create_rosa_network: "{{ create_rosa_network | bool }}"
+    validate_ocm_role_linkage: "{{ validate_ocm_role_linkage | bool }}"
 
 - name: Set default value for aws_region
   set_fact:
@@ -336,6 +342,24 @@
 
     - name: Run OCM role pre-flight check
       include_tasks: preflight_check_ocm_role.yml
+
+# ================================================================
+# PRE-FLIGHT: Validate mandatory OCM-role linkage (ROSA-637)
+# ================================================================
+- name: Validate mandatory OCM-role linkage
+  when: validate_ocm_role_linkage | bool
+  block:
+    - name: Display OCM-role linkage validation message
+      debug:
+        msg: |
+          🔐 PRE-FLIGHT: Validating mandatory OCM-role linkage
+          ───────────────────────────────────────────────────────────
+          ROSA-637 / ROSAENG-60868: assert a linked OCM role authorizes an
+          OCM op (positive) and an unlinked op is rejected with 403
+          (404 tolerated during the enforcement-transition window).
+
+    - name: Run OCM-role linkage validation
+      include_tasks: validate_ocm_role_linkage.yml
 
 # ================================================================
 # STEP 1: Create RosaRoleConfig (if requested)
