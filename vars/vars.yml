@@ -1,5 +1,6 @@
 #==== Common ====
 output_dir: "{{ lookup('env', 'HOME') }}/output"
+cleanup_kubeconfig: false                         # set true to delete the extracted <cluster>-kubeconfig after the run (it is a full cluster credential).
 skip_ansible_runner: false
 # ansible_async_dir: '/root/.ansible_async'
 ansible_async_dir: '/tmp/.ansible_async'
@@ -53,6 +54,11 @@ acm_namespace: "open-cluster-management"
 
 capi_namespace: "ns-rosa-hcp"
 rosa_hcp_namespace: "{{ capi_namespace }}"
+
+# Target cluster + minikube mgmt context for install_mce_on_provisioned_cluster.yml.
+# Normally supplied via -e cluster_name=... / -e minikube_context=... (or env).
+cluster_name: ""
+minikube_context: "minikube"
 capa_system_namespace: "multicluster-engine"
 rosa_creds_secret: "rosa-creds-secret"
 
@@ -60,6 +66,62 @@ rosa_creds_secret: "rosa-creds-secret"
 mce_sub_name: "multicluster-engine"
 mce_namespace: "multicluster-engine"
 mce_name: "multiclusterengine"
+
+# Credential defaults ("" so env/user_vars fallbacks in playbooks always resolve;
+# preflight_check_mce_creds.yml is what actually hard-fails on empties).
+OCM_CLIENT_ID: ""
+OCM_CLIENT_SECRET: ""
+AWS_ACCESS_KEY_ID: ""
+AWS_SECRET_ACCESS_KEY: ""
+AWS_REGION: ""
+
+# MCE operator install (used by install_mce_on_provisioned_cluster.yml)
+mce_channel: "stable-2.8"                          # must map to MCE >= 2.8; validated against packagemanifest at install time (gaCatalog mode only)
+mce_catalog_source: "redhat-operators"
+mce_catalog_source_namespace: "openshift-marketplace"
+mce_install_plan_approval: "Automatic"
+
+# ---------------------------------------------------------------------------
+# MCE source mode: choose between the GA catalog and the acm-d dev catalog.
+#
+#   gaCatalog  (default) — stable-2.8 / redhat-operators; validated against the
+#                          packagemanifest at install time. Standard GA install.
+#   devCatalog           — the team's 5.0 pre-release / RC / dev builds, sourced
+#                          from the downstream acm-d dev catalog (VERIFIED live
+#                          off the ci-azure-w36 regression hub; see docs section 3a).
+#
+# For a 5.0 RC/dev run, set (per-run, e.g. via -e or user_vars.yml):
+#   mce_source_mode: devCatalog
+#   acm_repo: acmd                 # -> catalog_sources.acmd.index_image.source = "quay.io:443/acm-d"
+#   mce_dev_catalog_tag: latest-5.0   # moving tag, OR pin e.g. "5.0.0-259"
+#   mce_channel: stable-5.0        # VERIFIED: acm-d dev catalog publishes per-stream
+#                                  #   stable-* channels. stable-5.0 -> v5.0.0-259.
+#                                  #   Do NOT use stable-2.8 or candidate-*.
+#
+# IMPORTANT: the dev catalog's defaultChannel is stable-5.1 (i.e. 5.1). The
+# install task ALWAYS sets channel explicitly on the Subscription, so it never
+# silently falls back to 5.1 — but that means you MUST set mce_channel for 5.0.
+#
+# To lock an exact build (recommended for reproducible RC testing), also set
+#   mce_starting_csv: multicluster-engine.v5.0.0-259
+# The dev catalog HAS a multicluster-engine packagemanifest, so mce_channel is
+# validated against it AFTER the CatalogSource reports READY (see task).
+#
+# PREREQUISITE (hard, live-test): quay.io:443/acm-d is an internal/authenticated
+# dev registry. The target ROSA HCP cluster needs a pull secret for
+# quay.io:443/acm-d (and possibly an ICSP/IDMS) BEFORE the catalog pod can pull
+# the image, otherwise the CatalogSource pod ImagePullBackOffs and never reaches
+# READY. See docs/mce-on-provisioned-rosa-hcp.md section 3a.
+# ---------------------------------------------------------------------------
+mce_source_mode: "gaCatalog"                       # gaCatalog | devCatalog
+mce_dev_catalog_name: "mce-dev-catalog"            # CatalogSource metadata.name (devCatalog mode)
+mce_dev_catalog_tag: "latest-5.0"                  # moving tag; or pin e.g. "5.0.0-259"
+mce_starting_csv: ""                               # optional: pin exact CSV, e.g. "multicluster-engine.v5.0.0-259"
+# Derived from the existing catalog_sources / acm_repo scaffolding: setting
+# acm_repo: acmd yields "quay.io:443/acm-d/mce-dev-catalog:<tag>". Override
+# directly if you need a fully custom image reference.
+mce_dev_catalog_image: "{{ catalog_sources[acm_repo].index_image.source }}/mce-dev-catalog:{{ mce_dev_catalog_tag }}"
+
 default_lc_name: "local-cluster"
 infra_nodes: false
 ingress_cert_secret: "custom-cert"

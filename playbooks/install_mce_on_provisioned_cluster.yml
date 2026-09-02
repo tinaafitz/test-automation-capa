@@ -1,0 +1,154 @@
+---
+- name: Install and configure MCE on a freshly-provisioned ROSA HCP cluster
+  hosts: localhost
+  any_errors_fatal: true
+  vars_files:
+    - ../vars/vars.yml
+    - ../vars/user_vars.yml
+  tasks:
+    - set_fact:
+        cluster_name: "{{ lookup('env', 'CLUSTER_NAME') | default(cluster_name, true) }}"
+        capi_namespace: "{{ lookup('env', 'CAPI_NAMESPACE') | default(capi_namespace, true) }}"
+        minikube_context: "{{ lookup('env', 'MINIKUBE_CONTEXT') | default(minikube_context, true) }}"
+        output_dir: "{{ lookup('env', 'OUTPUT_DIR') | default(output_dir, true) }}"
+        mce_namespace: "{{ lookup('env', 'MCE_NAMESPACE') | default(mce_namespace, true) }}"
+        mce_name: "{{ lookup('env', 'MCE_NAME') | default(mce_name, true) }}"
+        mce_sub_name: "{{ lookup('env', 'MCE_SUB_NAME') | default(mce_sub_name, true) }}"
+        mce_channel: "{{ lookup('env', 'MCE_CHANNEL') | default(mce_channel, true) }}"
+        mce_catalog_source: "{{ lookup('env', 'MCE_CATALOG_SOURCE') | default(mce_catalog_source, true) }}"
+        mce_catalog_source_namespace: "{{ lookup('env', 'MCE_CATALOG_SOURCE_NAMESPACE') | default(mce_catalog_source_namespace, true) }}"
+        mce_install_plan_approval: "{{ lookup('env', 'MCE_INSTALL_PLAN_APPROVAL') | default(mce_install_plan_approval, true) }}"
+        mce_source_mode: "{{ lookup('env', 'MCE_SOURCE_MODE') | default(mce_source_mode, true) }}"
+        acm_repo: "{{ lookup('env', 'ACM_REPO') | default(acm_repo, true) }}"
+        mce_dev_catalog_name: "{{ lookup('env', 'MCE_DEV_CATALOG_NAME') | default(mce_dev_catalog_name, true) }}"
+        mce_dev_catalog_tag: "{{ lookup('env', 'MCE_DEV_CATALOG_TAG') | default(mce_dev_catalog_tag, true) }}"
+        mce_starting_csv: "{{ lookup('env', 'MCE_STARTING_CSV') | default(mce_starting_csv, true) }}"
+        OCM_CLIENT_ID: "{{ lookup('env', 'OCM_CLIENT_ID') | default(OCM_CLIENT_ID, true) }}"
+        OCM_CLIENT_SECRET: "{{ lookup('env', 'OCM_CLIENT_SECRET') | default(OCM_CLIENT_SECRET, true) }}"
+        AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') | default(AWS_ACCESS_KEY_ID, true) }}"
+        AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') | default(AWS_SECRET_ACCESS_KEY, true) }}"
+        AWS_REGION: "{{ lookup('env', 'AWS_REGION') | default(AWS_REGION, true) }}"
+        AUTOMATION_PATH: "{{ lookup('env', 'AUTOMATION_PATH') | default(playbook_dir + '/..', true) }}"
+
+    # 1. Fail fast on missing / placeholder OCM + AWS credentials.
+    - name: Preflight - validate OCM and AWS credentials
+      include_tasks: ../tasks/preflight_check_mce_creds.yml
+
+    # 2. Optional gate - wait for the ROSAControlPlane to be Ready on the
+    #    minikube management cluster before extracting the kubeconfig.
+    #
+    #    NOTE (B1): the shared wait_for_rosa_control_plane_ready.yml uses bare,
+    #    context-less `oc get rosacontrolplane ...`, so it hits whatever kube
+    #    context is currently active. We must select the minikube mgmt context
+    #    FIRST (same approach as provision_rosa_hcp_minikube.yml), otherwise the
+    #    wait queries the wrong cluster. This selection is deliberately BEFORE
+    #    the KUBECONFIG block below; that block sets its own KUBECONFIG env which
+    #    overrides the active-context selection for the new-hub tasks, so this
+    #    does not leak into the new-hub work.
+    - name: Select the minikube management context for the control-plane wait
+      shell: |
+        kubectl config use-context {{ minikube_context }}
+      register: minikube_context_result
+      changed_when: false
+      when: not (skip_wait_for_ready | default(false) | bool)
+
+    - name: Wait for ROSA control plane to be ready (minikube context)
+      include_tasks: ../tasks/wait_for_rosa_control_plane_ready.yml
+      when: not (skip_wait_for_ready | default(false) | bool)
+
+    # 3. Extract the CAPA-published <cluster_name>-kubeconfig for the new hub.
+    - name: Get the new hub kubeconfig
+      include_tasks: ../tasks/get_new_hub_kubeconfig.yml
+
+    # 4-8. Everything from here on targets the NEW hub via KUBECONFIG.
+    #      enable_capi_capa.yml and create_rosa_creds_secret.yml use bare
+    #      context-less oc, so setting KUBECONFIG at the block environment
+    #      level is the non-invasive redirect to the new hub.
+    - name: Install and configure MCE on the new hub
+      environment:
+        KUBECONFIG: "{{ new_hub_kubeconfig }}"
+      block:
+        - name: Install the MCE operator on the new hub
+          include_tasks: ../tasks/install_mce_operator.yml
+
+        # B2: the shared create_rosa_creds_secret.yml creates the OCM secret a
+        # SECOND time in {{ capi_namespace }}, but nothing creates that namespace
+        # on the fresh new hub (only multicluster-engine exists). Pre-create it
+        # here, idempotently, inside the KUBECONFIG block so it lands on the NEW
+        # hub. The guard MUST mirror the shared task's own literal predicate
+        # (capi_namespace != 'multicluster-engine') EXACTLY -- using mce_namespace
+        # here would let the guards diverge if mce_namespace is overridden to
+        # equal capi_namespace, skipping the ns-create while the second secret
+        # create still fires (silently, under no_log) -> the blocker returns.
+        - name: Ensure the CAPI namespace exists on the new hub (for rosa-creds-secret)
+          shell: |
+            oc create namespace {{ capi_namespace }} \
+              --dry-run=client -o yaml | oc apply -f -
+          register: new_hub_capi_ns
+          changed_when: "'created' in new_hub_capi_ns.stdout"
+          when: capi_namespace is defined and capi_namespace != 'multicluster-engine'
+
+        # M2: the reused create_rosa_creds_secret.yml has an internal debug task
+        # that prints ocm_client_id / ocm_client_secret in plaintext, and its
+        # `oc create secret` shells echo secret values in argv, none with no_log.
+        # We do NOT edit that shared task; instead we suppress the entire include
+        # (the include and all its inner tasks inherit no_log) at the call site.
+        # Follow-up: a separate PR should add no_log inside the shared task.
+        - name: Create rosa-creds-secret (OCM) on the new hub
+          include_tasks: ../tasks/create_rosa_creds_secret.yml
+          no_log: true
+
+        # The MCE-managed CAPA controller mounts this secret's SINGLE
+        # `credentials` key as an AWS shared-credentials ini file at
+        # /home/.aws/credentials (via AWS_SHARED_CREDENTIALS_FILE). Separate
+        # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY keys are ignored -> the
+        # controller falls back to EC2 IMDS -> "no EC2 IMDS role found" and
+        # every ROSA cluster provisioned from this hub silently fails. So we
+        # build a `[default]` ini (region from {{ AWS_REGION }}, no quotes -
+        # quotes break the AWS SDK ini parser) into one `credentials` key.
+        - name: Create AWS bootstrap credentials secret on the new hub
+          shell: |
+            oc create secret generic capa-manager-bootstrap-credentials \
+              --from-literal=credentials="$(printf '[default]\naws_access_key_id = %s\naws_secret_access_key = %s\nregion = %s\n' '{{ AWS_ACCESS_KEY_ID }}' '{{ AWS_SECRET_ACCESS_KEY }}' '{{ AWS_REGION }}')" \
+              -n {{ mce_namespace }} \
+              --dry-run=client -o yaml | oc apply -f -
+          register: new_hub_aws_secret
+          no_log: true
+
+        - name: Enable CAPI/CAPA and disable HyperShift on the new hub
+          include_tasks: ../tasks/enable_capi_capa.yml
+
+    # 9. Final summary.
+    - name: Get new hub console URL
+      shell: |
+        oc --kubeconfig {{ new_hub_kubeconfig }} whoami --show-console
+      register: new_hub_console
+      failed_when: false
+      changed_when: false
+
+    - name: Print installation summary
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          ✅ MCE hub ready on freshly-provisioned ROSA HCP cluster
+          ============================================================
+          Cluster:        {{ cluster_name }}
+          Kubeconfig:     {{ new_hub_kubeconfig }}
+          Console:        {{ new_hub_console.stdout | default('(unavailable)') }}
+          MCE version:    {{ mce_current_version.stdout | default('unknown') }}
+          CAPI/CAPA:      enabled (HyperShift disabled)
+          Creds on hub:   rosa-creds-secret + capa-manager-bootstrap-credentials
+                          in {{ mce_namespace }}
+          ============================================================
+          Next: provision workload clusters against this hub, or run
+          test-suites/05-verify-mce-environment.json against it.
+
+    # 10. Opt-in cleanup. The extracted <cluster>-kubeconfig is a full
+    #     cluster-admin credential. It is kept by default (the summary above
+    #     references it and the operator may still need it); pass
+    #     -e cleanup_kubeconfig=true to remove it after the run.
+    - name: Remove the extracted new-hub kubeconfig artifact (opt-in)
+      ansible.builtin.file:
+        path: "{{ new_hub_kubeconfig }}"
+        state: absent
+      when: cleanup_kubeconfig | default(false) | bool
