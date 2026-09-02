@@ -660,6 +660,15 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
                 sidecar_cluster = cluster_name
             sidecar_logfile = f"/tmp/{'deletion' if is_deletion else 'provision'}-agent-{sidecar_cluster}.log"
 
+            # How often the tailer re-reads the sidecar file. Lower = fresher
+            # UI/agent updates at the cost of more wakeups. Default 1.0s (was
+            # 2.0s); override with SIDECAR_TAIL_INTERVAL for tuning.
+            try:
+                sidecar_interval = float(os.environ.get("SIDECAR_TAIL_INTERVAL", "1.0"))
+            except (TypeError, ValueError):
+                sidecar_interval = 1.0
+            sidecar_interval = max(0.25, sidecar_interval)
+
             def _tail_sidecar():
                 """Tail the sidecar log file and feed lines to the AI agent in real-time."""
                 last_pos = 0
@@ -687,7 +696,7 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
                                 last_pos = f.tell()
                     except Exception:
                         pass
-                    sidecar_stop.wait(2)
+                    sidecar_stop.wait(sidecar_interval)
 
             sidecar_thread = threading.Thread(target=_tail_sidecar, daemon=True)
             sidecar_thread.start()
