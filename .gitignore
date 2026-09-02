@@ -9,6 +9,7 @@ ui/backend/*.db
 *.key
 *.crt
 kubeconfig
+*-kubeconfig
 
 # Test results
 test-results/

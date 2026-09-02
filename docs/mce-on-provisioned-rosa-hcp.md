@@ -328,7 +328,10 @@ Two independent reviews of this workflow surfaced the following issues; all are 
 5. **Shared `enable_capi_capa.yml` uses context-less `oc`** — relies on play/block `KUBECONFIG` env
    to redirect. Verified no sub-task hardcodes a context; re-verify on implementation.
 6. **Runtime kubeconfig file in `output_dir`** — acceptable artifact; ensure not world-readable and
-   in a gitignored location.
+   in a gitignored location. Note this is a **long-lived, full cluster-admin credential** written
+   `0600` to `{{ output_dir }}/{{ cluster_name }}-kubeconfig`. It is kept by default (the summary
+   references it and you may still need it). Remove it after the run with
+   `-e cleanup_kubeconfig=true`, or delete the file manually when finished.
 
 ---
 

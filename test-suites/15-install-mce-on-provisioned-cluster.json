@@ -17,8 +17,8 @@
         "minikube_context": "minikube",
         "mce_channel": "stable-2.8"
       },
-      "timeout_budget_comment": "M1: the runner SIGKILLs this playbook at `timeout` seconds. The realistic worst case is control-plane wait (75x30=2250s) + MCE install loops (devCatalog catalog READY 600s + packagemanifest 180s + currentCSV 300s + CSV Succeeded 1200s + MCE Available 1800s + currentVersion 300s). gaCatalog (no dev catalog) sums to ~3600s of install loops; devCatalog to ~4200s; plus the 2250s control-plane wait. 5400s (90 min) covers a healthy-but-slow gaCatalog install with control-plane wait, and a devCatalog install when the control-plane wait is skipped, without being absurd. Do NOT lower below the sum of the loop budgets in tasks/install_mce_operator.yml + tasks/wait_for_rosa_control_plane_ready.yml.",
-      "timeout": 5400,
+      "timeout_budget_comment": "M1: the runner SIGKILLs this playbook at `timeout` seconds. The realistic worst case is control-plane wait (75x30=2250s) + MCE install loops (devCatalog catalog READY 600s + packagemanifest 180s + currentCSV 300s + CSV Succeeded 1200s + MCE Available 1800s + currentVersion 300s). gaCatalog (no dev catalog) sums to ~3600s of install loops; devCatalog to ~4200s. With the control-plane wait ENABLED (the default, skip_wait_for_ready=false) the worst cases are gaCatalog ~5850s (3600+2250) and devCatalog ~6630s (4200+2250). 7200s (120 min) covers the devCatalog-with-control-plane-wait worst case (~6630s) with headroom; gaCatalog runs and any run with the wait skipped finish well under it. Do NOT lower below the sum of the loop budgets in tasks/install_mce_operator.yml + tasks/wait_for_rosa_control_plane_ready.yml.",
+      "timeout": 7200,
       "required": true
     }
   ],

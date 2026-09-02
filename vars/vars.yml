@@ -1,5 +1,6 @@
 #==== Common ====
 output_dir: "{{ lookup('env', 'HOME') }}/output"
+cleanup_kubeconfig: false                         # set true to delete the extracted <cluster>-kubeconfig after the run (it is a full cluster credential).
 skip_ansible_runner: false
 # ansible_async_dir: '/root/.ansible_async'
 ansible_async_dir: '/tmp/.ansible_async'

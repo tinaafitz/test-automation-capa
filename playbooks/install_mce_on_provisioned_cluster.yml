@@ -71,6 +71,23 @@
         - name: Install the MCE operator on the new hub
           include_tasks: ../tasks/install_mce_operator.yml
 
+        # B2: the shared create_rosa_creds_secret.yml creates the OCM secret a
+        # SECOND time in {{ capi_namespace }}, but nothing creates that namespace
+        # on the fresh new hub (only multicluster-engine exists). Pre-create it
+        # here, idempotently, inside the KUBECONFIG block so it lands on the NEW
+        # hub. The guard MUST mirror the shared task's own literal predicate
+        # (capi_namespace != 'multicluster-engine') EXACTLY -- using mce_namespace
+        # here would let the guards diverge if mce_namespace is overridden to
+        # equal capi_namespace, skipping the ns-create while the second secret
+        # create still fires (silently, under no_log) -> the blocker returns.
+        - name: Ensure the CAPI namespace exists on the new hub (for rosa-creds-secret)
+          shell: |
+            oc create namespace {{ capi_namespace }} \
+              --dry-run=client -o yaml | oc apply -f -
+          register: new_hub_capi_ns
+          changed_when: "'created' in new_hub_capi_ns.stdout"
+          when: capi_namespace is defined and capi_namespace != 'multicluster-engine'
+
         # M2: the reused create_rosa_creds_secret.yml has an internal debug task
         # that prints ocm_client_id / ocm_client_secret in plaintext, and its
         # `oc create secret` shells echo secret values in argv, none with no_log.
@@ -125,3 +142,13 @@
           ============================================================
           Next: provision workload clusters against this hub, or run
           test-suites/05-verify-mce-environment.json against it.
+
+    # 10. Opt-in cleanup. The extracted <cluster>-kubeconfig is a full
+    #     cluster-admin credential. It is kept by default (the summary above
+    #     references it and the operator may still need it); pass
+    #     -e cleanup_kubeconfig=true to remove it after the run.
+    - name: Remove the extracted new-hub kubeconfig artifact (opt-in)
+      ansible.builtin.file:
+        path: "{{ new_hub_kubeconfig }}"
+        state: absent
+      when: cleanup_kubeconfig | default(false) | bool
