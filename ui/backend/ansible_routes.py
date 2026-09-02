@@ -654,11 +654,28 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
 
         if use_sidecar:
             cluster_name = extra_vars.get("cluster_name", extra_vars.get("clusterName", extra_vars.get("name_prefix", "")))
-            if cluster_name and not cluster_name.endswith("-rosa-hcp") and is_provisioning:
-                sidecar_cluster = f"{cluster_name}-rosa-hcp"
-            else:
-                sidecar_cluster = cluster_name
-            sidecar_logfile = f"/tmp/{'deletion' if is_deletion else 'provision'}-agent-{sidecar_cluster}.log"
+            prefix = "deletion" if is_deletion else "provision"
+            # Resolve the sidecar filename robustly. The playbook writes to
+            # /tmp/provision-agent-{cluster_name}.log verbatim (see
+            # tasks/provision_rosa_hcp_with_automation.yml: agent_sidecar_log).
+            # An explicit agent_sidecar_log in extra_vars is authoritative;
+            # otherwise try the exact cluster_name first, then the historical
+            # "-rosa-hcp"-suffixed variant, and pick whichever file exists so we
+            # don't silently tail a nonexistent path when a cluster is named
+            # without the -rosa-hcp convention.
+            explicit = extra_vars.get("agent_sidecar_log")
+            candidates = []
+            if explicit:
+                candidates.append(explicit)
+            if cluster_name:
+                candidates.append(f"/tmp/{prefix}-agent-{cluster_name}.log")
+                if is_provisioning and not cluster_name.endswith("-rosa-hcp"):
+                    candidates.append(f"/tmp/{prefix}-agent-{cluster_name}-rosa-hcp.log")
+            if not candidates:
+                candidates = [f"/tmp/{prefix}-agent-.log"]
+            # Reported for logging; the tailer resolves lazily among candidates
+            # (the file usually doesn't exist yet at job start).
+            sidecar_logfile = candidates[0]
 
             # How often the tailer re-reads the sidecar file. Lower = fresher
             # UI/agent updates at the cost of more wakeups. Default 1.0s (was
@@ -672,10 +689,13 @@ def _run_playbook_in_thread(playbook: str, extra_vars: dict, job_id: str, descri
             def _tail_sidecar():
                 """Tail the sidecar log file and feed lines to the AI agent in real-time."""
                 last_pos = 0
+                resolved = None  # locked onto the first candidate that appears
                 while not sidecar_stop.is_set():
                     try:
-                        if os.path.exists(sidecar_logfile):
-                            with open(sidecar_logfile, 'r') as f:
+                        if resolved is None:
+                            resolved = next((c for c in candidates if os.path.exists(c)), None)
+                        if resolved and os.path.exists(resolved):
+                            with open(resolved, 'r') as f:
                                 f.seek(last_pos)
                                 new_lines = f.readlines()
                                 if new_lines:
