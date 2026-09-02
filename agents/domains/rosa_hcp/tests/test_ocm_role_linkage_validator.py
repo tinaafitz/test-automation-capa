@@ -3,8 +3,8 @@ OCM Role Linkage Validator Tests
 ================================
 
 Unit tests for the pure 403/404-tolerant decision logic
-(`verdict_from_status`) and the validator orchestration with fake clients.
-Covers ROSA-637 / ROSAENG-60868 semantics.
+(`verdict_from_status`) and the negative-enforcement probe with a fake OCM
+client. Covers ROSA-637 / ROSAENG-60868 semantics.
 
 Runnable both under pytest and standalone (mirrors test_rosa_hcp.py).
 """
@@ -75,39 +75,31 @@ class _FakeOCM:
         raise urllib.error.HTTPError(url, 404, "not found", {}, None)
 
 
-class _FakeAWS:
-    available = False
-
-    def _client(self, service):
-        return None
-
-
-def test_validate_positive_authorized_negative_404():
-    """End-to-end with fakes: positive 200, negative 404 -> both pass."""
+def test_negative_probe_404_is_tolerated():
+    """Negative probe returning 404 -> rejected (tolerated transition)."""
     ocm = _FakeOCM(
         "https://api.stage.openshift.com",
-        {"current_account": 200, "access_review": 404},
+        {"access_review": 404},
     )
-    v = OCMRoleLinkageValidator(ocm_client=ocm, aws_client=_FakeAWS(), aws_account_id="111")
-    result = v.validate()
-    assert result["positive_op_authorized"] is True
-    assert result["negative_op_rejected"] is True
-    assert result["negative_status_code"] == 404
-    assert result["verdict"] == "rejected_404_transition_tolerated"
-    print("PASSED: validate() positive=200, negative=404")
+    v = OCMRoleLinkageValidator(ocm_client=ocm, aws_account_id="111")
+    decision = v.probe_negative()
+    assert decision["negative_op_rejected"] is True
+    assert decision["status_code"] == 404
+    assert decision["verdict"] == "rejected_404_transition_tolerated"
+    print("PASSED: negative probe 404 -> tolerated")
 
 
-def test_validate_negative_200_flags_not_enforced():
+def test_negative_probe_200_flags_not_enforced():
     """If unlinked op returns 200, negative_op_rejected must be False."""
     ocm = _FakeOCM(
         "https://api.stage.openshift.com",
-        {"current_account": 200, "access_review": 200},
+        {"access_review": 200},
     )
-    v = OCMRoleLinkageValidator(ocm_client=ocm, aws_client=_FakeAWS(), aws_account_id="111")
-    result = v.validate()
-    assert result["negative_op_rejected"] is False
-    assert result["verdict"] == "not_enforced_200"
-    print("PASSED: validate() negative=200 -> not enforced")
+    v = OCMRoleLinkageValidator(ocm_client=ocm, aws_account_id="111")
+    decision = v.probe_negative()
+    assert decision["negative_op_rejected"] is False
+    assert decision["verdict"] == "not_enforced_200"
+    print("PASSED: negative probe 200 -> not enforced")
 
 
 def test_negative_probe_empty_account_id_raises():
@@ -116,9 +108,9 @@ def test_negative_probe_empty_account_id_raises():
 
     ocm = _FakeOCM(
         "https://api.stage.openshift.com",
-        {"current_account": 200, "access_review": 404},
+        {"access_review": 404},
     )
-    v = OCMRoleLinkageValidator(ocm_client=ocm, aws_client=_FakeAWS(), aws_account_id="")
+    v = OCMRoleLinkageValidator(ocm_client=ocm, aws_account_id="")
     with pytest.raises(ValueError, match="aws_account_id is required"):
         v.probe_negative()
     print("PASSED: empty account_id -> ValueError (no false 404 pass)")
@@ -128,11 +120,10 @@ def test_negative_probe_custom_template_without_account_id_ok():
     """A template that doesn't reference account_id needn't require one."""
     ocm = _FakeOCM(
         "https://api.stage.openshift.com",
-        {"current_account": 200, "custom_probe": 403},
+        {"custom_probe": 403},
     )
     v = OCMRoleLinkageValidator(
         ocm_client=ocm,
-        aws_client=_FakeAWS(),
         aws_account_id="",
         negative_probe_path_template="/api/custom_probe",
     )
@@ -148,8 +139,8 @@ if __name__ == "__main__":
         test_404_is_tolerated_transition,
         test_200_is_not_enforced_failure,
         test_unexpected_status_is_failure,
-        test_validate_positive_authorized_negative_404,
-        test_validate_negative_200_flags_not_enforced,
+        test_negative_probe_404_is_tolerated,
+        test_negative_probe_200_flags_not_enforced,
         test_negative_probe_empty_account_id_raises,
         test_negative_probe_custom_template_without_account_id_ok,
     ]

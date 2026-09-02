@@ -123,6 +123,22 @@
         rosa_role_config_name: "{{ cluster_name }}-roles"
         rosa_network_name: "{{ cluster_name }}-network"
 
+    # ROSA-637 negative-enforcement assertion is appended to the OCM-role
+    # preflight, which only runs inside the create_rosa_roles-gated block. Warn
+    # loudly if the assertion was requested but role-config is off, so the flag
+    # isn't silently skipped (the user would otherwise think it ran).
+    - name: Warn if OCM-role linkage validation was requested but will be skipped
+      debug:
+        msg: |
+          ⚠️  validate_ocm_role_linkage=true but create_rosa_role_config=false —
+          the ROSA-637 OCM-role negative-enforcement assertion runs inside the
+          OCM-role preflight, which only executes when role-config automation is
+          enabled. The assertion will be SKIPPED. Set create_rosa_role_config=true
+          (the suite-20 default) to run it.
+      when:
+        - validate_ocm_role_linkage | default(false) | bool
+        - not (create_rosa_roles | default(false) | bool)
+
     - name: Prepare ansible runner host
       include_tasks: ../tasks/prepare_ansible_runner.yml
       when: not skip_ansible_runner | default(false) | bool

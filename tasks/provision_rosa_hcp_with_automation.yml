@@ -344,24 +344,6 @@
       include_tasks: preflight_check_ocm_role.yml
 
 # ================================================================
-# PRE-FLIGHT: Validate mandatory OCM-role linkage (ROSA-637)
-# ================================================================
-- name: Validate mandatory OCM-role linkage
-  when: validate_ocm_role_linkage | bool
-  block:
-    - name: Display OCM-role linkage validation message
-      debug:
-        msg: |
-          🔐 PRE-FLIGHT: Validating mandatory OCM-role linkage
-          ───────────────────────────────────────────────────────────
-          ROSA-637 / ROSAENG-60868: assert a linked OCM role authorizes an
-          OCM op (positive) and an unlinked op is rejected with 403
-          (404 tolerated during the enforcement-transition window).
-
-    - name: Run OCM-role linkage validation
-      include_tasks: validate_ocm_role_linkage.yml
-
-# ================================================================
 # STEP 1: Create RosaRoleConfig (if requested)
 # ================================================================
 - name: Create RosaRoleConfig for automated AWS role creation
