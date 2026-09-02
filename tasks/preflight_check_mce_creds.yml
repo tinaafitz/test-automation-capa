@@ -1,0 +1,66 @@
+# M3-related: validate the non-secret required inputs first, with a PLAIN
+# (non-no_log) message so the user sees exactly what is missing. cluster_name
+# empty -> the kubeconfig secret name becomes "-kubeconfig" and fails late;
+# AWS_REGION empty -> the AWS bootstrap secret is created without a region.
+- name: Validate cluster_name and AWS_REGION are set (preflight)
+  ansible.builtin.fail:
+    msg: |
+      ❌ REQUIRED INPUT MISSING ❌
+
+      cluster_name and AWS_REGION must be set before installing MCE on the new hub.
+
+        cluster_name = '{{ cluster_name | default('') }}'
+          (empty -> the <cluster_name>-kubeconfig secret lookup becomes
+           "-kubeconfig" and fails late during kubeconfig extraction)
+
+        AWS_REGION   = '{{ AWS_REGION | default('') }}'
+          (consumed by the capa-manager-bootstrap-credentials AWS secret)
+
+      ⚠️  REQUIRED ACTION:
+        - Pass -e cluster_name=<name> (or set CLUSTER_NAME), and
+        - Set AWS_REGION (env or vars/user_vars.yml), then retry.
+  when: >
+    cluster_name is not defined or cluster_name | string | trim == '' or
+    AWS_REGION is not defined or AWS_REGION | string | trim == ''
+
+- name: Validate OCM and AWS credentials are configured (preflight)
+  ansible.builtin.fail:
+    msg: |
+      ❌ CREDENTIAL CONFIGURATION ERROR ❌
+
+      Required credentials for installing MCE on the new hub are missing,
+      empty, or still set to placeholder values.
+
+      MCE install needs valid OCM (ROSA) and AWS credentials so that
+      rosa-creds-secret and capa-manager-bootstrap-credentials can be
+      created on the new hub. Empty OCM_CLIENT_ID silently breaks
+      rosa-creds-secret and leads to later 403 / CLUSTERS-MGMT errors.
+
+      ⚠️  REQUIRED ACTION:
+
+      1. Open the file: vars/user_vars.yml (or export the environment vars)
+
+      2. Set real values for ALL of the following:
+
+         OCM_CLIENT_ID: "your-ocm-client-id"
+         OCM_CLIENT_SECRET: "your-ocm-client-secret"
+         AWS_ACCESS_KEY_ID: "your-aws-access-key-id"
+         AWS_SECRET_ACCESS_KEY: "your-aws-secret-access-key"
+
+      3. Save the file and retry this operation
+
+      📝 Note: The vars/user_vars.yml file is in .gitignore and will not be committed to git.
+  when: >
+    OCM_CLIENT_ID is not defined or OCM_CLIENT_ID | string | trim == '' or
+    OCM_CLIENT_ID in ['your-ocm-client-id', 'changeme', 'placeholder'] or
+    OCM_CLIENT_SECRET is not defined or OCM_CLIENT_SECRET | string | trim == '' or
+    OCM_CLIENT_SECRET in ['your-ocm-client-secret', 'changeme', 'placeholder'] or
+    AWS_ACCESS_KEY_ID is not defined or AWS_ACCESS_KEY_ID | string | trim == '' or
+    AWS_ACCESS_KEY_ID in ['your-aws-access-key-id', 'changeme', 'placeholder'] or
+    AWS_SECRET_ACCESS_KEY is not defined or AWS_SECRET_ACCESS_KEY | string | trim == '' or
+    AWS_SECRET_ACCESS_KEY in ['your-aws-secret-access-key', 'changeme', 'placeholder']
+  no_log: true
+
+- name: Print preflight credential check result
+  ansible.builtin.debug:
+    msg: "✅ Preflight passed - OCM and AWS credentials are present and non-placeholder"

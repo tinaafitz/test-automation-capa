@@ -1,0 +1,27 @@
+{
+  "name": "Install MCE on Provisioned Cluster",
+  "description": "Install and configure MCE on a freshly-provisioned ROSA HCP cluster, turning it into a CAPI/CAPA management hub",
+  "execution": "sequential",
+  "stopOnFailure": true,
+  "notifyOnComplete": true,
+  "environment": "mce",
+  "playbooks": [
+    {
+      "name": "Install MCE on Provisioned Cluster",
+      "file": "playbooks/install_mce_on_provisioned_cluster.yml",
+      "description": "Install the MCE operator on the new hub (via its CAPA-published kubeconfig), wire OCM/AWS creds, then enable CAPI/CAPA and disable HyperShift",
+      "test_case_id": "RHACM4K-61722",
+      "extra_vars": {
+        "cluster_name": "",
+        "capi_namespace": "ns-rosa-hcp",
+        "minikube_context": "minikube",
+        "mce_channel": "stable-2.8"
+      },
+      "timeout_budget_comment": "M1: the runner SIGKILLs this playbook at `timeout` seconds. The realistic worst case is control-plane wait (75x30=2250s) + MCE install loops (devCatalog catalog READY 600s + packagemanifest 180s + currentCSV 300s + CSV Succeeded 1200s + MCE Available 1800s + currentVersion 300s). gaCatalog (no dev catalog) sums to ~3600s of install loops; devCatalog to ~4200s; plus the 2250s control-plane wait. 5400s (90 min) covers a healthy-but-slow gaCatalog install with control-plane wait, and a devCatalog install when the control-plane wait is skipped, without being absurd. Do NOT lower below the sum of the loop budgets in tasks/install_mce_operator.yml + tasks/wait_for_rosa_control_plane_ready.yml.",
+      "timeout": 5400,
+      "required": true
+    }
+  ],
+  "tags": ["setup", "install", "mce", "capi", "capa", "rosa", "hcp"],
+  "schedule": null
+}

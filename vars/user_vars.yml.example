@@ -22,3 +22,34 @@ OCM_CLIENT_SECRET: ""                  # OCM client secret
 
 # MCE Configuration
 MCE_NAMESPACE: "multicluster-engine"   # MCE namespace (default)
+MCE_CHANNEL: "stable-2.8"              # Optional override of the MCE subscription channel (must map to MCE >= 2.8)
+
+# MCE source mode (gaCatalog | devCatalog). Default is gaCatalog (GA
+# stable-2.8 / redhat-operators). For the team's 5.0 pre-release / RC / dev
+# builds, use the downstream acm-d dev catalog instead:
+#   MCE_SOURCE_MODE: "devCatalog"
+#   ACM_REPO: "acmd"                  # -> catalog image base "quay.io:443/acm-d"
+#   MCE_DEV_CATALOG_TAG: "latest-5.0" # moving tag, OR pin e.g. "5.0.0-259"
+#   MCE_CHANNEL: "stable-5.0"         # VERIFIED dev-catalog channel for 5.0
+#                                     # (stable-5.0 -> v5.0.0-259). NOTE: the
+#                                     # dev catalog's defaultChannel is stable-5.1,
+#                                     # so you MUST set this for 5.0 work.
+#   MCE_STARTING_CSV: ""              # optional: pin exact build,
+#                                     # e.g. "multicluster-engine.v5.0.0-259"
+#
+# PREREQUISITE for devCatalog mode: quay.io:443/acm-d is an internal /
+# authenticated dev registry. The target ROSA HCP cluster must already have a
+# PULL SECRET for quay.io:443/acm-d (and possibly an ICSP/IDMS), otherwise the
+# dev CatalogSource pod ImagePullBackOffs and the install fails at the
+# CatalogSource READY wait.
+# MCE_SOURCE_MODE: "gaCatalog"
+# ACM_REPO: "production"
+# MCE_DEV_CATALOG_TAG: "latest-5.0"
+# MCE_STARTING_CSV: ""
+
+# Note: installing MCE on a freshly-provisioned ROSA HCP cluster
+# (playbooks/install_mce_on_provisioned_cluster.yml) does NOT need a
+# new-hub username/password. Access to the new hub comes from the
+# CAPA-published <cluster_name>-kubeconfig secret in capi_namespace on
+# the minikube management cluster. Only OCM_* and AWS_* creds above are
+# required (they are copied onto the new hub).

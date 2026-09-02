@@ -1,0 +1,281 @@
+---
+# Install the MultiCluster Engine (MCE) operator on the new hub.
+# KUBECONFIG must already point at the new hub (set by the caller via
+# environment: { KUBECONFIG: "{{ new_hub_kubeconfig }}" }). All oc calls
+# are context-less and therefore hit the new hub.
+#
+# Two source modes, selected by mce_source_mode (default "gaCatalog"):
+#   gaCatalog  — stable-2.8 / redhat-operators; validated against the
+#                packagemanifest (existing behavior).
+#   devCatalog — creates a custom acm-d dev CatalogSource first, then
+#                subscribes against it (5.0 RC/dev builds). See vars/vars.yml.
+
+# =====================================================================
+# Path A (devCatalog): create + wait for the acm-d dev CatalogSource.
+# =====================================================================
+- name: Resolve the effective Subscription source (mode-aware)
+  ansible.builtin.set_fact:
+    mce_effective_source: "{{ mce_dev_catalog_name if mce_source_mode == 'devCatalog' else mce_catalog_source }}"
+
+# M4: guard against a malformed dev catalog image ref. With the default
+# acm_repo=production, catalog_sources.production.index_image.source is "",
+# so mce_dev_catalog_image renders to "/mce-dev-catalog:<tag>" -> instant
+# ImagePullBackOff that gets misdiagnosed as a pull-secret problem. Fail fast
+# with actionable guidance instead.
+- name: (devCatalog) Assert acm_repo resolves to a real dev catalog registry
+  ansible.builtin.assert:
+    that:
+      - acm_repo in catalog_sources
+      - (catalog_sources[acm_repo].index_image.source | default('') | trim) != ''
+    fail_msg: |
+      ❌ devCatalog mode is set but acm_repo ('{{ acm_repo }}') does not resolve
+      to a usable dev catalog registry.
+
+      mce_dev_catalog_image would render to:
+        {{ (catalog_sources[acm_repo].index_image.source | default('')) }}/mce-dev-catalog:{{ mce_dev_catalog_tag }}
+      which is a MALFORMED image reference (empty registry prefix) and will
+      ImagePullBackOff -- easily misread as a pull-secret failure.
+
+      Fix: set acm_repo: acmd (-> catalog_sources.acmd.index_image.source =
+      "quay.io:443/acm-d"), or set acm_repo to another catalog_sources key whose
+      index_image.source is non-empty. Then retry.
+    success_msg: "✅ devCatalog acm_repo '{{ acm_repo }}' resolves to '{{ catalog_sources[acm_repo].index_image.source }}'"
+  when: mce_source_mode == 'devCatalog'
+
+- name: (devCatalog) Create the acm-d MCE dev CatalogSource
+  shell: |
+    oc apply -f - <<'EOF'
+    apiVersion: operators.coreos.com/v1alpha1
+    kind: CatalogSource
+    metadata:
+      name: {{ mce_dev_catalog_name }}
+      namespace: {{ mce_catalog_source_namespace }}
+    spec:
+      sourceType: grpc
+      image: {{ mce_dev_catalog_image }}
+      displayName: MCE Dev Catalog (acm-d)
+      publisher: grpc
+      updateStrategy:
+        registryPoll:
+          interval: 10m
+    EOF
+  register: mce_dev_catalogsource_result
+  when: mce_source_mode == 'devCatalog'
+
+- name: (devCatalog) Wait for the dev CatalogSource to report READY
+  shell: |
+    oc get catalogsource {{ mce_dev_catalog_name }} \
+      -n {{ mce_catalog_source_namespace }} \
+      -o jsonpath='{.status.connectionState.lastObservedState}'
+  register: mce_dev_catalog_state
+  until: mce_dev_catalog_state.stdout == 'READY'
+  retries: 30
+  delay: 20
+  changed_when: false
+  failed_when: false
+  when: mce_source_mode == 'devCatalog'
+
+- name: (devCatalog) Fail clearly if the dev CatalogSource never became READY
+  ansible.builtin.fail:
+    msg: |
+      ❌ MCE DEV CATALOGSOURCE NOT READY ❌
+
+      CatalogSource '{{ mce_dev_catalog_name }}' in
+      '{{ mce_catalog_source_namespace }}' did not reach
+      status.connectionState.lastObservedState == READY.
+
+      Image:         {{ mce_dev_catalog_image }}
+      Last observed: {{ mce_dev_catalog_state.stdout | default('(none)') }}
+
+      MOST LIKELY CAUSE: the catalog pod cannot pull the image from the
+      authenticated dev registry (ImagePullBackOff). '{{ mce_dev_catalog_image }}'
+      is served from quay.io:443/acm-d, an internal/authenticated registry.
+      The target cluster needs a PULL SECRET for quay.io:443/acm-d (and possibly
+      an ICSP/IDMS) before the catalog image can be pulled.
+
+      Debug:
+        oc -n {{ mce_catalog_source_namespace }} get pods -l olm.catalogSource={{ mce_dev_catalog_name }}
+        oc -n {{ mce_catalog_source_namespace }} describe catalogsource {{ mce_dev_catalog_name }}
+  when:
+    - mce_source_mode == 'devCatalog'
+    - mce_dev_catalog_state.stdout is not defined or mce_dev_catalog_state.stdout != 'READY'
+
+- name: (devCatalog) Print the resolved MCE dev catalog
+  ansible.builtin.debug:
+    msg: "✅ MCE dev CatalogSource '{{ mce_dev_catalog_name }}' READY (image {{ mce_dev_catalog_image }}). Subscription channel: '{{ mce_channel }}'."
+  when: mce_source_mode == 'devCatalog'
+
+# =====================================================================
+# Channel validation via packagemanifest — BOTH modes.
+#
+# The acm-d dev catalog DOES publish a proper multicluster-engine
+# packagemanifest with per-stream stable-* channels (VERIFIED off
+# ci-azure-w36: stable-5.0 -> v5.0.0-259, stable-5.1 -> v5.1.0-61,
+# stable-5.1 is the defaultChannel). So we validate in devCatalog mode
+# too — but ONLY after the dev CatalogSource is READY (its packagemanifest
+# appears once the catalog pod is up), and scoped to the dev catalog via
+# the `catalog=<name>` label so we read the RIGHT stream's channels.
+#
+# NOTE: channel is always set EXPLICITLY on the Subscription below — we do
+# NOT fall back to the catalog defaultChannel (which is stable-5.1, i.e.
+# 5.1, and would silently pull the wrong stream for 5.0 work).
+# =====================================================================
+# M5: the packagemanifest appears seconds-to-minutes AFTER the CatalogSource
+# reports connectionState==READY (especially in devCatalog mode). Querying once
+# with no retries races that gap: an empty result trips the channel validation
+# below and fails with a bogus "channel not available". Retry until the PM is
+# indexed. 12 x 15s = 180s (3 min) -- included in the RETRY BUDGET below.
+- name: Discover available MCE channels from the packagemanifest
+  shell: |
+    oc get packagemanifest {{ mce_sub_name }} \
+      -n {{ mce_catalog_source_namespace }} \
+      {% if mce_source_mode == 'devCatalog' %}-l catalog={{ mce_dev_catalog_name }} {% endif %}\
+      -o jsonpath='{.status.channels[*].name}'
+  register: mce_available_channels
+  until: mce_available_channels.stdout != ''
+  retries: 12    # 12 x 15s = 180s (3 min) -- wait for PM indexing after catalog READY
+  delay: 15
+  changed_when: false
+
+- name: Fail clearly if the requested MCE channel is not offered
+  ansible.builtin.fail:
+    msg: |
+      ❌ MCE CHANNEL NOT AVAILABLE ❌
+
+      Requested channel '{{ mce_channel }}' is not offered by the
+      '{{ mce_sub_name }}' packagemanifest in '{{ mce_catalog_source_namespace }}'
+      {% if mce_source_mode == 'devCatalog' %}(dev catalog '{{ mce_dev_catalog_name }}'){% endif %}.
+
+      Available channels: {{ mce_available_channels.stdout | default('(none discovered)') }}
+
+      Fix: set mce_channel (or MCE_CHANNEL) to one of the available channels.
+      {% if mce_source_mode == 'devCatalog' %}For 5.0 RC/dev work use 'stable-5.0' (do NOT rely on the
+      catalog defaultChannel, which is 'stable-5.1'){% else %}It must map to MCE 2.8 or later{% endif %}, then retry.
+  when: mce_channel not in mce_available_channels.stdout.split()
+
+- name: Print the resolved MCE channel
+  ansible.builtin.debug:
+    msg: "✅ MCE channel '{{ mce_channel }}' is available. Offered: {{ mce_available_channels.stdout }}"
+
+- name: Create the multicluster-engine namespace (idempotent)
+  shell: |
+    oc create namespace {{ mce_namespace }} \
+      --dry-run=client -o yaml | oc apply -f -
+  register: mce_namespace_result
+
+- name: Create the MCE OperatorGroup
+  shell: |
+    oc apply -f - <<'EOF'
+    apiVersion: operators.coreos.com/v1
+    kind: OperatorGroup
+    metadata:
+      name: {{ mce_sub_name }}
+      namespace: {{ mce_namespace }}
+    spec:
+      targetNamespaces:
+        - {{ mce_namespace }}
+    EOF
+  register: mce_operatorgroup_result
+
+- name: Create the MCE Subscription
+  shell: |
+    oc apply -f - <<'EOF'
+    apiVersion: operators.coreos.com/v1alpha1
+    kind: Subscription
+    metadata:
+      name: {{ mce_sub_name }}
+      namespace: {{ mce_namespace }}
+    spec:
+      channel: {{ mce_channel }}
+      installPlanApproval: {{ mce_install_plan_approval }}
+      name: {{ mce_sub_name }}
+      source: {{ mce_effective_source }}
+      sourceNamespace: {{ mce_catalog_source_namespace }}
+    {% if mce_starting_csv | default('') | length > 0 %}
+      startingCSV: {{ mce_starting_csv }}
+    {% endif %}
+    EOF
+  register: mce_subscription_result
+
+# ---------------------------------------------------------------------------
+# RETRY BUDGET (reconciled with test-suites/15-...json "timeout"):
+#   currentCSV discovery  : 20 x 15s =  300s (5 min)
+#   CSV Succeeded         : 40 x 30s = 1200s (20 min)   <- ~20 min max, by design
+#   MCE Available         : 60 x 30s = 1800s (30 min)   <- ~30 min max, by design
+#   currentVersion        : 20 x 15s =  300s (5 min)
+#   (devCatalog only) catalog READY : 30 x 20s = 600s; packagemanifest 12 x 15s = 180s
+# Cumulative install loop budget: ~3600s (gaCatalog) / ~4200s (devCatalog).
+# Add the 2250s control-plane wait (tasks/wait_for_rosa_control_plane_ready.yml)
+# when skip_wait_for_ready is false. The suite timeout (5400s) MUST exceed the
+# relevant sum -- do NOT shorten these loops below what a real install needs.
+# ---------------------------------------------------------------------------
+- name: Discover the MCE CSV name from the Subscription
+  shell: |
+    oc get subscription {{ mce_sub_name }} -n {{ mce_namespace }} \
+      -o jsonpath='{.status.currentCSV}'
+  register: mce_csv_name
+  until: mce_csv_name.stdout != ''
+  retries: 20    # 20 x 15s = 300s (5 min)
+  delay: 15
+  changed_when: false
+
+- name: Wait for the MCE CSV to reach Succeeded
+  shell: |
+    oc get csv {{ mce_csv_name.stdout }} -n {{ mce_namespace }} \
+      -o jsonpath='{.status.phase}'
+  register: mce_csv_phase
+  until: mce_csv_phase.stdout == 'Succeeded'
+  retries: 40    # 40 x 30s = 1200s (~20 min max) -- see RETRY BUDGET above
+  delay: 30
+  changed_when: false
+
+- name: Print MCE operator install result
+  ansible.builtin.debug:
+    msg: "✅ MCE operator CSV {{ mce_csv_name.stdout }} is Succeeded"
+
+# NOTE: the MCE CR name is fixed at creation to {{ mce_name }} -- you must name
+# a resource to create it, so this is intentional and correct. The repo
+# convention (PR #252) is to DISCOVER the MCE name dynamically for later use;
+# downstream tasks (e.g. enable_capi_capa.yml) re-discover it via
+# `oc get mce -o jsonpath={.items[0].metadata.name}`. This documents that the
+# create-time literal and the downstream discovery are intentional, not a silent
+# inconsistency. Do NOT try to discover a name that does not exist yet here.
+- name: Create the MultiClusterEngine CR
+  shell: |
+    oc apply -f - <<'EOF'
+    apiVersion: multicluster.openshift.io/v1
+    kind: MultiClusterEngine
+    metadata:
+      name: {{ mce_name }}
+    spec: {}
+    EOF
+  register: mce_cr_result
+
+- name: Wait for the MultiClusterEngine to become Available
+  shell: |
+    oc get mce {{ mce_name }} \
+      -o jsonpath='{.status.phase}'
+  register: mce_phase
+  until: mce_phase.stdout == 'Available'
+  retries: 60    # 60 x 30s = 1800s (~30 min max) -- see RETRY BUDGET above
+  delay: 30
+  changed_when: false
+
+- name: Wait for the MultiClusterEngine to report a currentVersion
+  shell: |
+    oc get mce {{ mce_name }} \
+      -o jsonpath='{.status.currentVersion}'
+  register: mce_current_version
+  until: mce_current_version.stdout != ''
+  retries: 20    # 20 x 15s = 300s (5 min)
+  delay: 15
+  changed_when: false
+
+- name: Print installed MCE version
+  ansible.builtin.debug:
+    msg: |
+      ✅ MultiClusterEngine is Available
+
+      Name:           {{ mce_name }}
+      Phase:          {{ mce_phase.stdout }}
+      currentVersion: {{ mce_current_version.stdout }}
