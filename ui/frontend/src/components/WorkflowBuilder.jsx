@@ -1183,11 +1183,14 @@ const WorkflowBuilder = () => {
 
   const pollJobCompletion = (jobId, stepId) => {
     return new Promise((resolve) => {
+      // Incremental log cursor: only fetch lines after what we've already seen.
+      let logCursor = 0;
+      let accumulatedLogs = [];
       const interval = setInterval(async () => {
         try {
           const [statusResponse, logsResponse, agentResponse] = await Promise.all([
             fetch(buildApiUrl(`/api/jobs/${jobId}`)),
-            fetch(buildApiUrl(`/api/jobs/${jobId}/logs`)),
+            fetch(buildApiUrl(`/api/jobs/${jobId}/logs?since=${logCursor}`)),
             fetch(buildApiUrl(`/api/jobs/${jobId}/agent-stats`)).catch(() => null),
           ]);
 
@@ -1196,12 +1199,23 @@ const WorkflowBuilder = () => {
 
           if (logsResponse.ok) {
             const logsData = await logsResponse.json();
-            const logLines = (logsData.logs || []).filter(l => l.trim());
+            // Backend echoes the `since` it applied; if it fell back to 0 (e.g.
+            // job log was reset), start our accumulator over to stay in sync.
+            if ((logsData.since ?? logCursor) === 0) {
+              accumulatedLogs = [];
+            }
+            const newLines = (logsData.logs || []).filter(l => l.trim());
+            if (newLines.length > 0) {
+              accumulatedLogs = accumulatedLogs.concat(newLines);
+            }
+            if (typeof logsData.total === 'number') {
+              logCursor = logsData.total;
+            }
             if (stepId) {
               setWorkflowSteps((prev) =>
                 prev.map((s) => s.id === stepId ? {
                   ...s,
-                  ...(logLines.length > 0 ? { logs: logLines } : {}),
+                  ...(accumulatedLogs.length > 0 ? { logs: accumulatedLogs } : {}),
                   ...(agentStats?.agent_stats ? { agentStats: agentStats.agent_stats } : {}),
                 } : s)
               );

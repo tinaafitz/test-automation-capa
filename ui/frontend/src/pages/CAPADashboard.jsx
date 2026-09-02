@@ -325,6 +325,12 @@ const CAPADashboardContent = () => {
     let attempts = 0;
     setProvisionJobId(jobId);
 
+    // Incremental log delivery: track a cursor and accumulate only new lines
+    // so each poll doesn't re-fetch/re-join the entire (growing) log. This
+    // keeps the playbook-detail panel current instead of lagging on long runs.
+    let logCursor = 0;
+    let accumulatedLines = [];
+
     const poll = async () => {
       if (attempts >= maxAttempts) {
         console.log('⏱️ Max polling attempts reached');
@@ -339,13 +345,23 @@ const CAPADashboardContent = () => {
         const jobResponse = await fetch(buildApiUrl(`/api/jobs/${jobId}`));
         const jobData = await jobResponse.json();
 
-        // Fetch logs and agent stats
+        // Fetch logs (incremental) and agent stats
         const [logsResponse, agentResponse] = await Promise.all([
-          fetch(buildApiUrl(`/api/jobs/${jobId}/logs`)),
+          fetch(buildApiUrl(`/api/jobs/${jobId}/logs?since=${logCursor}`)),
           fetch(buildApiUrl(`/api/jobs/${jobId}/agent-stats`)).catch(() => null),
         ]);
         const logsData = await logsResponse.json();
-        const currentOutput = logsData.logs ? logsData.logs.join('\n') : '';
+        // If the backend fell back to since=0 (job log reset), start over.
+        if ((logsData.since ?? logCursor) === 0) {
+          accumulatedLines = [];
+        }
+        if (Array.isArray(logsData.logs) && logsData.logs.length > 0) {
+          accumulatedLines = accumulatedLines.concat(logsData.logs);
+        }
+        if (typeof logsData.total === 'number') {
+          logCursor = logsData.total;
+        }
+        const currentOutput = accumulatedLines.join('\n');
         const agentData = agentResponse ? await agentResponse.json().catch(() => null) : null;
         const agentStats = agentData?.agent_stats || null;
 

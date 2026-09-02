@@ -220,10 +220,16 @@ async def list_jobs():
         # Check for and timeout stuck jobs before returning the list
         _resolve("check_and_timeout_stuck_jobs")()
 
-        # Return all jobs sorted by creation time (newest first)
+        # Return all jobs sorted by creation time (newest first).
+        # Strip the (potentially large, ever-growing) logs array from the list
+        # payload — clients fetch logs incrementally via /api/jobs/{id}/logs?since=N.
+        # Serializing every job's full log on every poll pinned the event loop.
         job_list = []
         for job_id, job in jobs.items():
             job_data = {**job, "id": job_id}
+            job_logs = job_data.pop("logs", None)
+            if job_logs is not None:
+                job_data["log_count"] = len(job_logs)
             job_list.append(job_data)
 
         # Sort by created_at timestamp (newest first)
@@ -256,12 +262,31 @@ async def get_job_status(job_id: str):
 
 
 @router.get("/api/jobs/{job_id}/logs")
-async def get_job_logs(job_id: str):
-    """Get job logs"""
+async def get_job_logs(job_id: str, since: int = 0):
+    """Get job logs, optionally only lines after index `since` (incremental).
+
+    Clients poll with `since` set to the `total` returned by the previous call,
+    so each poll only serializes new lines instead of the entire growing log.
+    `total` is the current line count; feed it back as `since` next time.
+    `since=0` (default) returns the full log for backward compatibility.
+    """
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    return {"success": True, "logs": jobs[job_id].get("logs", [])}
+    all_logs = jobs[job_id].get("logs", [])
+    total = len(all_logs)
+
+    # Clamp `since` into range: negatives or a cursor past the end (e.g. after a
+    # job restart that reset the list) fall back to sending everything.
+    if since < 0 or since > total:
+        since = 0
+
+    return {
+        "success": True,
+        "logs": all_logs[since:],
+        "since": since,
+        "total": total,
+    }
 
 
 @router.post("/api/jobs/{job_id}/cancel")

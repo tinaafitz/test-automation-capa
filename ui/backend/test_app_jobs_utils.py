@@ -156,6 +156,52 @@ class TestJobsCRUD:
         resp = client.get("/api/jobs/nonexistent/logs")
         assert resp.status_code == 404
 
+    def test_get_job_logs_default_returns_full_with_total(self):
+        # since defaults to 0 -> full log, and total is reported for cursoring.
+        app_module.jobs["job-1"] = {"status": "running", "logs": ["a", "b", "c"]}
+        data = client.get("/api/jobs/job-1/logs").json()
+        assert data["logs"] == ["a", "b", "c"]
+        assert data["since"] == 0
+        assert data["total"] == 3
+
+    def test_get_job_logs_since_returns_only_new_lines(self):
+        app_module.jobs["job-1"] = {"status": "running", "logs": ["a", "b", "c", "d"]}
+        data = client.get("/api/jobs/job-1/logs?since=2").json()
+        assert data["logs"] == ["c", "d"]
+        assert data["since"] == 2
+        assert data["total"] == 4
+
+    def test_get_job_logs_since_at_end_returns_empty(self):
+        app_module.jobs["job-1"] = {"status": "running", "logs": ["a", "b"]}
+        data = client.get("/api/jobs/job-1/logs?since=2").json()
+        assert data["logs"] == []
+        assert data["total"] == 2
+
+    def test_get_job_logs_since_past_end_falls_back_to_full(self):
+        # A cursor beyond the current length (e.g. after a log reset) resends all.
+        app_module.jobs["job-1"] = {"status": "running", "logs": ["a", "b"]}
+        data = client.get("/api/jobs/job-1/logs?since=99").json()
+        assert data["logs"] == ["a", "b"]
+        assert data["since"] == 0
+        assert data["total"] == 2
+
+    def test_get_job_logs_negative_since_falls_back_to_full(self):
+        app_module.jobs["job-1"] = {"status": "running", "logs": ["a", "b"]}
+        data = client.get("/api/jobs/job-1/logs?since=-5").json()
+        assert data["logs"] == ["a", "b"]
+        assert data["since"] == 0
+
+    def test_list_jobs_strips_logs_exposes_count(self):
+        # The list payload must not embed the (large, growing) logs array.
+        app_module.jobs["job-1"] = {
+            "status": "running",
+            "created_at": "2026-04-07T12:00:00",
+            "logs": ["x", "y", "z"],
+        }
+        job = client.get("/api/jobs").json()["jobs"][0]
+        assert "logs" not in job
+        assert job["log_count"] == 3
+
     def test_cancel_running_job(self):
         app_module.jobs["job-1"] = {
             "id": "job-1",
