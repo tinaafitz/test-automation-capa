@@ -43,57 +43,77 @@ client = TestClient(app_module.app)
 # =============================================
 
 
+from static_routes import _get_supported_versions_sync  # noqa: E402
+
+
+def _stub_ocm(versions, err=None):
+    """Patch the OCM client so these tests never depend on ambient credentials.
+
+    Patching subprocess.run only exercised the rosa CLI path, and only when the
+    machine happened to have no usable OCM credentials.
+    """
+    client = MagicMock()
+    client.list_versions.return_value = (versions, err)
+    return patch("agents.ocm_client.get_ocm_client", return_value=client)
+
+
 class TestSupportedVersions:
-    @patch("app.subprocess.run")
-    def test_rosa_versions_success(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="VERSION  DEFAULT  AVAILABLE UPGRADES\n4.21.0   \n4.20.12  yes\n4.20.11  \n4.19.22  \n",
-            stderr="",
-        )
-        result = app_module._get_supported_versions_sync()
-        assert "versions" in result
+    def test_ocm_versions_success(self):
+        with _stub_ocm(["4.21.0", "4.20.12", "4.20.11", "4.19.22"]):
+            result = _get_supported_versions_sync()
         assert "4.21.0" in result["versions"]
         assert "4.20.12" in result["versions"]
         assert result["latest_version"] == "4.21.0"
+        assert result["source"] == "ocm"
 
-    @patch("app.subprocess.run")
-    def test_rosa_versions_command_fails(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
-        result = app_module._get_supported_versions_sync()
-        # Should return fallback versions
-        assert "versions" in result
+    def test_default_is_newest_not_second_newest(self):
+        # Regression: default_version used to be versions[1], making the newest
+        # release unreachable as a default.
+        with _stub_ocm(["4.22.13", "4.22.12", "4.22.11"]):
+            result = _get_supported_versions_sync("stable")
+        assert result["default_version"] == "4.22.13"
+
+    def test_ocm_error_falls_back(self):
+        with _stub_ocm([], err="connection refused"):
+            result = _get_supported_versions_sync()
         assert len(result["versions"]) > 0
-        assert "4.21.0" in result["versions"]
+        assert result["source"] == "fallback"
+        assert result["error"] == "connection refused"
 
-    @patch("app.subprocess.run")
-    def test_rosa_versions_empty_output(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0, stdout="VERSION  DEFAULT\n", stderr="")
-        result = app_module._get_supported_versions_sync()
-        # Should return fallback versions
-        assert "versions" in result
+    def test_ocm_empty_falls_back(self):
+        with _stub_ocm([]):
+            result = _get_supported_versions_sync()
         assert len(result["versions"]) > 0
+        assert result["source"] == "fallback"
 
-    @patch("app.subprocess.run")
-    def test_rosa_versions_timeout(self, mock_run):
-        import subprocess
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="rosa", timeout=10)
-        result = app_module._get_supported_versions_sync()
-        # Should return fallback versions
-        assert "versions" in result
+    def test_ocm_exception_falls_back(self):
+        with patch("agents.ocm_client.get_ocm_client", side_effect=Exception("boom")):
+            result = _get_supported_versions_sync()
         assert len(result["versions"]) > 0
+        assert result["source"] == "fallback"
 
-    @patch("app.subprocess.run")
-    def test_rosa_versions_parses_correctly(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="VERSION  DEFAULT  AVAILABLE UPGRADES\nWARN: some warning\n4.20.12  yes\n4.20.11  \n",
-            stderr="",
-        )
-        result = app_module._get_supported_versions_sync()
-        # WARN lines should be skipped
-        assert "4.20.12" in result["versions"]
-        assert "4.20.11" in result["versions"]
+    def test_candidate_offers_pinned_prerelease(self):
+        # 5.0.0-rc.0 provisions but is not enumerated by OCM's HCP-filtered
+        # version list, so it must be merged in for the UI to offer it.
+        with _stub_ocm(["4.22.13", "4.22.12"]):
+            result = _get_supported_versions_sync("candidate")
+        assert "5.0.0-rc.0" in result["versions"]
+        assert "5.0.0-rc.0" in result["pinned_versions"]
+        # Sorted newest-first, so the pre-release leads the list...
+        assert result["versions"][0] == "5.0.0-rc.0"
+        # ...but the default stays on what OCM actually enumerated.
+        assert result["default_version"] == "4.22.13"
+
+    def test_stable_does_not_default_to_prerelease(self):
+        with _stub_ocm(["5.0.0-rc.1", "4.22.13"]):
+            result = _get_supported_versions_sync("stable")
+        assert result["default_version"] == "4.22.13"
+
+    def test_stable_has_no_pinned_versions(self):
+        with _stub_ocm(["4.22.13"]):
+            result = _get_supported_versions_sync("stable")
+        assert result["pinned_versions"] == []
+        assert "5.0.0-rc.0" not in result["versions"]
 
 
 # =============================================

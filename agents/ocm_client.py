@@ -12,6 +12,7 @@ Falls back to rosa CLI when OCM credentials are unavailable.
 import json
 import logging
 import os
+import re
 import ssl
 import subprocess
 import urllib.error
@@ -28,6 +29,38 @@ except ImportError:
     _SSL_CONTEXT = None
 
 SSO_TOKEN_URL = "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token"
+
+# x.y.z with an optional pre-release suffix, e.g. "4.22.13" or "5.0.0-rc.0".
+VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
+
+
+def is_prerelease(version: str) -> bool:
+    match = VERSION_RE.match(version or "")
+    return bool(match and match.group(4))
+
+
+def version_sort_key(version: str):
+    """Sort key with semver pre-release ordering.
+
+    OCM's own `order=id desc` is a lexicographic sort over strings like
+    "openshift-v4.20.12", which ranks 4.9.0 above 4.20.12. Sort locally instead.
+    A release outranks every pre-release of the same x.y.z (5.0.0 > 5.0.0-rc.1).
+    """
+    match = VERSION_RE.match(version or "")
+    if not match:
+        return (-1, -1, -1, (0,), ())
+
+    major, minor, patch = (int(match.group(i)) for i in (1, 2, 3))
+    prerelease = match.group(4)
+    if prerelease is None:
+        return (major, minor, patch, (1,), ())
+
+    # Numeric segments compare numerically, alphanumeric ones lexically.
+    segments = tuple(
+        (0, int(seg), "") if seg.isdigit() else (1, 0, seg)
+        for seg in prerelease.split(".")
+    )
+    return (major, minor, patch, (0,), segments)
 
 
 class OCMClient:
@@ -46,7 +79,38 @@ class OCMClient:
         self._ocm_client_id: Optional[str] = None
 
         if not self.client_id or not self.client_secret:
+            self._load_user_vars_creds()
+
+        if not self.client_id or not self.client_secret:
             self._load_ocm_config()
+
+    def _load_user_vars_creds(self):
+        """Pick up the service-account creds the Ansible/Jenkins path already uses.
+
+        Without this the backend falls back to ocm.json's refresh token, which
+        expires regularly and silently degrades every version list to _FALLBACK.
+        """
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "vars", "user_vars.yml",
+        )
+        try:
+            import yaml
+            with open(path) as f:
+                user_vars = yaml.safe_load(f) or {}
+        except Exception:
+            return
+
+        client_id = str(user_vars.get("OCM_CLIENT_ID") or "").strip()
+        client_secret = str(user_vars.get("OCM_CLIENT_SECRET") or "").strip()
+        if client_id and client_secret:
+            self.client_id = client_id
+            self.client_secret = client_secret
+            self._log("Loaded OCM client credentials from vars/user_vars.yml", "debug")
+
+        api_url = str(user_vars.get("OCM_API_URL") or "").strip()
+        if api_url and not os.environ.get("OCM_API_URL"):
+            self.api_url = api_url.rstrip("/")
 
     def _load_ocm_config(self):
         ocm_paths = [
@@ -339,18 +403,25 @@ class OCMClient:
             search = urllib.parse.quote(
                 f"channel_group='{channel_group}' and rosa_enabled='true' and hosted_control_plane_enabled='true'"
             )
-            resp = self._authed_request(
-                f"{self.api_url}/api/clusters_mgmt/v1/versions"
-                f"?search={search}&order=id+desc&size=100"
-            )
             versions = []
-            for v in resp.get("items", []):
-                raw_id = v.get("raw_id") or v.get("id", "")
-                if raw_id.startswith("openshift-"):
-                    raw_id = raw_id.replace("openshift-v", "").replace("openshift-", "")
-                parts = raw_id.split(".")
-                if len(parts) == 3 and all(p.replace("-", "").replace("rc", "").isdigit() or p.isdigit() for p in parts):
-                    versions.append(raw_id)
+            page, size = 1, 100
+            while True:
+                resp = self._authed_request(
+                    f"{self.api_url}/api/clusters_mgmt/v1/versions"
+                    f"?search={search}&size={size}&page={page}"
+                )
+                items = resp.get("items", [])
+                for v in items:
+                    raw_id = v.get("raw_id") or v.get("id", "")
+                    if raw_id.startswith("openshift-"):
+                        raw_id = raw_id.replace("openshift-v", "").replace("openshift-", "")
+                    if VERSION_RE.match(raw_id):
+                        versions.append(raw_id)
+                if not items or page * size >= resp.get("total", 0):
+                    break
+                page += 1
+
+            versions.sort(key=version_sort_key, reverse=True)
             return versions, None
         except Exception as e:
             self._log(f"OCM list_versions failed: {e}, falling back to CLI", "debug")
@@ -369,10 +440,9 @@ class OCMClient:
             for line in result.stdout.split("\n"):
                 if line.strip() and not line.startswith("VERSION") and not line.startswith("WARN"):
                     parts = line.split()
-                    if parts and parts[0]:
-                        version = parts[0]
-                        if len(version.split(".")) == 3:
-                            versions.append(version)
+                    if parts and parts[0] and VERSION_RE.match(parts[0]):
+                        versions.append(parts[0])
+            versions.sort(key=version_sort_key, reverse=True)
             return versions, None
         except Exception as e:
             return [], str(e)

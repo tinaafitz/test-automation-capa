@@ -1255,7 +1255,7 @@ const CAPADashboardContent = () => {
                           />
                           <div>
                             <span className="text-sm font-medium text-gray-900">Express</span>
-                            <p className="text-xs text-gray-500 mt-0.5">Use recommended defaults. Only specify a prefix and channel group.</p>
+                            <p className="text-xs text-gray-500 mt-0.5">Use recommended defaults. Only specify a prefix, channel and version.</p>
                           </div>
                         </label>
                         <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${

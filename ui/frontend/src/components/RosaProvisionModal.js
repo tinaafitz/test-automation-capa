@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import PropTypes from 'prop-types';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { buildApiUrl, API_ENDPOINTS } from '../config/api';
@@ -1269,43 +1269,142 @@ const generateSuffix = () => {
   return bytes[0].toString(16).padStart(2, '0');
 };
 
+const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+const isPrereleaseVersion = (v) => VERSION_RE.test(v || '') && (v || '').includes('-');
+
+const PRERELEASE_CHANNELS = ['candidate', 'nightly'];
+
+// Named shortcuts that set channel and version together. A pick may name a
+// version OCM does not enumerate (5.0.0-rc.0 is one) — the version list is
+// seeded with it so the select always has a matching option.
+const QUICK_PICKS = [
+  { id: 'ocp50-candidate', label: '5.0 candidate', channelGroup: 'candidate', version: '5.0.0-rc.0' },
+  { id: 'latest-stable', label: 'Latest stable', channelGroup: 'stable', version: 'latest' },
+  { id: 'latest-candidate', label: 'Latest candidate', channelGroup: 'candidate', version: 'latest' },
+];
+
+const OTHER_VERSION = '__other__';
+
 export function ExpressProvision({ onSubmit }) {
   const [prefix, setPrefix] = useState(() => `ui${generateSuffix()}`);
   const [channelGroup, setChannelGroup] = useState('stable');
   const [submitting, setSubmitting] = useState(false);
 
+  const [version, setVersion] = useState('');
+  // 'auto' follows the channel's default; 'preset'/'manual' are explicit user
+  // intent and must survive the refetch a channel change kicks off.
+  const [versionSource, setVersionSource] = useState('auto');
+  const [activePreset, setActivePreset] = useState(null);
+  const [showOverride, setShowOverride] = useState(false);
+
   const [availableVersions, setAvailableVersions] = useState([]);
-  const [defaultVersion, setDefaultVersion] = useState('4.22.5');
+  const [pinnedVersions, setPinnedVersions] = useState([]);
+  const [versionsMeta, setVersionsMeta] = useState({ source: null, error: null });
   const [loadingVersions, setLoadingVersions] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
+
+  // Read inside the fetch effect, which must not re-run when intent changes.
+  const versionSourceRef = useRef(versionSource);
+  const setVersionIntent = (next) => {
+    versionSourceRef.current = next;
+    setVersionSource(next);
+  };
+
+  // Guards against a slow response for one channel landing after a fast one
+  // for another and overwriting it.
+  const requestSeq = useRef(0);
 
   useEffect(() => {
+    const seq = ++requestSeq.current;
+
     const fetchVersions = async () => {
       setLoadingVersions(true);
       try {
         const response = await fetch(buildApiUrl(`${API_ENDPOINTS.VERSIONS}?channel_group=${channelGroup}`));
         const data = await response.json();
-        if (data.versions && data.versions.length > 0) {
-          setAvailableVersions(data.versions);
-          if (data.default_version) setDefaultVersion(data.default_version);
-        }
-      } catch {}
-      finally { setLoadingVersions(false); }
+        if (seq !== requestSeq.current) return;
+
+        const list = data.versions || [];
+        setAvailableVersions(list);
+        setPinnedVersions(data.pinned_versions || []);
+        setVersionsMeta({ source: data.source || 'ocm', error: data.error || null });
+        setVersion((current) => (
+          versionSourceRef.current !== 'auto' && current
+            ? current
+            : (data.default_version || list[0] || '')
+        ));
+      } catch (err) {
+        if (seq !== requestSeq.current) return;
+        // Surface the failure instead of silently provisioning a guessed version.
+        setAvailableVersions([]);
+        setPinnedVersions([]);
+        setVersionsMeta({ source: 'error', error: err?.message || String(err) });
+      } finally {
+        if (seq === requestSeq.current) setLoadingVersions(false);
+      }
     };
+
     fetchVersions();
-  }, [channelGroup]);
+  }, [channelGroup, retryToken]);
+
+  // A preset or override may name a version the API never listed; it still
+  // needs an <option> or the select renders blank.
+  const versionOptions = useMemo(() => (
+    version && !availableVersions.includes(version)
+      ? [version, ...availableVersions]
+      : availableVersions
+  ), [availableVersions, version]);
 
   const clusterName = prefix ? `${prefix}-rosa-hcp` : '';
   const nodePoolName = prefix ? `${prefix}-np` : '';
 
+  const versionValid = VERSION_RE.test(version);
+  const prerelease = isPrereleaseVersion(version);
+  const channelMismatch = prerelease && !PRERELEASE_CHANNELS.includes(channelGroup);
+  const notListed = versionValid && availableVersions.length > 0
+    && !availableVersions.includes(version);
+  const degraded = versionsMeta.source === 'fallback' || versionsMeta.source === 'error';
+
+  const handleQuickPick = (pick) => {
+    setActivePreset(pick.id);
+    setShowOverride(false);
+    setChannelGroup(pick.channelGroup);
+    if (pick.version === 'latest') {
+      setVersionIntent('auto');
+    } else {
+      setVersionIntent('preset');
+      setVersion(pick.version);
+    }
+  };
+
+  const handleChannelChange = (value) => {
+    setActivePreset(null);
+    setShowOverride(false);
+    setVersionIntent('auto');
+    setChannelGroup(value);
+  };
+
+  const handleVersionChange = (value) => {
+    setActivePreset(null);
+    setVersionIntent('manual');
+    if (value === OTHER_VERSION) {
+      setShowOverride(true);
+      setVersion('');
+      return;
+    }
+    setVersion(value);
+  };
+
   const handleSubmit = async () => {
-    if (!prefix.trim()) return;
+    if (!prefix.trim() || !versionValid) return;
     setSubmitting(true);
     try {
       await onSubmit({
         clusterName,
         nodePoolName,
         clusterDescription: '',
-        openShiftVersion: defaultVersion,
+        openShiftVersion: version,
         createRosaNetwork: true,
         createRosaRoleConfig: true,
         vpcCidrBlock: '10.0.0.0/16',
@@ -1325,10 +1424,26 @@ export function ExpressProvision({ onSubmit }) {
     }
   };
 
-  const recommendedVersion = availableVersions.length > 1 ? availableVersions[1] : defaultVersion;
-
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-medium text-gray-500 mr-1">Quick picks</span>
+        {QUICK_PICKS.map((pick) => (
+          <button
+            key={pick.id}
+            type="button"
+            onClick={() => handleQuickPick(pick)}
+            className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
+              activePreset === pick.id
+                ? 'bg-blue-50 border-blue-400 text-blue-700 ring-1 ring-blue-400'
+                : 'bg-white border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-50'
+            }`}
+          >
+            {pick.label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex items-end gap-3">
         <div className="w-36">
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1348,10 +1463,11 @@ export function ExpressProvision({ onSubmit }) {
           <span className="text-sm text-gray-400 pb-2 font-mono">{clusterName}</span>
         )}
         <div className="w-32">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Channel</label>
+          <label htmlFor="express-channel" className="block text-sm font-medium text-gray-700 mb-1">Channel</label>
           <select
+            id="express-channel"
             value={channelGroup}
-            onChange={(e) => setChannelGroup(e.target.value)}
+            onChange={(e) => handleChannelChange(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
           >
             <option value="stable">Stable</option>
@@ -1361,10 +1477,44 @@ export function ExpressProvision({ onSubmit }) {
             <option value="nightly">Nightly</option>
           </select>
         </div>
+        <div className="w-44">
+          <label htmlFor="express-version" className="block text-sm font-medium text-gray-700 mb-1">OpenShift Version</label>
+          {showOverride ? (
+            <input
+              id="express-version"
+              type="text"
+              value={version}
+              onChange={(e) => setVersion(e.target.value.trim())}
+              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm ${
+                version && !versionValid ? 'border-red-400' : 'border-gray-300'
+              }`}
+              placeholder="5.0.0-rc.0"
+              autoFocus
+            />
+          ) : (
+            <select
+              id="express-version"
+              value={version}
+              onChange={(e) => handleVersionChange(e.target.value)}
+              disabled={loadingVersions}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm disabled:bg-gray-50"
+            >
+              {loadingVersions && <option value="">Loading…</option>}
+              {versionOptions.map((v, i) => (
+                <option key={v} value={v}>
+                  {v}
+                  {pinnedVersions.includes(v) ? ' (pre-release)' : ''}
+                  {i === 0 && !pinnedVersions.includes(v) ? ' (latest)' : ''}
+                </option>
+              ))}
+              <option value={OTHER_VERSION}>Other version…</option>
+            </select>
+          )}
+        </div>
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={!prefix.trim() || submitting || loadingVersions}
+          disabled={!prefix.trim() || submitting || loadingVersions || !versionValid}
           className="px-5 py-2 text-sm text-white font-medium rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
         >
           {submitting ? (
@@ -1375,19 +1525,76 @@ export function ExpressProvision({ onSubmit }) {
         </button>
       </div>
 
+      {showOverride && (
+        <p className="text-xs">
+          {version && !versionValid ? (
+            <span className="text-red-600">Use x.y.z or x.y.z-rc.N (e.g. 5.0.0-rc.0)</span>
+          ) : (
+            <span className="text-gray-400">Any version ROSA accepts, listed or not.</span>
+          )}
+          <button
+            type="button"
+            onClick={() => { setShowOverride(false); setVersionIntent('auto'); }}
+            className="ml-2 text-blue-600 hover:text-blue-700 underline"
+          >
+            back to list
+          </button>
+        </p>
+      )}
+
       {prefix && (
         <p className="text-xs text-gray-400">
           <span className="font-mono">{clusterName}</span>
           <span className="mx-1.5 text-gray-300">&middot;</span>
           <span className="font-mono">{nodePoolName}</span>
           <span className="mx-1.5 text-gray-300">&middot;</span>
-          <span>{recommendedVersion}</span>
+          <span>{version || '—'}</span>
+          <span className="mx-1.5 text-gray-300">&middot;</span>
+          <span>{channelGroup}</span>
           <span className="mx-1.5 text-gray-300">&middot;</span>
           <span>us-west-2</span>
           <span className="mx-1.5 text-gray-300">&middot;</span>
           <span>2 AZ</span>
           <span className="mx-1.5 text-gray-300">&middot;</span>
           <span>auto roles</span>
+        </p>
+      )}
+
+      {channelMismatch ? (
+        <p className="text-xs text-red-600">
+          {version} is a pre-release build and needs the candidate channel.
+          <button
+            type="button"
+            onClick={() => { setChannelGroup('candidate'); setVersionIntent('preset'); }}
+            className="ml-2 text-blue-600 hover:text-blue-700 underline"
+          >
+            Switch to candidate
+          </button>
+        </p>
+      ) : prerelease && (
+        <p className="text-xs text-amber-600">
+          Pre-release build — requires the candidate channel.
+        </p>
+      )}
+
+      {notListed && !channelMismatch && (
+        <p className="text-xs text-gray-400">
+          Not in the {channelGroup} list — provisioning will still be attempted.
+        </p>
+      )}
+
+      {degraded && (
+        <p className="text-xs text-amber-600">
+          {versionsMeta.source === 'fallback'
+            ? "Couldn't reach OCM — showing a built-in version list."
+            : `Couldn't load versions${versionsMeta.error ? `: ${versionsMeta.error}` : ''}.`}
+          <button
+            type="button"
+            onClick={() => setRetryToken((t) => t + 1)}
+            className="ml-2 text-blue-600 hover:text-blue-700 underline"
+          >
+            Retry
+          </button>
         </p>
       )}
     </div>
