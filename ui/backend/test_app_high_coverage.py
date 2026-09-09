@@ -4150,39 +4150,43 @@ class TestRunAnsibleRoleEndpoint:
 ###############################################################################
 # Test _get_supported_versions_sync  (lines 703-776, 68 lines)
 ###############################################################################
+from static_routes import _get_supported_versions_sync  # noqa: E402
+
+
 class TestGetSupportedVersionsSync:
     """Tests for _get_supported_versions_sync"""
 
-    @patch("subprocess.run")
-    def test_success_parses_versions(self, mock_run):
-        output = "VERSION  DEFAULT  AVAILABLE UPGRADES\n4.21.0   \n4.20.12  yes\n4.20.11  \n4.19.22  \n"
-        mock_run.return_value = MagicMock(returncode=0, stdout=output, stderr="")
-        result = app_module._get_supported_versions_sync()
+    @staticmethod
+    def _stub_ocm(versions, err=None):
+        client = MagicMock()
+        client.list_versions.return_value = (versions, err)
+        return patch("agents.ocm_client.get_ocm_client", return_value=client)
+
+    def test_success_parses_versions(self):
+        with self._stub_ocm(["4.21.0", "4.20.12", "4.20.11", "4.19.22"]):
+            result = _get_supported_versions_sync()
         assert "4.21.0" in result["versions"]
         assert "4.20.12" in result["versions"]
         assert result["latest_version"] == "4.21.0"
-        assert result["default_version"] == "4.20.12"
+        assert result["default_version"] == "4.21.0"
 
-    @patch("subprocess.run")
-    def test_command_fails_fallback(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
-        result = app_module._get_supported_versions_sync()
-        assert "4.21.0" in result["versions"]
-        assert result["default_version"] == "4.20.12"
-
-    @patch("subprocess.run")
-    def test_empty_output_fallback(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0, stdout="VERSION  DEFAULT\n", stderr="")
-        result = app_module._get_supported_versions_sync()
-        # No valid versions parsed, should fallback
+    def test_command_fails_fallback(self):
+        with self._stub_ocm([], err="not found"):
+            result = _get_supported_versions_sync()
         assert len(result["versions"]) > 0
-        assert result["default_version"] == "4.20.12"
+        assert result["source"] == "fallback"
 
-    @patch("subprocess.run")
-    def test_exception_fallback(self, mock_run):
-        mock_run.side_effect = Exception("rosa not installed")
-        result = app_module._get_supported_versions_sync()
-        assert "4.21.0" in result["versions"]
+    def test_empty_output_fallback(self):
+        with self._stub_ocm([]):
+            result = _get_supported_versions_sync()
+        assert len(result["versions"]) > 0
+        assert result["source"] == "fallback"
+
+    def test_exception_fallback(self):
+        with patch("agents.ocm_client.get_ocm_client", side_effect=Exception("rosa not installed")):
+            result = _get_supported_versions_sync()
+        assert len(result["versions"]) > 0
+        assert result["source"] == "fallback"
 
 
 ###############################################################################
@@ -6209,7 +6213,7 @@ class TestGetSupportedVersionsErrors:
 
     @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="rosa", timeout=30))
     def test_timeout_returns_fallback(self, mock_run):
-        result = app_module._get_supported_versions_sync()
+        result = _get_supported_versions_sync()
         assert isinstance(result, dict)
         # On error, returns hardcoded fallback versions
         assert len(result.get("versions", [])) > 0
@@ -6217,7 +6221,7 @@ class TestGetSupportedVersionsErrors:
 
     @patch("subprocess.run", side_effect=Exception("connection failed"))
     def test_exception_returns_fallback(self, mock_run):
-        result = app_module._get_supported_versions_sync()
+        result = _get_supported_versions_sync()
         assert isinstance(result, dict)
         assert len(result.get("versions", [])) > 0
 

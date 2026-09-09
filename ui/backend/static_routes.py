@@ -60,10 +60,68 @@ async def health_check():
 # Versions
 # ============================================================================
 
+# Channels whose newest release may legitimately be a pre-release build.
+_PRERELEASE_CHANNELS = {"candidate", "nightly"}
+
+# Versions that provision successfully but are NOT enumerated by OCM's
+# versions endpoint under the rosa_enabled + hosted_control_plane_enabled
+# filter. 5.0.0-rc.0 is verified: capi_tests build 351 brought up a
+# ROSAControlPlane with status.ready=true on it (channelGroup: candidate).
+# Without this merge the UI cannot offer a version the API refuses to list.
+# Anything not listed here is still reachable via the free-text override.
+_PINNED_VERSIONS = {
+    "candidate": ["5.0.0-rc.0"],
+}
+
+# Last-resort list for when OCM is unreachable AND the rosa CLI is unusable.
+# Responses built from this are tagged source="fallback" so the UI can say so
+# instead of presenting stale data as fact.
+_FALLBACK_VERSIONS = {
+    "stable": ["4.22.12", "4.22.11", "4.22.10", "4.21.9", "4.20.12", "4.19.22"],
+    "candidate": ["4.22.13", "4.22.12", "4.22.11", "4.21.9", "4.20.12"],
+}
+
+
 @router.get("/api/versions")
 async def get_supported_versions(channel_group: str = "stable"):
     """Get supported OpenShift versions — offloads to thread pool."""
     return await asyncio.to_thread(_get_supported_versions_sync, channel_group)
+
+
+def _pick_default(versions, channel_group, is_prerelease):
+    """Newest version for the channel.
+
+    GA channels never default to a pre-release even if one leaks into the list;
+    candidate/nightly default to the newest build of any kind. `versions` is
+    already sorted newest-first.
+    """
+    if not versions:
+        return ""
+    if channel_group in _PRERELEASE_CHANNELS:
+        return versions[0]
+    return next((v for v in versions if not is_prerelease(v)), versions[0])
+
+
+def _build_versions_response(versions, channel_group, source, error=None):
+    from agents.ocm_client import is_prerelease, version_sort_key
+
+    # The default comes from what OCM actually enumerated, so merging a pinned
+    # version never silently redirects everyone's provisions onto it.
+    default_version = _pick_default(versions, channel_group, is_prerelease)
+
+    pinned = [v for v in _PINNED_VERSIONS.get(channel_group, []) if v not in versions]
+    merged = sorted(versions + pinned, key=version_sort_key, reverse=True)
+
+    return {
+        "success": True,
+        "versions": merged,
+        "pinned_versions": pinned,
+        "default_version": default_version or (merged[0] if merged else ""),
+        "latest_version": merged[0] if merged else "",
+        "channel_group": channel_group,
+        "source": source,
+        **({"error": error} if error else {}),
+    }
 
 
 def _get_supported_versions_sync(channel_group: str = "stable"):
@@ -72,31 +130,23 @@ def _get_supported_versions_sync(channel_group: str = "stable"):
     if channel_group not in allowed_groups:
         channel_group = "stable"
 
-    _FALLBACK = {
-        "success": True,
-        "versions": ["4.21.0", "4.20.12", "4.20.11", "4.20.10", "4.20.8", "4.19.22", "4.19.21"],
-        "default_version": "4.20.12",
-        "latest_version": "4.21.0",
-    }
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
     try:
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
         from agents.ocm_client import get_ocm_client
         ocm = get_ocm_client()
         versions, err = ocm.list_versions(channel_group)
 
-        if err or not versions:
-            return _FALLBACK
+        if not err and versions:
+            return _build_versions_response(versions, channel_group, "ocm")
 
-        return {
-            "success": True,
-            "versions": versions,
-            "default_version": versions[1] if len(versions) > 1 else versions[0],
-            "latest_version": versions[0] if versions else "4.21.0",
-        }
+        error = err or "OCM returned no versions"
     except Exception as e:
         print(f"Error fetching ROSA versions: {e}")
-        return _FALLBACK
+        error = str(e)
+
+    fallback = _FALLBACK_VERSIONS.get(channel_group, _FALLBACK_VERSIONS["stable"])
+    return _build_versions_response(fallback, channel_group, "fallback", error)
 
 
 # ============================================================================
