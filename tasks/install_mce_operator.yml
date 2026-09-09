@@ -5,7 +5,7 @@
 # are context-less and therefore hit the new hub.
 #
 # Two source modes, selected by mce_source_mode (default "gaCatalog"):
-#   gaCatalog  — stable-2.8 / redhat-operators; validated against the
+#   gaCatalog  — mce_channel / redhat-operators; validated against the
 #                packagemanifest (existing behavior).
 #   devCatalog — creates a custom acm-d dev CatalogSource first, then
 #                subscribes against it (5.0 RC/dev builds). See vars/vars.yml.
