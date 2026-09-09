@@ -16,6 +16,13 @@ frontend engineer. Desktop-first, information-dense, matches existing convention
 >   in the suite** — it's a playbook-level var (gaCatalog default). For a first UI cut, expose the
 >   four suite vars; treat GA-vs-dev-catalog + `stable-5.0` as a later enhancement, and keep the
 >   acm-d pull-secret guardrail (§5) conditional on the user choosing a `stable-5.x` channel.
+>
+> **SUPERSEDED (2026-09-09):** the later enhancement landed. The card now has an *MCE source*
+> selector and sends `mce_source_mode` (plus `acm_repo: acmd` and `mce_dev_catalog_tag` on the
+> dev path) — the playbook has always accepted them via env/extra_vars. Default is now
+> **devCatalog / `stable-5.0`** (the 5.0 candidate); GA is the second option and resolves to
+> `stable-2.17`, since `stable-2.8` was retired from `redhat-operators`. The pull-secret
+> guardrail is an acknowledgement checkbox rather than a hard block — see below.
 > - **Success outputs are PRINT-ONLY** (a `debug` summary at playbook.yml:129-141: `Console:`,
 >   `MCE version:`, `CAPI/CAPA: enabled`). No machine-readable registered return facts → the
 >   success card (§3d) MUST parse these from the log stream. Console URL comes from
@@ -25,8 +32,9 @@ frontend engineer. Desktop-first, information-dense, matches existing convention
 >   "Get the new hub kubeconfig" → "Install the MCE operator on the new hub" →
 >   "Create rosa-creds-secret (OCM) on the new hub" / "Create AWS bootstrap credentials secret" →
 >   "Enable CAPI/CAPA and disable HyperShift on the new hub". Map these substrings to phase rows.
-> - Default `mce_channel` is **`stable-2.8`** (GA), NOT `stable-5.0`. Prefill the field with the
->   suite default and let the user change it.
+> - ~~Default `mce_channel` is **`stable-2.8`** (GA), NOT `stable-5.0`.~~ **Reversed 2026-09-09:**
+>   the default is now `stable-5.0` on the dev catalog. The channel stays a free-text field, so
+>   any catalog channel can still be typed.
 
 ---
 
