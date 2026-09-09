@@ -491,16 +491,45 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
       const credResponse = await fetch(buildApiUrl('/api/credentials'));
       const credData = await credResponse.json();
       const creds = credData.credentials || {};
+      // The playbook var is called minikube_context, but it is just the kube
+      // context of whichever management cluster holds the CAPI resources and
+      // the <cluster>-kubeconfig secret. On the MCE dashboard that is the MCE
+      // hub itself, not a minikube profile — so prefer the live current
+      // context there. The minikube dashboard keeps its profile-name default.
       minikubeContext =
         creds.minikubeCluster || creds.clusterName || 'minikube';
+      if (theme !== 'minikube') {
+        // Blank rather than a stale credentials value on failure: a wiped
+        // kubeconfig would otherwise prefill a minikube profile name and the
+        // build would die on `kubectl config use-context <bogus>`.
+        minikubeContext = '';
+        try {
+          const ctxResponse = await fetch(
+            buildApiUrl('/api/minikube/current-context')
+          );
+          const ctxData = await ctxResponse.json();
+          if (ctxData.success && ctxData.current_context) {
+            minikubeContext = ctxData.current_context;
+          }
+        } catch (e) {
+          console.warn('Could not read current kube context:', e);
+        }
+      }
       // Creds preflight: verify OCM + AWS values are present and non-placeholder.
+      // /api/credentials keys the vars/user_vars.yml entries verbatim
+      // (OCM_CLIENT_ID, AWS_ACCESS_KEY_ID, ...); the camelCase names are only a
+      // fallback in case that endpoint ever normalizes them.
       const nonEmpty = (v) =>
         typeof v === 'string' &&
         v.trim() !== '' &&
         !/placeholder|changeme|xxx/i.test(v);
-      ocmOk = nonEmpty(creds.ocmClientId) && nonEmpty(creds.ocmClientSecret);
+      const cred = (...keys) => keys.map((k) => creds[k]).find(nonEmpty);
+      ocmOk =
+        !!cred('OCM_CLIENT_ID', 'ocmClientId') &&
+        !!cred('OCM_CLIENT_SECRET', 'ocmClientSecret');
       awsOk =
-        nonEmpty(creds.awsAccessKeyId) && nonEmpty(creds.awsSecretAccessKey);
+        !!cred('AWS_ACCESS_KEY_ID', 'awsAccessKeyId') &&
+        !!cred('AWS_SECRET_ACCESS_KEY', 'awsSecretAccessKey');
     } catch (e) {
       console.warn('Could not fetch credentials for hub preflight:', e);
     }
@@ -549,7 +578,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         isRunning: true,
         timestamp: new Date().toISOString(),
         clusterName,
-        output: `🚀 Starting MCE hub build for ${clusterName}...\n\nInstalling + configuring MultiCluster Engine and enabling CAPI/CAPA...\nCluster: ${clusterName}\nCAPI namespace: ${cfg.capi_namespace}\nMinikube context: ${cfg.minikube_context}\nMCE channel: ${cfg.mce_channel}\n\nConnecting to backend...`,
+        output: `🚀 Starting MCE hub build for ${clusterName}...\n\nInstalling + configuring MultiCluster Engine and enabling CAPI/CAPA...\nCluster: ${clusterName}\nCAPI namespace: ${cfg.capi_namespace}\nManagement cluster context: ${cfg.minikube_context}\nMCE channel: ${cfg.mce_channel}\n\nConnecting to backend...`,
       });
 
       addToRecent({
@@ -1262,9 +1291,14 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         const devChannel = isDevChannel(hubConfig.mce_channel);
         const credsOk =
           credsPreflight && credsPreflight.ocm && credsPreflight.aws;
-        // Launch blocked if creds missing, or dev channel selected (acm-d pull
-        // secret guardrail — we cannot verify it, so we block dev/RC channels).
-        const launchBlocked = !credsOk || devChannel;
+        // An empty context means we could not resolve the management cluster
+        // (e.g. the kubeconfig lost its contexts). Launching would fail at
+        // `kubectl config use-context`, so block it here instead.
+        const contextOk = !!(hubConfig.minikube_context || '').trim();
+        // Launch blocked if creds missing, no management context, or a dev
+        // channel is selected (acm-d pull secret guardrail — we cannot verify
+        // it, so we block dev/RC channels).
+        const launchBlocked = !credsOk || !contextOk || devChannel;
         return (
           <div className="mt-4">
             <div className="bg-purple-50 border border-purple-300 rounded-lg p-4">
@@ -1306,11 +1340,28 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                           AWS credentials {credsPreflight?.aws ? 'present' : 'missing'}
                         </span>
                       </span>
+                      <span className="flex items-center gap-1.5">
+                        {contextOk ? (
+                          <CheckCircleIcon className="h-4 w-4 text-green-600" />
+                        ) : (
+                          <XCircleIcon className="h-4 w-4 text-red-600" />
+                        )}
+                        <span className={contextOk ? 'text-gray-700' : 'text-red-700'}>
+                          Management cluster context{' '}
+                          {contextOk ? 'resolved' : 'not set'}
+                        </span>
+                      </span>
                     </div>
                     {!credsOk && (
                       <p className="text-xs text-red-700 mt-1">
                         Add OCM + AWS credentials in the Credentials / Environments
                         section before launching.
+                      </p>
+                    )}
+                    {!contextOk && (
+                      <p className="text-xs text-red-700 mt-1">
+                        No kube context found for the management cluster. Log in
+                        again (<code>oc login</code>) or type the context name below.
                       </p>
                     )}
                   </div>
@@ -1342,7 +1393,9 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                         />
                       </label>
                       <label className="text-sm">
-                        <span className="block text-gray-600 mb-1">Minikube context</span>
+                        <span className="block text-gray-600 mb-1">
+                          Management cluster context
+                        </span>
                         <input
                           type="text"
                           value={hubConfig.minikube_context}
