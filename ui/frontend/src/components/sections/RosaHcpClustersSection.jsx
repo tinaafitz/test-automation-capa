@@ -102,6 +102,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
   const [hubStartedAt, setHubStartedAt] = useState(null);          // ms epoch for elapsed timer
   const [hubElapsed, setHubElapsed] = useState(0);                 // seconds elapsed (drives ⏱)
   const [credsPreflight, setCredsPreflight] = useState(null);      // { ocm, aws } from /api/credentials
+  const [pullSecretAck, setPullSecretAck] = useState(false);       // acm-d pull secret confirmed (devCatalog only)
   const [buildingClusterName, setBuildingClusterName] = useState(null); // drives per-row "Building hub…" spinner (STATE, not ref)
   const hubAbortController = useRef(null);
   const activeHubJobId = useRef(null);        // the REAL backend job_id of the in-flight hub build (for direct cancel)
@@ -463,6 +464,14 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
   // Whether an mce_channel is a dev/RC channel that needs the acm-d pull secret.
   const isDevChannel = (channel) => /^stable-5/i.test(channel || '');
 
+  // The two MCE sources the playbook supports. gaCatalog reads redhat-operators,
+  // which now offers only stable-2.11 and stable-2.17 (stable-2.8 was retired);
+  // devCatalog stands up the acm-d CatalogSource that carries the 5.x streams.
+  const MCE_SOURCES = {
+    devCatalog: { label: '5.0 candidate (acm-d dev catalog)', channel: 'stable-5.0' },
+    gaCatalog: { label: 'GA (redhat-operators)', channel: 'stable-2.17' },
+  };
+
   // Open the pre-run config + preflight card for a cluster.
   const handleMakeHub = async (cluster) => {
     // Block opening/launching another card while one build is already in flight
@@ -479,8 +488,12 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
       cluster_name: cluster.name,
       capi_namespace: cluster.namespace || 'ns-rosa-hcp',
       minikube_context: 'minikube',
-      mce_channel: 'stable-2.8',
+      mce_source_mode: 'devCatalog',
+      mce_channel: MCE_SOURCES.devCatalog.channel,
+      mce_dev_catalog_tag: 'latest-5.0',
     });
+    // Re-arm the acm-d pull-secret acknowledgement for every new card.
+    setPullSecretAck(false);
     setClusterPendingHub(cluster);
 
     // Prefill config from the row + credentials (minikube context default).
@@ -578,7 +591,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         isRunning: true,
         timestamp: new Date().toISOString(),
         clusterName,
-        output: `🚀 Starting MCE hub build for ${clusterName}...\n\nInstalling + configuring MultiCluster Engine and enabling CAPI/CAPA...\nCluster: ${clusterName}\nCAPI namespace: ${cfg.capi_namespace}\nManagement cluster context: ${cfg.minikube_context}\nMCE channel: ${cfg.mce_channel}\n\nConnecting to backend...`,
+        output: `🚀 Starting MCE hub build for ${clusterName}...\n\nInstalling + configuring MultiCluster Engine and enabling CAPI/CAPA...\nCluster: ${clusterName}\nCAPI namespace: ${cfg.capi_namespace}\nManagement cluster context: ${cfg.minikube_context}\nMCE source: ${cfg.mce_source_mode}\nMCE channel: ${cfg.mce_channel}\n\nConnecting to backend...`,
       });
 
       addToRecent({
@@ -591,13 +604,23 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         output: `Initializing MCE hub build...\nCluster: ${clusterName}\n\nConnecting to backend...`,
       });
 
-      // The four suite-15 extra_vars — nothing else (mce_source_mode deferred).
+      const devCatalog = (cfg.mce_source_mode || 'devCatalog') === 'devCatalog';
       const extraVars = {
         cluster_name: cfg.cluster_name,
         capi_namespace: cfg.capi_namespace || 'ns-rosa-hcp',
         minikube_context: cfg.minikube_context || 'minikube',
-        mce_channel: cfg.mce_channel || 'stable-2.8',
+        mce_channel:
+          cfg.mce_channel ||
+          MCE_SOURCES[devCatalog ? 'devCatalog' : 'gaCatalog'].channel,
+        mce_source_mode: devCatalog ? 'devCatalog' : 'gaCatalog',
       };
+      // vars.yml defaults acm_repo to "production", whose index_image.source is
+      // "". mce_dev_catalog_image interpolates that, so without flipping to acmd
+      // the CatalogSource image renders as "/mce-dev-catalog:latest-5.0".
+      if (devCatalog) {
+        extraVars.acm_repo = 'acmd';
+        extraVars.mce_dev_catalog_tag = cfg.mce_dev_catalog_tag || 'latest-5.0';
+      }
 
       const response = await fetch(
         buildApiUrl(API_ENDPOINTS.ANSIBLE_RUN_PLAYBOOK),
@@ -1295,10 +1318,12 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
         // (e.g. the kubeconfig lost its contexts). Launching would fail at
         // `kubectl config use-context`, so block it here instead.
         const contextOk = !!(hubConfig.minikube_context || '').trim();
-        // Launch blocked if creds missing, no management context, or a dev
-        // channel is selected (acm-d pull secret guardrail — we cannot verify
-        // it, so we block dev/RC channels).
-        const launchBlocked = !credsOk || !contextOk || devChannel;
+        // The acm-d pull secret lives on the target cluster, which we have no
+        // kube access to from here — so it can't be checked, only confirmed.
+        // Blocking dev channels outright would make the 5.0 candidate (the
+        // default) unlaunchable, so require an explicit acknowledgement instead.
+        const pullSecretOk = !devChannel || pullSecretAck;
+        const launchBlocked = !credsOk || !contextOk || !pullSecretOk;
         return (
           <div className="mt-4">
             <div className="bg-purple-50 border border-purple-300 rounded-lg p-4">
@@ -1406,6 +1431,30 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                         />
                       </label>
                       <label className="text-sm">
+                        <span className="block text-gray-600 mb-1">MCE source</span>
+                        <select
+                          value={hubConfig.mce_source_mode || 'devCatalog'}
+                          onChange={(e) => {
+                            const mode = e.target.value;
+                            // Carry the matching channel across, so switching
+                            // source can't leave stable-5.0 pointed at the GA
+                            // catalog (which doesn't carry it) or vice versa.
+                            setHubConfig((c) => ({
+                              ...c,
+                              mce_source_mode: mode,
+                              mce_channel: MCE_SOURCES[mode].channel,
+                            }));
+                          }}
+                          className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                        >
+                          {Object.entries(MCE_SOURCES).map(([mode, { label }]) => (
+                            <option key={mode} value={mode}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-sm">
                         <span className="block text-gray-600 mb-1">MCE channel</span>
                         <input
                           type="text"
@@ -1416,6 +1465,25 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                           className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
                         />
                       </label>
+                      {devChannel && (
+                        <label className="text-sm">
+                          <span className="block text-gray-600 mb-1">
+                            Dev catalog tag
+                          </span>
+                          <input
+                            type="text"
+                            value={hubConfig.mce_dev_catalog_tag || ''}
+                            onChange={(e) =>
+                              setHubConfig((c) => ({
+                                ...c,
+                                mce_dev_catalog_tag: e.target.value,
+                              }))
+                            }
+                            placeholder="latest-5.0"
+                            className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                          />
+                        </label>
+                      )}
                     </div>
                   </div>
 
@@ -1423,13 +1491,25 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
                   {devChannel && (
                     <div className="mb-4 flex items-start gap-2 bg-yellow-50 border border-yellow-300 rounded p-3">
                       <ExclamationTriangleIcon className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                      <p className="text-xs text-yellow-800">
-                        Dev catalog / stable-5.x requires the acm-d pull secret on
-                        the target cluster. Add it (or switch to a GA stable-2.x
-                        channel) before launching &mdash; the install will otherwise
-                        stall pulling the dev catalog image
-                        (<code>quay.io:443/acm-d/mce-dev-catalog</code>).
-                      </p>
+                      <div className="text-xs text-yellow-800">
+                        <p>
+                          The dev catalog pulls{' '}
+                          <code>quay.io:443/acm-d/mce-dev-catalog</code>, an
+                          authenticated registry. Without an acm-d pull secret on{' '}
+                          <strong>{clusterPendingHub.name}</strong> the
+                          CatalogSource pod ImagePullBackOffs and the install
+                          stalls. We can&rsquo;t check that from here.
+                        </p>
+                        <label className="mt-2 flex items-center gap-2 font-medium">
+                          <input
+                            type="checkbox"
+                            checked={pullSecretAck}
+                            onChange={(e) => setPullSecretAck(e.target.checked)}
+                            className="rounded border-yellow-400"
+                          />
+                          The acm-d pull secret is present on this cluster
+                        </label>
+                      </div>
                     </div>
                   )}
 
