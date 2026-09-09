@@ -181,7 +181,9 @@ Modeled on `playbooks/configure_mce_environment.yml` (vars_files + `set_fact` en
 ### 4.4 Config / vars
 
 Add to `vars/vars.yml` (ACM/MCE section):
-- `mce_channel: "stable-2.8"` (satisfies the ≥ 2.8 requirement — a var, not hardcoded)
+- `mce_channel` (satisfies the ≥ 2.8 requirement — a var, not hardcoded). Set this to a
+  channel the target catalog actually offers; as of 2026-09-09 `redhat-operators` carries
+  only `stable-2.11` and `stable-2.17`. See the drift note in §5.
 - `mce_catalog_source: "redhat-operators"`
 - `mce_catalog_source_namespace: "openshift-marketplace"`
 - `mce_install_plan_approval: "Automatic"`
@@ -206,7 +208,7 @@ this explicitly). Optionally pin `mce_starting_csv: multicluster-engine.v5.0.0-2
 cluster needs a pull secret for `quay.io:443/acm-d`.
 
 Add to `vars/user_vars.yml.example`:
-- `MCE_CHANNEL: "stable-2.8"` (optional override)
+- `MCE_CHANNEL` (optional override; `stable-2.17` is the current GA channel)
 - Comment: no new-hub username/password needed — access comes from the CAPA
   `<cluster_name>-kubeconfig` secret on the minikube mgmt cluster.
 
@@ -312,9 +314,15 @@ Two independent reviews of this workflow surfaced the following issues; all are 
 
 ## 5. Risks / open questions
 
-1. **Channel/version drift** — `stable-2.8` may not exist / map to < 2.8 in a given catalog.
-   *Mitigation:* the install task validates the channel via `packagemanifest` before subscribing.
-   **Open:** exact supported channel for the target OCP version.
+1. **Channel/version drift** — ~~`stable-2.8` may not exist~~ **this happened.** As of
+   2026-09-09 `redhat-operators` offers only `stable-2.11` and `stable-2.17`; `stable-2.8`
+   was retired and any gaCatalog run pinned to it now fails the channel check.
+   **`vars/vars.yml` still ships `mce_channel: "stable-2.8"`** — override it per run
+   (`-e mce_channel=stable-2.17` / `MCE_CHANNEL`) or change that default, or every
+   gaCatalog install will abort at the channel check. `stable-2.17` is the catalog's
+   own defaultChannel → `v2.17.2`.
+   *Mitigation:* the install task validates the channel via `packagemanifest` before
+   subscribing, so the drift fails fast and loudly rather than installing the wrong stream.
 2. **ROSA-HCP-as-MCE-hub topology** — MCE on ROSA HCP as a *nested* CAPI/CAPA management hub is a
    less-common setup. Whether HyperShift-disabled + CAPI-enabled MCE is fully supported on ROSA HCP
    *specifically* is not verifiable from the repo — stated as an assumption; `enable_capi_capa.yml`
