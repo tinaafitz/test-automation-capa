@@ -8,13 +8,14 @@
     {
       "name": "Create CAPA Cluster",
       "file": "playbooks/create_rosa_hcp_cluster.yml",
-      "description": "Provisions a ROSA HCP cluster using CAPA with optional ROSANetwork and ROSARoleConfig automation",
+      "description": "Provisions a ROSA HCP cluster using CAPA with optional ROSANetwork and ROSARoleConfig automation, and validates mandatory OCM-role linkage (ROSA-637; regression ROSAENG-60868 — unlinked yields 404 today, 403 after enforcement)",
       "test_case_id": "RHACM4K-61815",
       "extra_vars": {
         "name_prefix": "",
         "openshift_version": "4.20.10",
         "create_rosa_network": true,
         "create_rosa_role_config": true,
+        "validate_ocm_role_linkage": true,
         "vpc_cidr_block": "10.0.0.0/16",
         "availability_zone_count": 1,
         "aws_region": "us-west-2",
