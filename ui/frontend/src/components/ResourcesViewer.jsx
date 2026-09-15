@@ -148,7 +148,7 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
   };
 
   const groupedResources = resources.reduce((acc, resource) => {
-    const ns = resource.namespace || 'default';
+    const ns = resource.namespace || 'cluster-scoped';
     if (!acc[ns]) {
       acc[ns] = [];
     }

@@ -253,7 +253,7 @@ async def get_mce_resources():
             #     "type": "Deployment",
             #     "namespaces": ["capi-system", "capa-system", "multicluster-engine"],
             # },
-            {"type": "AWSClusterControllerIdentity", "namespaces": ["capa-system"]},
+            {"type": "AWSClusterControllerIdentity", "namespaces": "cluster-scoped"},  # Cluster-scoped resource
             {"type": "ROSACluster", "namespaces": None},  # All namespaces
             {"type": "ROSANetwork", "namespaces": None},  # All namespaces
             {"type": "ROSAControlPlane", "namespaces": None},  # All namespaces
@@ -265,7 +265,42 @@ async def get_mce_resources():
             namespaces = resource_config["namespaces"]
 
             try:
-                if namespaces:
+                if namespaces == "cluster-scoped":
+                    # Fetch cluster-scoped resource (no namespace flag)
+                    result = subprocess.run(
+                        ["oc", "get", resource_type.lower(), "-o", "json"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+
+                    if result.returncode == 0:
+                        data = json.loads(result.stdout)
+                        for item in data.get("items", []):
+                            metadata = item.get("metadata", {})
+                            resource_name = metadata.get("name", "unknown")
+
+                            yaml_result = subprocess.run(
+                                ["oc", "get", resource_type.lower(), resource_name, "-o", "yaml"],
+                                capture_output=True,
+                                text=True,
+                                timeout=10,
+                            )
+
+                            yaml_content = (
+                                yaml_result.stdout if yaml_result.returncode == 0 else None
+                            )
+
+                            resources.append(
+                                {
+                                    "name": resource_name,
+                                    "type": resource_type,
+                                    "namespace": "cluster-scoped",
+                                    "status": "Active",
+                                    "yaml": yaml_content,
+                                }
+                            )
+                elif namespaces:
                     # Fetch from specific namespaces
                     for namespace in namespaces:
                         result = subprocess.run(
