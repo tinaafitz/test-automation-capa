@@ -945,11 +945,13 @@ const MCEEnvironmentSelector = ({
               <div className={`mt-4 p-4 rounded-lg border ${
                 createMessageType === 'success'
                   ? 'bg-green-50 border-green-200 text-green-800'
+                  : createMessageType === 'info'
+                  ? 'bg-blue-50 border-blue-200 text-blue-800'
                   : 'bg-red-50 border-red-200 text-red-800'
               }`}>
                 <div className="flex items-start gap-3">
                   <span className="text-xl flex-shrink-0">
-                    {createMessageType === 'success' ? '✅' : '❌'}
+                    {createMessageType === 'success' ? '✅' : createMessageType === 'info' ? '🔄' : '❌'}
                   </span>
                   <div className="flex-1">
                     <p className="text-sm font-medium">{createMessage}</p>

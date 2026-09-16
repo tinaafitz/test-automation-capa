@@ -808,7 +808,7 @@ def get_capi_resources(context: str, namespace: str = "ns-rosa-hcp") -> Dict[str
                 resources.append({
                     "type": "AWSClusterControllerIdentity",
                     "name": metadata.get("name", "unknown"),
-                    "namespace": "(cluster-scoped)",
+                    "namespace": "cluster-scoped",
                     "version": "",
                     "status": "Active",
                     "age": _calculate_age(metadata.get("creationTimestamp", "")),

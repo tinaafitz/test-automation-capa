@@ -32,7 +32,7 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
         setActiveClusterName(clusterName);
 
         // Fetch resources from multiple namespaces in parallel with timeout
-        const namespaces = ['ns-rosa-hcp', 'capa-system', 'default'];
+        const namespaces = ['ns-rosa-hcp', 'capa-system'];
 
         const fetchWithTimeout = (namespace, timeoutMs = 30000) => {
           return Promise.race([
@@ -148,7 +148,7 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
   };
 
   const groupedResources = resources.reduce((acc, resource) => {
-    const ns = resource.namespace || 'default';
+    const ns = resource.namespace || 'cluster-scoped';
     if (!acc[ns]) {
       acc[ns] = [];
     }
@@ -158,6 +158,67 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
 
   // Sort namespaces alphabetically
   const sortedNamespaces = Object.keys(groupedResources).sort();
+
+  // Tree hierarchy: each type lists its children types
+  const typeChildren = {
+    'AWSClusterControllerIdentity': ['ROSARoleConfig', 'ROSANetwork', 'ROSACluster'],
+    'ROSANetwork': ['ROSAControlPlane'],
+    'ROSAControlPlane': ['Cluster'],
+    'Cluster': ['MachinePool'],
+    'MachinePool': ['ROSAMachinePool'],
+  };
+
+  // Root types within ns-rosa-hcp (anchored to AWSClusterControllerIdentity cross-namespace)
+  const nsRootTypes = ['ROSARoleConfig', 'ROSANetwork', 'ROSACluster', 'ROSAControlPlane', 'Cluster', 'MachinePool', 'ROSAMachinePool'];
+
+  const TREE_LAYOUT = {
+    ROSACluster:      { order: 0, depth: 0 },
+    ROSARoleConfig:   { order: 1, depth: 1 },
+    ROSANetwork:      { order: 2, depth: 1 },
+    ROSAControlPlane: { order: 3, depth: 1 },
+    Cluster:          { order: 4, depth: 2 },
+    MachinePool:      { order: 5, depth: 3 },
+    ROSAMachinePool:  { order: 6, depth: 4 },
+  };
+
+  const EXCLUDED_TYPES = new Set(['Namespace']);
+  const kindOf = (r) => r.type || r.kind || '';
+
+  const buildTree = (nsResources) => {
+    const visible = nsResources.filter((r) => !EXCLUDED_TYPES.has(kindOf(r)));
+
+    const ordered = visible
+      .map((r, i) => ({ r, i, layout: TREE_LAYOUT[kindOf(r)] }))
+      .sort((a, b) => {
+        const ao = a.layout ? a.layout.order : 99;
+        const bo = b.layout ? b.layout.order : 99;
+        if (ao !== bo) return ao - bo;
+        return (a.r.name || '').localeCompare(b.r.name || '') || a.i - b.i;
+      })
+      .map(({ r, layout }) => ({
+        ...r,
+        depth: layout ? layout.depth : 0,
+        known: Boolean(layout),
+      }));
+
+    const knownDepths = ordered.filter((n) => n.known).map((n) => n.depth);
+    const shift = knownDepths.length ? Math.min(...knownDepths) : 0;
+
+    return ordered.map((node, i) => {
+      const depth = node.known ? node.depth - shift : 0;
+      const rest = ordered.slice(i + 1).map((n) => (n.known ? n.depth - shift : 0));
+
+      const nextSibling = rest.findIndex((d) => d <= depth);
+      const isLast = nextSibling === -1 || rest[nextSibling] < depth;
+
+      const guides = [];
+      for (let level = 0; level < depth; level++) {
+        const next = rest.findIndex((d) => d <= level);
+        guides.push(next !== -1 && rest[next] === level);
+      }
+      return { ...node, depth, isLast, guides };
+    });
+  };
 
   const themeColors = theme === 'mce'
     ? { primary: '#2684FF', hover: '#0065FF', border: 'border-cyan-200' }
@@ -262,48 +323,75 @@ const ResourcesViewer = ({ theme = 'mce' }) => {
                     <span className="font-medium text-gray-900">{namespace}</span>
                   </div>
                   <span className="px-2 py-1 bg-white rounded text-xs font-medium text-gray-700">
-                    {nsResources.length}
+                    {nsResources.filter((r) => !EXCLUDED_TYPES.has(kindOf(r))).length}
                   </span>
                 </button>
 
                 {/* Resource Items */}
                 {expandedNamespaces.has(namespace) && (
                   <div className="divide-y divide-gray-100">
-                    {nsResources.map((resource, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => handleResourceClick(resource)}
-                        disabled={loadingYaml}
-                        className="w-full px-4 py-3 hover:bg-gray-50 transition-colors text-left disabled:opacity-50"
-                      >
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-medium text-gray-900">
-                            {resource.name}
-                          </span>
-                          <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
-                            {resource.type || resource.kind}
-                          </span>
-                          {resource.status && (
-                            <span
-                              className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                resource.status === 'Ready' || resource.status === 'Running'
-                                  ? 'bg-green-100 text-green-700'
-                                  : resource.status === 'Pending'
-                                  ? 'bg-yellow-100 text-yellow-700'
-                                  : 'bg-gray-100 text-gray-700'
-                              }`}
-                            >
-                              {resource.status}
-                            </span>
-                          )}
-                        </div>
-                        {resource.age && (
-                          <div className="text-xs text-gray-500 mt-1">
-                            Age: {resource.age}
+                    {(namespace === 'ns-rosa-hcp'
+                      ? buildTree(nsResources)
+                      : nsResources
+                          .filter((r) => !EXCLUDED_TYPES.has(kindOf(r)))
+                          .map((r) => ({ ...r, depth: 0, isLast: true, guides: [] }))
+                    ).map((resource, idx) => {
+                      const depth = resource.depth || 0;
+                      const guides = resource.guides || [];
+                      return (
+                        <button
+                          key={`${kindOf(resource)}-${resource.name}-${idx}`}
+                          onClick={() => handleResourceClick(resource)}
+                          disabled={loadingYaml}
+                          className="w-full pl-4 pr-4 py-3 hover:bg-gray-50 transition-colors text-left disabled:opacity-50"
+                        >
+                          <div className="flex items-stretch">
+                            {guides.map((show, level) => (
+                              <span key={level} aria-hidden="true"
+                                    className="w-6 flex-none flex justify-center select-none">
+                                {show && <span className="w-px bg-gray-200" />}
+                              </span>
+                            ))}
+
+                            {depth > 0 && (
+                              <span aria-hidden="true" className="w-6 flex-none relative select-none">
+                                <span className={`absolute left-1/2 top-0 w-px bg-gray-200 ${
+                                  resource.isLast ? 'h-1/2' : 'h-full'
+                                }`} />
+                                <span className="absolute left-1/2 top-1/2 w-3 h-px bg-gray-200" />
+                              </span>
+                            )}
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-medium text-gray-900 break-all">
+                                  {resource.name}
+                                </span>
+                                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                                  {kindOf(resource)}
+                                </span>
+                                {resource.status && (
+                                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                    resource.status === 'Ready' || resource.status === 'Running' || resource.status === 'Active'
+                                      ? 'bg-green-100 text-green-700'
+                                      : resource.status === 'Provisioning' || resource.status === 'Pending'
+                                      ? 'bg-yellow-100 text-yellow-700'
+                                      : resource.status === 'Failed' || resource.status === 'Deleting'
+                                      ? 'bg-red-100 text-red-700'
+                                      : 'bg-gray-100 text-gray-700'
+                                  }`}>
+                                    {resource.status}
+                                  </span>
+                                )}
+                              </div>
+                              {resource.age && (
+                                <div className="text-xs text-gray-500 mt-1">Age: {resource.age}</div>
+                              )}
+                            </div>
                           </div>
-                        )}
-                      </button>
-                    ))}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
