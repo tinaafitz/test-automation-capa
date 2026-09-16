@@ -608,10 +608,17 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                     if result.stderr:
                         jobs[job_id]["logs"].append(f"\n⚠️ Warnings:\n{result.stderr}")
 
-                    if result.returncode != 0:
+                    no_hosts = (
+                        "provided hosts list is empty" in result.stderr
+                        or "only implicit localhost is available" in result.stderr
+                    )
+                    if result.returncode != 0 or no_hosts:
+                        error_detail = result.stderr or result.stdout
+                        if no_hosts:
+                            error_detail = "Ansible ran with no inventory — cluster context may be missing or unreachable.\n\n" + error_detail
                         jobs[job_id]["status"] = "failed"
-                        jobs[job_id]["message"] = f"❌ Playbook failed with exit code {result.returncode}"
-                        jobs[job_id]["error"] = result.stderr or result.stdout
+                        jobs[job_id]["message"] = f"❌ Playbook failed: no target hosts found" if no_hosts else f"❌ Playbook failed with exit code {result.returncode}"
+                        jobs[job_id]["error"] = error_detail
 
                         send_cluster_notifications(
                             cluster_name=cluster_name,
@@ -619,7 +626,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                             version=version,
                             job_id=job_id,
                             status="failed",
-                            error=result.stderr or result.stdout,
+                            error=error_detail,
                             operation_type="provision"
                         )
                         return
@@ -648,7 +655,9 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                 check_cmd, capture_output=True, text=True, timeout=30
                             )
 
-                            if check_result.returncode == 0:
+                            if check_result.returncode != 0:
+                                jobs[job_id]["logs"].append(f"⚠️ kubectl error: {check_result.stderr.strip()}")
+                            else:
                                 rcp_data = json.loads(check_result.stdout)
                                 status_obj = rcp_data.get("status", {})
                                 ready = status_obj.get("ready", False)
