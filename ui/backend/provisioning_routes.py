@@ -608,10 +608,17 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                     if result.stderr:
                         jobs[job_id]["logs"].append(f"\n⚠️ Warnings:\n{result.stderr}")
 
-                    if result.returncode != 0:
+                    no_hosts = (
+                        "provided hosts list is empty" in result.stderr
+                        or "only implicit localhost is available" in result.stderr
+                    )
+                    if result.returncode != 0 or no_hosts:
+                        error_detail = result.stderr or result.stdout
+                        if no_hosts:
+                            error_detail = "Ansible ran with no inventory — cluster context may be missing or unreachable.\n\n" + error_detail
                         jobs[job_id]["status"] = "failed"
-                        jobs[job_id]["message"] = f"❌ Playbook failed with exit code {result.returncode}"
-                        jobs[job_id]["error"] = result.stderr or result.stdout
+                        jobs[job_id]["message"] = f"❌ Playbook failed: no target hosts found" if no_hosts else f"❌ Playbook failed with exit code {result.returncode}"
+                        jobs[job_id]["error"] = error_detail
 
                         send_cluster_notifications(
                             cluster_name=cluster_name,
@@ -619,7 +626,7 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                             version=version,
                             job_id=job_id,
                             status="failed",
-                            error=result.stderr or result.stdout,
+                            error=error_detail,
                             operation_type="provision"
                         )
                         return
@@ -633,7 +640,8 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                     max_wait_time = 3600  # 60 minutes
                     poll_interval = 15  # Check every 15 seconds
                     start_time = time.time()
-                    last_log_time = 0
+                    last_log_time = time.time()
+                    warned_unknown = False
 
                     while (time.time() - start_time) < max_wait_time:
                         try:
@@ -648,7 +656,9 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                 check_cmd, capture_output=True, text=True, timeout=30
                             )
 
-                            if check_result.returncode == 0:
+                            if check_result.returncode != 0:
+                                jobs[job_id]["logs"].append(f"⚠️ kubectl error: {check_result.stderr.strip()}")
+                            else:
                                 rcp_data = json.loads(check_result.stdout)
                                 status_obj = rcp_data.get("status", {})
                                 ready = status_obj.get("ready", False)
@@ -683,6 +693,8 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                     jobs[job_id]["message"] = f"✅ Cluster {cluster_name} provisioned successfully!"
                                     jobs[job_id]["logs"].append(f"\n✅ Cluster {cluster_name} is READY! ({elapsed_min}m {elapsed_sec}s)")
                                     jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
+                                    jobs[job_id]["completed_at"] = datetime.now()
+                                    jobs[job_id]["return_code"] = 0
 
                                     send_cluster_notifications(
                                         cluster_name=cluster_name,
@@ -702,6 +714,8 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                     if rcp_message:
                                         jobs[job_id]["logs"].append(f"   {rcp_message}")
                                     jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
+                                    jobs[job_id]["completed_at"] = datetime.now()
+                                    jobs[job_id]["return_code"] = 1
 
                                     send_cluster_notifications(
                                         cluster_name=cluster_name,
@@ -720,6 +734,12 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                     jobs[job_id]["progress"] = progress
                                     jobs[job_id]["message"] = f"⏳ Provisioning... ({rcp_reason}) - {elapsed_min}m {elapsed_sec}s"
 
+                                    if rcp_reason == "Unknown" and elapsed > 600 and not warned_unknown:
+                                        jobs[job_id]["logs"].append(
+                                            "⚠️ RosaControlPlane has no conditions after 10m — controller may not be reconciling"
+                                        )
+                                        warned_unknown = True
+
                                     # Log every 30 seconds
                                     if time.time() - last_log_time >= 30:
                                         jobs[job_id]["logs"].append(f"   [{elapsed_min}m {elapsed_sec}s] Status: {rcp_reason}")
@@ -737,6 +757,8 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                     jobs[job_id]["progress"] = 100
                     jobs[job_id]["message"] = f"❌ Provisioning timed out after 60 minutes"
                     jobs[job_id]["logs"].append(f"\n❌ Timeout: Cluster did not reach ready state within 60 minutes")
+                    jobs[job_id]["completed_at"] = datetime.now()
+                    jobs[job_id]["return_code"] = 1
 
                     send_cluster_notifications(
                         cluster_name=cluster_name,
@@ -748,133 +770,6 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                         operation_type="provision"
                     )
                     return
-
-                    apply_cmd = [
-                        "kubectl",
-                        "--context",
-                        cluster_context,
-                        "apply",
-                        "-f",
-                        saved_yaml_path,
-                    ]
-
-                    result = subprocess.run(
-                        apply_cmd,
-                        cwd=project_root,
-                        capture_output=True,
-                        text=True,
-                        timeout=120,
-                    )
-
-                    jobs[job_id]["logs"].append(f"\n{result.stdout}")
-                    if result.stderr:
-                        jobs[job_id]["logs"].append(f"\n⚠️ Warnings/Errors:\n{result.stderr}")
-
-                    if result.returncode == 0 or "created" in result.stdout or "configured" in result.stdout:
-                        jobs[job_id]["progress"] = 50
-                        jobs[job_id]["message"] = "✅ Resources applied, waiting for cluster to be ready..."
-                        jobs[job_id]["logs"].append(f"\n✅ All resources applied successfully!")
-
-                        # Wait for cluster to be ready (for Minikube/ROSA provisioning)
-                        jobs[job_id]["logs"].append(f"\n⏳ Monitoring cluster provisioning status...")
-
-                        max_wait_time = 3600  # 60 minutes max wait
-                        poll_interval = 10  # Check every 10 seconds
-                        start_time = time.time()
-
-                        while (time.time() - start_time) < max_wait_time:
-                            # Get cluster name from YAML
-                            try:
-                                # Check for Cluster resource status
-                                check_cluster_cmd = [
-                                    "kubectl",
-                                    "--context",
-                                    cluster_context,
-                                    "get",
-                                    "cluster",
-                                    "-n", "ns-rosa-hcp",
-                                    "-o", "json"
-                                ]
-
-                                cluster_result = subprocess.run(
-                                    check_cluster_cmd,
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=30
-                                )
-
-                                if cluster_result.returncode == 0:
-                                    clusters_data = json.loads(cluster_result.stdout)
-
-                                    if clusters_data.get("items"):
-                                        cluster = clusters_data["items"][0]  # Get first cluster
-                                        found_cluster_name = cluster["metadata"]["name"]
-                                        phase = cluster.get("status", {}).get("phase", "Unknown")
-
-                                        # Check RosaControlPlane ready status
-                                        check_rcp_cmd = [
-                                            "kubectl",
-                                            "--context",
-                                            cluster_context,
-                                            "get",
-                                            "rosacontrolplane",
-                                            found_cluster_name,
-                                            "-n", "ns-rosa-hcp",
-                                            "-o", "jsonpath={.status.ready}"
-                                        ]
-
-                                        rcp_result = subprocess.run(
-                                            check_rcp_cmd,
-                                            capture_output=True,
-                                            text=True,
-                                            timeout=30
-                                        )
-
-                                        rcp_ready = rcp_result.stdout.strip().lower() == "true"
-
-                                        # Update progress based on phase
-                                        if phase == "Provisioned" and rcp_ready:
-                                            jobs[job_id]["status"] = "completed"
-                                            jobs[job_id]["progress"] = 100
-                                            jobs[job_id]["message"] = f"✅ Cluster {found_cluster_name} is ready!"
-                                            jobs[job_id]["logs"].append(f"\n✅ Cluster {found_cluster_name} provisioned successfully!")
-                                            jobs[job_id]["logs"].append(f"   Phase: {phase}")
-                                            jobs[job_id]["logs"].append(f"   RosaControlPlane Ready: {rcp_ready}")
-                                            return
-                                        elif phase == "Failed":
-                                            jobs[job_id]["status"] = "failed"
-                                            jobs[job_id]["progress"] = 100
-                                            jobs[job_id]["message"] = f"❌ Cluster {found_cluster_name} provisioning failed"
-                                            jobs[job_id]["logs"].append(f"\n❌ Cluster {found_cluster_name} entered Failed state")
-                                            return
-                                        else:
-                                            # Update progress incrementally (50-90%)
-                                            elapsed = time.time() - start_time
-                                            progress = min(90, 50 + int((elapsed / max_wait_time) * 40))
-                                            jobs[job_id]["progress"] = progress
-                                            jobs[job_id]["message"] = f"⏳ Cluster {cluster_name} provisioning... (Phase: {phase}, RCP Ready: {rcp_ready})"
-
-                                            # Log status update every 60 seconds
-                                            if int(elapsed) % 60 == 0:
-                                                jobs[job_id]["logs"].append(f"   [{int(elapsed//60)}m] Phase: {phase}, RCP Ready: {rcp_ready}")
-
-                            except Exception as status_error:
-                                jobs[job_id]["logs"].append(f"⚠️  Error checking cluster status: {str(status_error)}")
-
-                            await asyncio.sleep(poll_interval)
-
-                        # Timeout reached
-                        jobs[job_id]["status"] = "failed"
-                        jobs[job_id]["progress"] = 100
-                        jobs[job_id]["message"] = "❌ Cluster provisioning timed out after 60 minutes"
-                        jobs[job_id]["logs"].append(f"\n❌ Timeout: Cluster did not reach ready state within 60 minutes")
-                        return
-                    else:
-                        jobs[job_id]["status"] = "failed"
-                        jobs[job_id]["progress"] = 100
-                        jobs[job_id]["message"] = f"❌ Failed to apply resources"
-                        jobs[job_id]["logs"].append(f"\n❌ ERROR: {result.stderr}")
-                        return
 
                 # Apply each resource using oc apply
                 progress_increment = 70 / max(len(yaml_documents), 1)
@@ -923,7 +818,8 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                             # Default to oc for OpenShift clusters
                             apply_cmd = ["oc", "apply", "-f", temp_path]
 
-                        result = subprocess.run(
+                        result = await asyncio.to_thread(
+                            subprocess.run,
                             apply_cmd,
                             cwd=project_root,
                             capture_output=True,
@@ -955,7 +851,8 @@ async def apply_provisioning_yaml(request: Request, background_tasks: Background
                                             kubectl_cmd = "oc"
 
                                         # Check if rosa-creds-secret exists in multicluster-engine namespace
-                                        check_secret = subprocess.run(
+                                        check_secret = await asyncio.to_thread(
+                                            subprocess.run,
                                             [kubectl_cmd.split()[0]]
                                             + (kubectl_cmd.split()[1:] if cluster_context else [])
                                             + [
@@ -980,7 +877,8 @@ sed '/uid:/d' | \
 sed '/creationTimestamp:/d' | \
 {kubectl_cmd} apply -f -
 """
-                                            copy_result = subprocess.run(
+                                            copy_result = await asyncio.to_thread(
+                                                subprocess.run,
                                                 ["bash", "-c", copy_cmd],
                                                 capture_output=True,
                                                 text=True,
@@ -1014,12 +912,131 @@ sed '/creationTimestamp:/d' | \
                     current_progress += progress_increment
                     jobs[job_id]["progress"] = int(current_progress)
 
-                jobs[job_id]["status"] = "completed"
-                jobs[job_id]["progress"] = 100
-                jobs[job_id]["message"] = f"Successfully applied {len(yaml_documents)} resource(s)"
                 jobs[job_id]["logs"].append(f"\n✅ All resources applied successfully!")
+                jobs[job_id]["logs"].append(f"⏳ Polling RosaControlPlane status (this typically takes 15-20 minutes)...\n")
+                jobs[job_id]["message"] = "✅ Resources applied - monitoring cluster provisioning..."
+                jobs[job_id]["progress"] = 40
+
+                # Poll until RosaControlPlane is ready (mirrors the Ansible/Minikube path)
+                oc_max_wait = 3600
+                oc_poll_interval = 30
+                oc_start = time.time()
+                oc_last_log = time.time()
+                oc_warned_unknown = False
+
+                while (time.time() - oc_start) < oc_max_wait:
+                    try:
+                        if cluster_context:
+                            oc_cmd = ["kubectl", "--context", cluster_context,
+                                      "get", "rosacontrolplane", cluster_name,
+                                      "-n", "ns-rosa-hcp", "-o", "json"]
+                        else:
+                            oc_cmd = ["oc", "get", "rosacontrolplane", cluster_name,
+                                      "-n", "ns-rosa-hcp", "-o", "json"]
+
+                        oc_result = await asyncio.to_thread(
+                            subprocess.run, oc_cmd, capture_output=True, text=True, timeout=30
+                        )
+
+                        if oc_result.returncode != 0:
+                            jobs[job_id]["logs"].append(f"⚠️ oc error: {oc_result.stderr.strip()}")
+                        else:
+                            rcp_data = json.loads(oc_result.stdout)
+                            status_obj = rcp_data.get("status", {})
+                            ready = status_obj.get("ready", False)
+                            conditions = status_obj.get("conditions", [])
+
+                            rcp_reason = "Unknown"
+                            rcp_message = ""
+                            for cond in conditions:
+                                if cond.get("type") == "ROSAControlPlaneReady":
+                                    rcp_reason = cond.get("reason", "Unknown")
+                                    rcp_message = cond.get("message", "")
+                                    break
+
+                            elapsed = time.time() - oc_start
+                            elapsed_min = int(elapsed // 60)
+                            elapsed_sec = int(elapsed % 60)
+
+                            if agents and agents.get("monitor"):
+                                try:
+                                    agents["monitor"].process_line(
+                                        f"#AGENT_CONTEXT: resource_name={cluster_name} namespace=ns-rosa-hcp resource_type=rosacontrolplane"
+                                    )
+                                    agents["monitor"].process_line(
+                                        f"RosaControlPlane {cluster_name}: ready={ready} reason={rcp_reason} message={rcp_message}"
+                                    )
+                                except Exception as agent_err:
+                                    print(f"[AI Agent] Warning: {agent_err}")
+
+                            if ready:
+                                jobs[job_id]["status"] = "completed"
+                                jobs[job_id]["progress"] = 100
+                                jobs[job_id]["message"] = f"✅ Cluster {cluster_name} provisioned successfully!"
+                                jobs[job_id]["logs"].append(f"\n✅ Cluster {cluster_name} is READY! ({elapsed_min}m {elapsed_sec}s)")
+                                jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
+                                jobs[job_id]["completed_at"] = datetime.now()
+                                jobs[job_id]["return_code"] = 0
+                                send_cluster_notifications(
+                                    cluster_name=cluster_name,
+                                    region=region,
+                                    version=version,
+                                    job_id=job_id,
+                                    status="completed",
+                                    operation_type="provision"
+                                )
+                                return
+
+                            elif rcp_reason in ["ReconciliationError", "ProvisioningFailed", "Failed"]:
+                                jobs[job_id]["status"] = "failed"
+                                jobs[job_id]["progress"] = 100
+                                jobs[job_id]["message"] = f"❌ Cluster {cluster_name} provisioning failed: {rcp_reason}"
+                                jobs[job_id]["logs"].append(f"\n❌ Provisioning failed: {rcp_reason}")
+                                if rcp_message:
+                                    jobs[job_id]["logs"].append(f"   {rcp_message}")
+                                jobs[job_id]["agent_stats"] = get_agent_stats(job_id)
+                                jobs[job_id]["completed_at"] = datetime.now()
+                                jobs[job_id]["return_code"] = 1
+                                send_cluster_notifications(
+                                    cluster_name=cluster_name,
+                                    region=region,
+                                    version=version,
+                                    job_id=job_id,
+                                    status="failed",
+                                    error=f"{rcp_reason}: {rcp_message}",
+                                    operation_type="provision"
+                                )
+                                return
+
+                            else:
+                                progress = min(90, 40 + int((elapsed / oc_max_wait) * 50))
+                                jobs[job_id]["progress"] = progress
+                                jobs[job_id]["message"] = f"⏳ Provisioning... ({rcp_reason}) - {elapsed_min}m {elapsed_sec}s"
+
+                                if rcp_reason == "Unknown" and elapsed > 600 and not oc_warned_unknown:
+                                    jobs[job_id]["logs"].append(
+                                        "⚠️ RosaControlPlane has no conditions after 10m — controller may not be reconciling"
+                                    )
+                                    oc_warned_unknown = True
+
+                                if time.time() - oc_last_log >= 30:
+                                    jobs[job_id]["logs"].append(f"   [{elapsed_min}m {elapsed_sec}s] Status: {rcp_reason}")
+                                    if rcp_message:
+                                        jobs[job_id]["logs"].append(f"             {rcp_message}")
+                                    oc_last_log = time.time()
+
+                    except Exception as poll_err:
+                        jobs[job_id]["logs"].append(f"⚠️ Poll error: {str(poll_err)}")
+
+                    await asyncio.sleep(oc_poll_interval)
+
+                # Timeout
+                jobs[job_id]["status"] = "failed"
+                jobs[job_id]["progress"] = 100
+                jobs[job_id]["message"] = "❌ Provisioning timed out after 60 minutes"
+                jobs[job_id]["logs"].append(f"\n❌ Timeout: Cluster did not reach ready state within 60 minutes")
                 jobs[job_id]["completed_at"] = datetime.now()
-                jobs[job_id]["return_code"] = 0
+                jobs[job_id]["return_code"] = 1
 
             except Exception as e:
                 jobs[job_id]["status"] = "failed"
