@@ -257,6 +257,7 @@ async def get_mce_resources():
             {"type": "ROSACluster", "namespaces": None},  # All namespaces
             {"type": "ROSANetwork", "namespaces": None},  # All namespaces
             {"type": "ROSAControlPlane", "namespaces": None},  # All namespaces
+            {"type": "ROSAMachinePool", "namespaces": None},  # All namespaces
             {"type": "ROSARoleConfig", "namespaces": None},  # All namespaces
         ]
 
