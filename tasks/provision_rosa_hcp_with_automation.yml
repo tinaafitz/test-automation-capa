@@ -64,10 +64,16 @@
     create_rosa_network: false
   when: create_rosa_network is not defined
 
+- name: Set default value for validate_ocm_role_linkage
+  set_fact:
+    validate_ocm_role_linkage: false
+  when: validate_ocm_role_linkage is not defined
+
 - name: Ensure boolean types for flags
   set_fact:
     create_rosa_roles: "{{ create_rosa_roles | bool }}"
     create_rosa_network: "{{ create_rosa_network | bool }}"
+    validate_ocm_role_linkage: "{{ validate_ocm_role_linkage | bool }}"
 
 - name: Set default value for aws_region
   set_fact:

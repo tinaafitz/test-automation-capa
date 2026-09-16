@@ -151,3 +151,112 @@
 
           Manual fix: rosa create ocm-role --admin --mode auto --yes
       when: ocm_role_create_result.rc != 0
+
+# ================================================================
+# NEGATIVE-ENFORCEMENT ASSERTION (ROSA-637 / ROSAENG-60868)
+# ================================================================
+# Gated by validate_ocm_role_linkage. The steps above only ESTABLISH and FIX
+# OCM-role existence + linkage so provisioning succeeds — they never assert that
+# an UNLINKED operation is rejected. This block adds exactly that delta: it
+# probes an OCM op that requires OCM-role linkage for the AWS account and
+# asserts the unlinked path is rejected with 403, TOLERATING 404 during the
+# enforcement-transition window. A 200 means enforcement is NOT applied and is
+# a meaningful ROSA-637 test failure. Uses the OCM API (not the rosa CLI) via
+# the slimmed ocm_role_linkage_validator.
+- name: Assert unlinked OCM-role operation is rejected (ROSA-637)
+  when: validate_ocm_role_linkage | default(false) | bool
+  block:
+    - name: Display OCM-role negative-enforcement assertion banner
+      debug:
+        msg: |
+          🔐 ASSERT: unlinked OCM-role op is rejected (ROSA-637 / ROSAENG-60868)
+          ───────────────────────────────────────────────────────────
+          Negative: unlinked -> rejected (403; 404 tolerated in transition).
+          A 200 means enforcement is NOT applied = meaningful failure.
+          AWS account: {{ aws_account_id | default('(from AWS_ACCOUNT_ID env)') }}
+          OCM API: {{ OCM_API_URL | default('https://api.stage.openshift.com') }}
+
+    - name: Run OCM-role negative-enforcement probe
+      shell: |
+        python3 -c "
+        import sys, json
+        sys.path.insert(0, '{{ playbook_dir }}/..')
+        from agents.domains.rosa_hcp.ocm_role_linkage_validator import validate_from_env
+        try:
+            result = validate_from_env()
+            print(json.dumps(result))
+        except Exception as e:
+            print(json.dumps({'error': str(e)}))
+            sys.exit(3)
+        "
+      register: ocm_linkage_result
+      changed_when: false
+      failed_when: false
+      no_log: true
+      environment:
+        OCM_CLIENT_ID: "{{ OCM_CLIENT_ID | default('') }}"
+        OCM_CLIENT_SECRET: "{{ OCM_CLIENT_SECRET | default('') }}"
+        OCM_API_URL: "{{ OCM_API_URL | default('https://api.stage.openshift.com') }}"
+        aws_account_id: "{{ aws_account_id | default('') }}"
+        AWS_ACCOUNT_ID: "{{ aws_account_id | default('') }}"
+        # Optional endpoint override (live-verification residual — see the
+        # ocm_role_linkage_validator module docstring; VERIFIED-AGAINST-LIVE-OCM
+        # PENDING). Leave unset to use the default negative probe path.
+        OCM_LINKAGE_NEGATIVE_PATH: "{{ ocm_linkage_negative_path | default('') }}"
+        PATH: "{{ AUTOMATION_PATH | default(playbook_dir + '/..') }}/ui/backend/venv/bin:{{ ansible_env.PATH | default('/usr/bin:/bin:/usr/local/bin') }}"
+
+    - name: Fail if the negative-enforcement probe produced no parseable JSON
+      fail:
+        msg: |
+          ❌ OCM-role negative-enforcement assertion could not run — the
+          validator produced no parseable JSON on stdout. This usually means a
+          Python import/traceback or a dependency wrote noise to stdout.
+
+          Ensure OCM_CLIENT_ID/OCM_CLIENT_SECRET are set and that the OCM client
+          dependencies are available in the active Python environment.
+      # stdout is suppressed (no_log on the probe step) so we do not echo it
+      # here, but we still catch the malformed-output case with an actionable
+      # message instead of a cryptic masked from_json error.
+      when: (ocm_linkage_result.stdout | default('') | trim) is not match('^\s*\{')
+
+    - name: Parse OCM-role negative-enforcement result
+      set_fact:
+        ocm_linkage: "{{ ocm_linkage_result.stdout | from_json }}"
+
+    - name: Fail if the negative-enforcement probe itself errored
+      fail:
+        msg: |
+          ❌ OCM-role negative-enforcement assertion could not run.
+          {{ ocm_linkage.error | default('validator produced no result') }}
+
+          Ensure OCM_CLIENT_ID/OCM_CLIENT_SECRET are set and that the OCM client
+          dependencies are available in the active Python environment. If the
+          error mentions aws_account_id, pass -e aws_account_id=<12-digit id>.
+      when: ocm_linkage.error is defined
+
+    - name: Display OCM-role negative-enforcement findings
+      debug:
+        msg: "{{ ocm_linkage.messages | default(['(no messages)']) }}"
+
+    - name: Assert NEGATIVE — unlinked op rejected with 403 (404 tolerated)
+      fail:
+        msg: |
+          ❌ Negative assertion failed (verdict: {{ ocm_linkage.verdict | default('unknown') }}).
+          Unlinked OCM-role operation returned HTTP {{ ocm_linkage.negative_status_code | default('?') }};
+          expected 403 (or tolerated 404 during the enforcement transition).
+
+          A 200 here means OCM-role linkage enforcement is NOT applied — this is
+          a meaningful ROSA-637 regression. Any other status is unexpected and
+          should be triaged (see ROSAENG-60868).
+      when: not (ocm_linkage.negative_op_rejected | default(false) | bool)
+
+    - name: OCM-role negative-enforcement assertion PASSED
+      debug:
+        msg: |
+          ✅ OCM-role negative-enforcement assertion PASSED (ROSA-637 / ROSAENG-60868)
+          • Negative op rejected: {{ ocm_linkage.negative_op_rejected }}
+            (HTTP {{ ocm_linkage.negative_status_code }}, verdict: {{ ocm_linkage.verdict }})
+          {% if not (ocm_linkage.enforcement_applied | default(false) | bool) %}
+          ⚠️  NOTE: negative op returned 404, TOLERATED during the enforcement-
+              transition window (ROSAENG-60868). Full 403 enforcement not yet live.
+          {% endif %}
