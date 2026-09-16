@@ -58,6 +58,115 @@
   delay: 30
   failed_when: false
 
+# VPN-compatible networking for minikube: pods can't reach 192.168.49.1:53 (bridge DNS)
+# or public DNS (8.8.8.8) when VPN is active. Fix: run a socat DNS forwarder on the
+# pod-facing node IP (10.244.0.1) and a CONNECT proxy on the VM for HTTPS egress,
+# then point CoreDNS and CAPA at them.
+- name: Write HTTPS CONNECT proxy script to minikube VM
+  shell: |
+    minikube ssh -p {{ minikube_context | default(lookup('env', 'MINIKUBE_CONTEXT'), true) }} -- "cat > /tmp/proxy.py << 'PYEOF'
+    import socket, threading, select, sys
+
+    def handle(client):
+        try:
+            req = b''
+            while b'\r\n\r\n' not in req:
+                req += client.recv(4096)
+            line = req.split(b'\r\n')[0].decode()
+            method, target, _ = line.split()
+            if method == 'CONNECT':
+                host, port = target.rsplit(':', 1)
+                port = int(port)
+                srv = socket.create_connection((host, port), timeout=30)
+                client.sendall(b'HTTP/1.1 200 Connection established\r\n\r\n')
+                while True:
+                    r, _, _ = select.select([client, srv], [], [], 60)
+                    if not r: break
+                    for s in r:
+                        d = s.recv(65536)
+                        if not d: return
+                        (srv if s is client else client).sendall(d)
+        except Exception:
+            pass
+        finally:
+            try: client.close()
+            except: pass
+
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(('0.0.0.0', 3128))
+    s.listen(50)
+    print('Proxy listening on 0.0.0.0:3128')
+    sys.stdout.flush()
+    while True:
+        c, _ = s.accept()
+        threading.Thread(target=handle, args=(c,), daemon=True).start()
+    PYEOF"
+
+- name: Start HTTPS proxy and socat DNS forwarder in minikube VM
+  shell: |
+    CTX="{{ minikube_context | default(lookup('env', 'MINIKUBE_CONTEXT'), true) }}"
+    # Kill any stale instances
+    minikube ssh -p "$CTX" -- "sudo pkill -f 'python3 /tmp/proxy.py' 2>/dev/null; sudo pkill -f 'socat UDP4-LISTEN:53,bind=10.244.0.1' 2>/dev/null; sleep 1" || true
+    # Start HTTPS proxy (runs as docker user since VM user is docker)
+    minikube ssh -p "$CTX" -- "nohup python3 /tmp/proxy.py > /tmp/proxy.log 2>&1 &"
+    # Start socat DNS forwarder: pod network (10.244.0.1:53) → bridge DNS (192.168.49.1:53)
+    minikube ssh -p "$CTX" -- "sudo nohup socat UDP4-LISTEN:53,bind=10.244.0.1,fork,reuseaddr UDP4:192.168.49.1:53 > /tmp/socat-dns.log 2>&1 &"
+    sleep 2
+  register: vpn_fix_start
+  failed_when: false
+
+- name: Update CoreDNS to forward external DNS via pod-facing node IP
+  shell: |
+    kubectl get configmap coredns -n kube-system -o json | python3 -c "
+    import json, sys
+    d = json.load(sys.stdin)
+    corefile = d['data']['Corefile']
+    if 'forward . 10.244.0.1' not in corefile:
+        corefile = corefile.replace('forward . /etc/resolv.conf', 'forward . 10.244.0.1')
+        d['data']['Corefile'] = corefile
+        print(json.dumps(d))
+    else:
+        print(json.dumps(d))
+    " | kubectl apply -f -
+    kubectl rollout restart deployment/coredns -n kube-system
+    kubectl rollout status deployment/coredns -n kube-system --timeout=60s
+  register: coredns_update
+  failed_when: false
+
+- name: Patch CAPA controller with HTTPS proxy env vars and ClusterFirst DNS
+  shell: |
+    kubectl patch deployment capa-controller-manager -n capa-system --type=merge -p '{
+      "spec": {
+        "template": {
+          "spec": {
+            "dnsPolicy": "ClusterFirst",
+            "dnsConfig": null,
+            "containers": [{
+              "name": "manager",
+              "env": [
+                {"name": "HTTPS_PROXY", "value": "http://192.168.49.2:3128"},
+                {"name": "HTTP_PROXY",  "value": "http://192.168.49.2:3128"},
+                {"name": "NO_PROXY",    "value": "10.96.0.0/12,10.244.0.0/16,192.168.49.0/24,localhost,127.0.0.1,.cluster.local,.svc"}
+              ]
+            }]
+          }
+        }
+      }
+    }'
+    kubectl rollout status deployment/capa-controller-manager -n capa-system --timeout=120s
+  register: capa_proxy_patch
+  failed_when: false
+
+- name: Display VPN networking fix status
+  debug:
+    msg:
+      - "✅ HTTPS CONNECT proxy started in minikube VM (port 3128)"
+      - "✅ socat DNS forwarder started on 10.244.0.1:53 → 192.168.49.1:53"
+      - "✅ CoreDNS updated to forward . 10.244.0.1"
+      - "✅ CAPA patched with HTTPS_PROXY=http://192.168.49.2:3128"
+      - "Note: these settings survive pod restarts but not minikube VM reboots"
+
 - name: Apply updated CRDs from CAPA source
   when: lookup('env', 'CUSTOM_CAPA_IMAGE') == 'true' and lookup('env', 'CUSTOM_CAPA_SOURCE_PATH') != ''
   shell: |
