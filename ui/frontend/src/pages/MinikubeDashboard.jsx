@@ -1897,7 +1897,12 @@ const MinikubeDashboardContent = () => {
         );
 
       case 'rosa-hcp-clusters':
-        return <RosaHcpClustersSection theme="minikube" />;
+        return (
+          <div className="space-y-6">
+            <RosaHcpClustersSection theme="minikube" />
+            <ResourcesViewer theme="minikube" />
+          </div>
+        );
 
       case 'resources':
         return (
