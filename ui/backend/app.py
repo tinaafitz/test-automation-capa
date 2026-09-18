@@ -185,7 +185,6 @@ from aws_dashboard_routes import (
     _collect_aws_usage_data,
     _get_aws_history_db,
     _save_aws_usage_snapshot,
-    _aws_usage_snapshot_loop,
 )
 
 app.include_router(aws_dashboard_router)
@@ -261,10 +260,6 @@ async def configure_thread_pool():
     loop = asyncio.get_running_loop()
     loop.set_default_executor(ThreadPoolExecutor(max_workers=20))
 
-
-@app.on_event("startup")
-async def start_aws_snapshot_collector():
-    asyncio.create_task(_aws_usage_snapshot_loop())
 
 
 # Disabled: aws_orphan_report module is missing (see import note above).

@@ -873,9 +873,9 @@ const AWSUsageDashboard = ({ inline = false }) => {
                   ? 'bg-[#37475A] text-[#FF9900] border border-[#FF9900]/30'
                   : 'bg-[#37475A] text-[#879596] border border-[#4A5568] hover:text-[#D5DBDB]'
               }`}
-              title="Auto-refresh every 5 minutes"
+              title="Auto-refresh every 5 minutes (off by default)"
             >
-              {autoRefresh ? `Auto ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, '0')}` : 'Auto'}
+              {autoRefresh ? `Auto-refresh ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, '0')}` : 'Auto-refresh (off)'}
             </button>
             <button
               onClick={fetchUsage}
