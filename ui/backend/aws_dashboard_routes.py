@@ -16,7 +16,6 @@ Also contains:
   _get_aws_history_db         -- path to SQLite history DB
   _init_aws_history_db        -- create tables on first import
   _save_aws_usage_snapshot    -- persist a usage snapshot to the DB
-  _aws_usage_snapshot_loop    -- hourly background coroutine
 """
 
 import asyncio
@@ -325,20 +324,6 @@ def _save_aws_usage_snapshot(usage_data):
     except Exception as e:
         print(f"\u26a0\ufe0f [AWS HISTORY] Failed to save snapshot: {e}")
 
-
-async def _aws_usage_snapshot_loop():
-    """Background task that collects AWS usage snapshots every hour"""
-    await asyncio.sleep(10)  # Wait for app startup
-    print("\U0001f504 [AWS TREND] Hourly AWS usage snapshot collector started", flush=True)
-    while True:
-        try:
-            usage_data = await asyncio.to_thread(_resolve("_collect_aws_usage_data"))
-            _resolve("_save_aws_usage_snapshot")(usage_data)
-            valid_count = sum(1 for v in usage_data.values() if v != "error")
-            print(f"\u2705 [AWS TREND] Hourly snapshot saved: {valid_count} resources at {datetime.now().strftime('%H:%M')}", flush=True)
-        except Exception as e:
-            print(f"\u26a0\ufe0f [AWS TREND] Hourly snapshot failed: {e}", flush=True)
-        await asyncio.sleep(3600)  # 1 hour
 
 
 # ---------------------------------------------------------------------------

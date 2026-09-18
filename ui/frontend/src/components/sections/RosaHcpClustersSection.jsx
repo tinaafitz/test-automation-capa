@@ -77,6 +77,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
   const [clusters, setClusters] = useState([]);
   const [clustersLoading, setClustersLoading] = useState(false);
   const [clustersError, setClustersError] = useState(null);
+  const [clustersFetchedAt, setClustersFetchedAt] = useState(null);
 
   // Sort state
   const [sortField, setSortField] = useState('created');
@@ -218,6 +219,7 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
       setClustersError(safeErrorMessage);
     } finally {
       setClustersLoading(false);
+      setClustersFetchedAt(new Date());
     }
     // eslint-disable-next-line
   }, []);
@@ -789,11 +791,9 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
     }
   };
 
-  // Auto-fetch clusters on mount + poll every 30 seconds
+  // Fetch clusters once on mount
   useEffect(() => {
     fetchClusters();
-    const interval = setInterval(fetchClusters, 30000);
-    return () => clearInterval(interval);
   }, [fetchClusters]);
 
   // Live elapsed timer for the running hub build (⏱ in the progress card).
@@ -1133,17 +1133,24 @@ const RosaHcpClustersSection = ({ theme = 'mce' }) => {
       {/* Title and Refresh Button */}
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">ROSA HCP Clusters</h2>
-        <button
-          onClick={fetchClusters}
-          disabled={clustersLoading}
-          className="px-4 py-2 text-white rounded transition-colors disabled:opacity-50 font-medium flex items-center gap-2"
-          style={!clustersLoading ? { backgroundColor: colors.buttonBg } : {}}
-          onMouseEnter={(e) => !clustersLoading && (e.currentTarget.style.backgroundColor = colors.buttonBgHover)}
-          onMouseLeave={(e) => !clustersLoading && (e.currentTarget.style.backgroundColor = colors.buttonBg)}
-        >
-          <ArrowPathIcon className={`h-4 w-4 ${clustersLoading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          {clustersFetchedAt && !clustersLoading && (
+            <span className="text-xs text-gray-400">
+              Updated {clustersFetchedAt.toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            onClick={fetchClusters}
+            disabled={clustersLoading}
+            className="px-4 py-2 text-white rounded transition-colors disabled:opacity-50 font-medium flex items-center gap-2"
+            style={!clustersLoading ? { backgroundColor: colors.buttonBg } : {}}
+            onMouseEnter={(e) => !clustersLoading && (e.currentTarget.style.backgroundColor = colors.buttonBgHover)}
+            onMouseLeave={(e) => !clustersLoading && (e.currentTarget.style.backgroundColor = colors.buttonBg)}
+          >
+            <ArrowPathIcon className={`h-4 w-4 ${clustersLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-lg shadow-md border border-gray-100 overflow-hidden">

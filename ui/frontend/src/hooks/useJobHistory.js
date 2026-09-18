@@ -7,8 +7,6 @@ let sharedLoading = false;
 let sharedError = null;
 let lastFetchTime = 0;
 const subscribers = new Set();
-let pollingInterval = null;
-
 const FETCH_TIMEOUT = 10000; // 10 seconds timeout
 
 // Fetch function that updates all subscribers
@@ -88,23 +86,6 @@ const fetchJobHistoryShared = async () => {
   }
 };
 
-// Start polling (only once for all instances)
-const startPolling = () => {
-  if (!pollingInterval) {
-    console.log('🔁 [useJobHistory] Starting shared polling interval');
-    pollingInterval = setInterval(fetchJobHistoryShared, 5000);
-  }
-};
-
-// Stop polling when no more subscribers
-const stopPolling = () => {
-  if (pollingInterval && subscribers.size === 0) {
-    console.log('⏸️ [useJobHistory] Stopping shared polling interval');
-    clearInterval(pollingInterval);
-    pollingInterval = null;
-  }
-};
-
 // Custom hook for managing job/task execution history from API
 export const useJobHistory = () => {
   const [jobHistory, setJobHistory] = useState(sharedJobHistory);
@@ -132,9 +113,6 @@ export const useJobHistory = () => {
     // Initial fetch
     fetchJobHistoryShared();
 
-    // Start shared polling
-    startPolling();
-
     // Cleanup on unmount
     return () => {
       subscribers.delete(subscriberRef.current);
@@ -142,7 +120,6 @@ export const useJobHistory = () => {
         '📴 [useJobHistory] Component unsubscribed, remaining subscribers:',
         subscribers.size
       );
-      stopPolling();
     };
   }, []); // Empty dependency array - only run on mount/unmount
 

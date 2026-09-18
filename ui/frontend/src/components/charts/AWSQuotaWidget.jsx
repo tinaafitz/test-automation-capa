@@ -51,11 +51,9 @@ const AWSQuotaWidget = () => {
     }
   };
 
-  // Auto-fetch on mount + poll every 5 minutes
+  // Fetch on mount only if cache is empty
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 300000);
-    return () => clearInterval(interval);
+    if (!_cache.usage) fetchData();
   }, []);
 
   const getBarColor = (count, threshold) => {
