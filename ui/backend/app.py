@@ -39,7 +39,6 @@ except ImportError as e:
 from capa_core import (
     resolve_spec_to_plan as _core_resolve_spec_to_plan,
 )
-import minikube_ops
 
 
 app = FastAPI(title="ROSA Automation API", version="1.0.0")
