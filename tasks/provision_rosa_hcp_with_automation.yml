@@ -401,7 +401,6 @@
     - name: Create ROSANetwork resource
       include_tasks: create_rosa_network.yml
       vars:
-        rosa_network_config_name: "{{ rosa_network_name }}"
         vpc_cidr_block: "{{ network_cidr }}"
 
     - name: Get actual subnet count from ROSANetwork status

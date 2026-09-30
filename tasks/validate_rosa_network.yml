@@ -6,7 +6,7 @@
       kubernetes.core.k8s_info:
         api_version: infrastructure.cluster.x-k8s.io/v1beta2
         kind: ROSANetwork
-        name: "{{ rosa_network_config_name | default(cluster_name + '-network') }}"
+        name: "{{ rosa_network_name | default(cluster_name + '-network') }}"
         namespace: "{{ capi_namespace }}"
       register: network_info
 
@@ -14,7 +14,7 @@
       assert:
         that:
           - network_info.resources | length > 0
-        fail_msg: "ROSANetwork {{ rosa_network_config_name | default(cluster_name + '-network') }} not found"
+        fail_msg: "ROSANetwork {{ rosa_network_name | default(cluster_name + '-network') }} not found"
         success_msg: "ROSANetwork resource found"
 
     - name: Extract network resource details
@@ -150,7 +150,7 @@
       kubernetes.core.k8s_info:
         api_version: infrastructure.cluster.x-k8s.io/v1beta2
         kind: ROSANetwork
-        name: "{{ rosa_network_config_name | default(cluster_name + '-network') }}"
+        name: "{{ rosa_network_name | default(cluster_name + '-network') }}"
         namespace: "{{ capi_namespace }}"
       register: debug_network_validation
       ignore_errors: true
