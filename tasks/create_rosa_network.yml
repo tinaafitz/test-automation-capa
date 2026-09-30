@@ -112,15 +112,16 @@
         - rosa_network_result is succeeded
 
     - name: Wait for ROSANetwork to be fully ready
-      kubernetes.core.k8s_info:
-        api_version: infrastructure.cluster.x-k8s.io/v1beta2
-        kind: ROSANetwork
-        name: "{{ rosa_network_name | default(cluster_name + '-network') }}"
-        namespace: "{{ capi_namespace }}"
+      shell: |
+        READY=$(oc get rosanetwork {{ rosa_network_name | default(cluster_name + '-network') }} -n {{ capi_namespace }} \
+          -o jsonpath='{.status.conditions[?(@.type=="ROSANetworkReady")].status}' 2>/dev/null || echo "")
+        if [ "$READY" = "True" ]; then
+          exit 0
+        else
+          exit 1
+        fi
       register: network_ready_status
-      until:
-        - network_ready_status.resources | length > 0
-        - network_ready_status.resources[0].status.conditions | selectattr('type', 'equalto', 'ROSANetworkReady') | selectattr('status', 'equalto', 'True') | list | length > 0
+      until: network_ready_status.rc == 0
       retries: "{{ (rosa_network_ready_timeout | default(1200) / 30) | int }}"
       delay: 30
       changed_when: false
