@@ -113,7 +113,9 @@
 
     - name: Wait for ROSANetwork to be fully ready
       shell: |
-        READY=$(oc get rosanetwork {{ rosa_network_name | default(cluster_name + '-network') }} -n {{ capi_namespace }} \
+        NETWORK_NAME="{{ rosa_network_name | default(cluster_name + '-network') }}"
+        NAMESPACE="{{ capi_namespace }}"
+        READY=$(oc get rosanetwork "$NETWORK_NAME" -n "$NAMESPACE" \
           -o jsonpath='{.status.conditions[?(@.type=="ROSANetworkReady")].status}' 2>/dev/null || echo "")
         if [ "$READY" = "True" ]; then
           exit 0
