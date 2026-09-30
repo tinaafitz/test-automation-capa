@@ -426,15 +426,22 @@ const StepOutputPanel = ({ logs, status, agentStats }) => {
   const outputRef = useRef(null);
   const [copied, setCopied] = useState(false);
 
+  // Separate sidecar logs from regular logs for prioritized display
+  const sidecarLogs = logs.filter(line => line.includes('[AGENT-SIDECAR]') || line.includes('#AGENT_CONTEXT'));
+  const otherLogs = logs.filter(line => !line.includes('[AGENT-SIDECAR]') && !line.includes('#AGENT_CONTEXT'));
+
+  // Display sidecar logs first (real-time progress), then other logs
+  const displayLogs = [...sidecarLogs, ...otherLogs];
+
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
     if (outputRef.current && status === 'running') {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
-  }, [logs, status]);
+  }, [displayLogs, status]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(logs.join('\n')).then(() => {
+    navigator.clipboard.writeText(displayLogs.join('\n')).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -484,7 +491,24 @@ const StepOutputPanel = ({ logs, status, agentStats }) => {
           ref={outputRef}
           className="bg-gray-900 text-gray-100 rounded-b-lg p-3 max-h-80 overflow-y-auto font-mono text-xs leading-relaxed"
         >
-        {logs.map((line, i) => (
+        {/* Sidecar logs section - real-time progress */}
+        {sidecarLogs.length > 0 && (
+          <div className="border-b border-yellow-600 pb-2 mb-2">
+            <div className="text-yellow-300 font-bold mb-1">\u26A1 Real-time Progress:</div>
+            {sidecarLogs.map((line, i) => (
+              <div
+                key={`sidecar-${i}`}
+                className="text-yellow-200 font-medium bg-yellow-950 bg-opacity-30 px-1 py-0.5 mb-0.5"
+              >
+                {line}
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Regular Ansible logs */}
+        {displayLogs.map((line, i) => {
+          if (sidecarLogs.includes(line)) return null;
+          return (
           <div
             key={i}
             className={
@@ -500,7 +524,7 @@ const StepOutputPanel = ({ logs, status, agentStats }) => {
           >
             {line}
           </div>
-        ))}
+        )})}
         {status === 'running' && (
           <div className="text-blue-400 animate-pulse mt-1">▋</div>
         )}
