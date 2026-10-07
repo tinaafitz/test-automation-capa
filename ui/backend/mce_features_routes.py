@@ -5,6 +5,8 @@ Endpoints moved here from app.py:
   GET    /api/mce/features
   GET    /api/mce/yaml
   GET    /api/mce/resources
+  POST   /api/mce/switch-to-hypershift
+  POST   /api/mce/switch-to-capi
 
 Also contains:
   _get_mce_features_sync  -- sync helper that shells out to ``oc`` for MCE data
@@ -14,10 +16,30 @@ import asyncio
 import json
 import subprocess
 import sys
-
-from fastapi import APIRouter, HTTPException
+import uuid
+from datetime import datetime
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request, status
 
 router = APIRouter()
+
+try:
+  from shared_state import jobs, _jobs_lock
+  JOBS_AVAILABLE = True
+except ImportError:
+  JOBS_AVAILABLE = False
+
+def require_auth(request: Request) -> None:
+  """Simple auth check - verify Authorization header is present.
+
+  In production, this should validate JWT tokens, API keys, or session cookies.
+  For now, we require the Authorization header to be present as a basic gate.
+  """
+  auth_header = request.headers.get("Authorization")
+  if not auth_header:
+    raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      detail="Authentication required. Please provide Authorization header."
+    )
 
 
 def _resolve(name: str):
@@ -42,7 +64,10 @@ def _get_mce_features_sync():
         )
 
         if result.returncode != 0:
-            raise HTTPException(status_code=500, detail=f"Failed to get MCE: {result.stderr}")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to get MCE: {result.stderr}")
+            raise HTTPException(status_code=500, detail="Failed to fetch MCE configuration. Check server logs.")
 
         mce_data = json.loads(result.stdout)
 
@@ -185,7 +210,10 @@ def _get_mce_features_sync():
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Request to OpenShift timed out")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching MCE features: {str(e)}")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception(f"Error fetching MCE features: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch MCE features. Check server logs.")
 
 
 # ---------------------------------------------------------------------------
@@ -229,14 +257,13 @@ async def get_mce_yaml():
             "message": "Request to OpenShift timed out",
         }
     except Exception as e:
-        import traceback
-
-        print(f"\u274c [MCE-YAML] Error: {str(e)}")
-        print(traceback.format_exc())
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception(f"Error fetching MCE YAML: {e}")
         return {
             "success": False,
             "yaml": None,
-            "message": f"Error fetching MCE YAML: {str(e)}",
+            "message": "Error fetching MCE YAML. Check server logs.",
         }
 
 
@@ -402,8 +429,168 @@ async def get_mce_resources():
         return {"success": True, "resources": resources, "count": len(resources)}
 
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception(f"Error fetching MCE resources: {e}")
         return {
             "success": False,
-            "message": f"Error fetching MCE resources: {str(e)}",
+            "message": "Error fetching MCE resources. Check server logs.",
             "resources": [],
         }
+
+
+def _run_playbook_background(playbook_path, job_id, description):
+  """Background task to run a playbook"""
+  import os
+  try:
+    if JOBS_AVAILABLE:
+      with _jobs_lock:
+        jobs[job_id]["status"] = "running"
+        jobs[job_id]["progress"] = 10
+        jobs[job_id]["message"] = f"{description} in progress..."
+
+    project_root = os.environ.get("AUTOMATION_PATH") or os.path.dirname(
+      os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+    full_path = os.path.join(project_root, playbook_path)
+
+    if not os.path.exists(full_path):
+      error = f"Playbook not found: {playbook_path}"
+      if JOBS_AVAILABLE:
+        with _jobs_lock:
+          jobs[job_id]["status"] = "failed"
+          jobs[job_id]["message"] = error
+          jobs[job_id]["logs"].append(error)
+      return
+
+    cmd = [
+      "ansible-playbook",
+      full_path,
+      "-i",
+      "localhost,",
+      "-e",
+      "skip_ansible_runner=true",
+    ]
+
+    proc = subprocess.Popen(
+      cmd,
+      stdout=subprocess.PIPE,
+      stderr=subprocess.STDOUT,
+      text=True,
+      preexec_fn=lambda: os.setsid() if hasattr(os, 'setsid') else None,
+    )
+
+    for line in proc.stdout:
+      if line:
+        if JOBS_AVAILABLE:
+          with _jobs_lock:
+            jobs[job_id]["logs"].append(line.rstrip())
+
+    proc.wait()
+
+    if JOBS_AVAILABLE:
+      with _jobs_lock:
+        if proc.returncode == 0:
+          jobs[job_id]["status"] = "succeeded"
+          jobs[job_id]["message"] = f"{description} completed successfully"
+          jobs[job_id]["progress"] = 100
+        else:
+          jobs[job_id]["status"] = "failed"
+          jobs[job_id]["message"] = f"{description} failed with return code {proc.returncode}"
+
+  except Exception as e:
+    if JOBS_AVAILABLE:
+      with _jobs_lock:
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["message"] = f"Error: {str(e)}"
+        jobs[job_id]["logs"].append(f"Error: {str(e)}")
+
+
+@router.post("/api/mce/switch-to-hypershift")
+async def switch_to_hypershift(background_tasks: BackgroundTasks, request: Request):
+  """Switch MCE from CAPI/CAPA to Hypershift mode"""
+  require_auth(request)
+  try:
+    if not JOBS_AVAILABLE:
+      raise HTTPException(status_code=500, detail="Jobs service not available")
+
+    job_id = str(uuid.uuid4())
+    playbook_path = "playbooks/disable_capi_enable_hypershift.yml"
+    description = "Disable CAPI/CAPA and Enable Hypershift"
+
+    with _jobs_lock:
+      jobs[job_id] = {
+        "id": job_id,
+        "status": "pending",
+        "progress": 0,
+        "message": f"Queued: {description}",
+        "logs": [],
+        "created_at": datetime.now(),
+        "playbook": playbook_path,
+        "description": description,
+      }
+
+    background_tasks.add_task(_run_playbook_background, playbook_path, job_id, description)
+
+    return {
+      "success": True,
+      "job_id": job_id,
+      "status": "pending",
+      "message": f"Playbook queued: {description}",
+    }
+
+  except HTTPException:
+    raise
+  except Exception as e:
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.exception(f"Error queuing playbook: {e}")
+    return {
+      "success": False,
+      "message": "Error queuing playbook. Check server logs.",
+    }
+
+
+@router.post("/api/mce/switch-to-capi")
+async def switch_to_capi(background_tasks: BackgroundTasks, request: Request):
+  """Switch MCE from Hypershift to CAPI/CAPA mode"""
+  require_auth(request)
+  try:
+    if not JOBS_AVAILABLE:
+      raise HTTPException(status_code=500, detail="Jobs service not available")
+
+    job_id = str(uuid.uuid4())
+    playbook_path = "playbooks/enable_capi_disable_hypershift.yml"
+    description = "Enable CAPI/CAPA and Disable Hypershift"
+
+    with _jobs_lock:
+      jobs[job_id] = {
+        "id": job_id,
+        "status": "pending",
+        "progress": 0,
+        "message": f"Queued: {description}",
+        "logs": [],
+        "created_at": datetime.now(),
+        "playbook": playbook_path,
+        "description": description,
+      }
+
+    background_tasks.add_task(_run_playbook_background, playbook_path, job_id, description)
+
+    return {
+      "success": True,
+      "job_id": job_id,
+      "status": "pending",
+      "message": f"Playbook queued: {description}",
+    }
+
+  except HTTPException:
+    raise
+  except Exception as e:
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.exception(f"Error queuing playbook: {e}")
+    return {
+      "success": False,
+      "message": "Error queuing playbook. Check server logs.",
+    }

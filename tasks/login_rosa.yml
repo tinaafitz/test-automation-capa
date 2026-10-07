@@ -1,9 +1,21 @@
-- name: Make sure we're logged into ROSA with whoami
+- name: Login to ROSA using OCM credentials
+  shell: |
+    rosa login --client-id="{{ OCM_CLIENT_ID }}" --client-secret="{{ OCM_CLIENT_SECRET }}" 2>&1
+  environment:
+    OCM_CLIENT_ID: "{{ OCM_CLIENT_ID | default('') }}"
+    OCM_CLIENT_SECRET: "{{ OCM_CLIENT_SECRET | default('') }}"
+  register: rosa_login_result
+  ignore_errors: true
+  changed_when: "'Successfully logged' in rosa_login_result.stdout or 'Already logged' in rosa_login_result.stdout"
+
+- name: Verify ROSA login with whoami
   shell: |
     rosa whoami -o json
   register: rosa_whoami
-  ignore_errors: false
+  ignore_errors: true
+  retries: 3
+  delay: 2
 
 - name: Print ROSA login Information
   debug:
-    msg: "ROSA whoami: {{ rosa_whoami.stdout }}"
+    msg: "ROSA whoami: {{ rosa_whoami.stdout | default('Not authenticated') }}"

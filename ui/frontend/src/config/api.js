@@ -32,6 +32,8 @@ export const API_ENDPOINTS = {
 
   // MCE endpoints
   MCE_YAML: '/api/mce/yaml',
+  MCE_SWITCH_TO_HYPERSHIFT: '/api/mce/switch-to-hypershift',
+  MCE_SWITCH_TO_CAPI: '/api/mce/switch-to-capi',
 
   // Provisioning endpoints
   PROVISIONING_GENERATE_YAML: '/api/provisioning/generate-yaml',

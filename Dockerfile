@@ -70,6 +70,7 @@ COPY mcp_server/ /app/mcp_server/
 COPY ansible.cfg /app/ansible.cfg
 COPY capa_core.py /app/capa_core.py
 COPY playbook_executor.py /app/playbook_executor.py
+COPY minikube_ops.py /app/minikube_ops.py
 
 # Copy built frontend
 COPY --from=frontend-build /app/frontend/build /app/ui/frontend/build

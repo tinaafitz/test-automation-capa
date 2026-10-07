@@ -1,0 +1,28 @@
+---
+name: delete-clusters
+description: Delete ROSA HCP clusters with proper resource cleanup order
+entry_point: main.sh
+parameters:
+  - name: cluster_prefixes
+    description: "Cluster name prefix(es) to delete (e.g., 'we5', 'qe6'). Space-separated for multiple."
+    type: string
+    required: true
+  - name: namespace
+    description: "CAPI namespace containing the clusters (default: ns-rosa-hcp)"
+    type: string
+    default: "ns-rosa-hcp"
+  - name: wait_for_deletion
+    description: "Wait for deletion to complete (default: true)"
+    type: boolean
+    default: true
+  - name: force_cleanup
+    description: "Enable force-cleanup of stuck resources (default: true)"
+    type: boolean
+    default: true
+  - name: verbose
+    description: "Show detailed Ansible output (default: false)"
+    type: boolean
+    default: false
+
+execution_mode: background
+timeout: 14400  # 4 hours for full deletion including CloudFormation

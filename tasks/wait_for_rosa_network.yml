@@ -5,7 +5,7 @@
     - name: Display wait configuration
       debug:
         msg:
-          - "Waiting for ROSANetwork: {{ rosa_network_config_name | default(cluster_name + '-network') }}"
+          - "Waiting for ROSANetwork: {{ rosa_network_name | default(cluster_name + '-network') }}"
           - "Namespace: {{ capi_namespace }}"
           - "Timeout: {{ rosa_network_creation_timeout | default(900) }} seconds"
 
@@ -13,7 +13,7 @@
       shell: |
         set -e
         LOGFILE="{{ agent_sidecar_log | default('/tmp/provision-agent-' + cluster_name + '.log') }}"
-        NETWORK_NAME="{{ rosa_network_config_name | default(cluster_name + '-network') }}"
+        NETWORK_NAME="{{ rosa_network_name | default(cluster_name + '-network') }}"
         NAMESPACE="{{ capi_namespace }}"
         TIMEOUT="{{ rosa_network_creation_timeout | default(900) }}"
         START_TIME=$(date +%s)
@@ -148,7 +148,7 @@
 
     - name: Get current ROSANetwork status for debugging
       shell: |
-        oc get rosanetwork "{{ rosa_network_config_name | default(cluster_name + '-network') }}" \
+        oc get rosanetwork "{{ rosa_network_name | default(cluster_name + '-network') }}" \
           -n "{{ capi_namespace }}" -o json 2>/dev/null || echo '{"error": "Resource not found"}'
       register: debug_network_status_raw
       changed_when: false
@@ -169,7 +169,7 @@
     - name: Get ROSANetwork events for troubleshooting
       shell: |
         oc get events -n "{{ capi_namespace }}" --field-selector \
-          involvedObject.name="{{ rosa_network_config_name | default(cluster_name + '-network') }}" \
+          involvedObject.name="{{ rosa_network_name | default(cluster_name + '-network') }}" \
           -o json 2>/dev/null || echo '{"items": []}'
       register: network_events_raw
       changed_when: false

@@ -3,6 +3,34 @@
 # If missing, automatically creates and links it using boto3 + OCM API.
 # This prevents the 45-minute CLUSTERS-MGMT-403 failure during provisioning.
 
+- name: Login to ROSA with OCM credentials
+  shell: |
+    rosa login --client-id="{{ OCM_CLIENT_ID }}" --client-secret="{{ OCM_CLIENT_SECRET }}" 2>&1
+  environment:
+    OCM_CLIENT_ID: "{{ OCM_CLIENT_ID | default('') }}"
+    OCM_CLIENT_SECRET: "{{ OCM_CLIENT_SECRET | default('') }}"
+  register: rosa_login_result
+  ignore_errors: true
+  changed_when: false
+
+- name: Check ROSA authentication
+  shell: |
+    rosa whoami 2>&1
+  register: rosa_whoami
+  changed_when: false
+  ignore_errors: true
+
+- name: Set ROSA authentication status
+  set_fact:
+    rosa_authenticated: "{{ 'Organization ID' in rosa_whoami.stdout or 'user' in rosa_whoami.stdout | lower }}"
+
+- name: Display ROSA auth status
+  debug:
+    msg: |
+      ROSA Login Result: {{ rosa_login_result.stdout | default(rosa_login_result.stderr | default('No output')) }}
+      ROSA Auth Check: {{ rosa_whoami.stdout | default('Not authenticated') }}
+      Authenticated: {{ rosa_authenticated }}
+
 - name: Check for OCM role in AWS IAM
   shell: |
     python3 -c "
@@ -61,19 +89,22 @@
       ⚠️ No OCM role found in AWS IAM — will attempt to create one
       {% endif %}
 
-- name: Link existing OCM role if unlinked
-  shell: |
-    rosa link ocm-role --role-arn "{{ ocm_role_status.arn }}" --yes 2>&1
-  register: ocm_role_link_result
-  when:
-    - ocm_role_status.exists
-    - not (ocm_role_linked | bool)
-  failed_when: false
+- name: Link existing OCM role if unlinked (optional - will continue if fails)
+  block:
+    - name: Link OCM role
+      shell: |
+        rosa link ocm-role --role-arn "{{ ocm_role_status.arn }}" --yes 2>&1
+      register: ocm_role_link_result
+      when:
+        - ocm_role_status.exists
+        - not (ocm_role_linked | bool)
+      failed_when: false
 
-- name: Display OCM role link result
-  debug:
-    msg: "{{ ocm_role_link_result.stdout | default('') }}"
-  when: ocm_role_link_result is defined and ocm_role_link_result.stdout is defined
+    - name: Display OCM role link result
+      debug:
+        msg: "{{ ocm_role_link_result.stdout | default('') }}"
+      when: ocm_role_link_result is defined and ocm_role_link_result.stdout is defined
+  ignore_errors: true
 
 - name: Unlink stale OCM role if linked role doesn't exist in AWS
   shell: |

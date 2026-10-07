@@ -233,6 +233,8 @@ const CAPADashboardContent = () => {
   const [provisionJobId, setProvisionJobId] = useState(null);
   const [provisionOpId, setProvisionOpId] = useState(null);
   const [isCheckingProvisionJob, setIsCheckingProvisionJob] = useState(false);
+  const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
+  const [mceLastStatusRefreshed, setMceLastStatusRefreshed] = useState(null);
 
   const {
     ocpStatus,
@@ -1615,6 +1617,34 @@ const CAPADashboardContent = () => {
                       <span className="text-emerald-600 font-semibold">Passed</span>
                     </div>
                   )}
+                  {mceLastStatusRefreshed && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                      <ArrowPathIcon className="h-4 w-4 text-blue-600" />
+                      <span>Last refreshed: {new Date(mceLastStatusRefreshed).toLocaleString()}</span>
+                    </div>
+                  )}
+                  <button
+                    onClick={async () => {
+                      setIsRefreshingStatus(true);
+                      try {
+                        await refreshAllStatus();
+                        setMceLastStatusRefreshed(new Date());
+                      } catch (err) {
+                        console.error('Failed to refresh status:', err);
+                      } finally {
+                        setIsRefreshingStatus(false);
+                      }
+                    }}
+                    disabled={isRefreshingStatus}
+                    className={`px-4 py-2 text-sm font-semibold rounded-lg flex items-center gap-2 transition-all shadow-sm hover:shadow-md border ${
+                      isRefreshingStatus
+                        ? 'bg-gray-200 text-gray-500 border-gray-300 cursor-not-allowed'
+                        : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+                    }`}
+                  >
+                    <ArrowPathIcon className={`h-4 w-4 ${isRefreshingStatus ? 'animate-spin' : ''}`} />
+                    {isRefreshingStatus ? 'Refreshing...' : 'Refresh Status'}
+                  </button>
                   <button
                     onClick={handleMceVerification}
                     disabled={isVerifying}
@@ -1704,6 +1734,81 @@ const CAPADashboardContent = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Component Switch Actions */}
+              {(() => {
+                const capiEnabled = mceFeatures.some(c => c.name === 'cluster-api' && c.enabled);
+                const hypershiftEnabled = mceFeatures.some(c => c.name === 'hypershift' && c.enabled);
+
+                return (
+                  <div className="mt-6 pt-6 border-t border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-semibold text-gray-700">Switch Components</h4>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {capiEnabled ? 'Currently: CAPI/CAPA enabled' : hypershiftEnabled ? 'Currently: Hypershift enabled' : 'Currently: No cluster provider enabled'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {capiEnabled && (
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm('Switch MCE from CAPI/CAPA to Hypershift?\n\nThis will disable CAPI/CAPA and enable Hypershift.')) {
+                                return;
+                              }
+                              try {
+                                const response = await fetch(buildApiUrl(API_ENDPOINTS.MCE_SWITCH_TO_HYPERSHIFT), {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                });
+                                const data = await response.json();
+                                if (data.success) {
+                                  alert(`Playbook queued (Job ID: ${data.job_id})\n\nMonitor progress in the Jobs panel.`);
+                                  handleMceVerification();
+                                } else {
+                                  alert(`Error: ${data.message}`);
+                                }
+                              } catch (err) {
+                                alert(`Failed to switch: ${err.message}`);
+                              }
+                            }}
+                            className="px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-lg transition-all shadow-sm hover:shadow-md"
+                          >
+                            Switch to Hypershift
+                          </button>
+                        )}
+                        {hypershiftEnabled && (
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm('Switch MCE from Hypershift to CAPI/CAPA?\n\nThis will enable CAPI/CAPA and disable Hypershift.')) {
+                                return;
+                              }
+                              try {
+                                const response = await fetch(buildApiUrl(API_ENDPOINTS.MCE_SWITCH_TO_CAPI), {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                });
+                                const data = await response.json();
+                                if (data.success) {
+                                  alert(`Playbook queued (Job ID: ${data.job_id})\n\nMonitor progress in the Jobs panel.`);
+                                  handleMceVerification();
+                                } else {
+                                  alert(`Error: ${data.message}`);
+                                }
+                              } catch (err) {
+                                alert(`Failed to switch: ${err.message}`);
+                              }
+                            }}
+                            className="px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 rounded-lg transition-all shadow-sm hover:shadow-md"
+                          >
+                            Switch to CAPI/CAPA
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Verification Results */}
               {verificationResults && (

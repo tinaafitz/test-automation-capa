@@ -1641,7 +1641,7 @@ def _run_ansible_task_sync(
     rosa_role_prefix: "{cluster_name}"
     rosa_role_config_name: "{cluster_name}-roles"
     rosa_network_name: "{cluster_name}-network"
-    rosa_network_config_name: "{cluster_name}-network"
+    rosa_network_name: "{cluster_name}-network"
     network_cidr: "{extra_vars.get('network_cidr', '10.0.0.0/16')}"
     availability_zone_count: {az_count}
     availability_zones_list: {az_list_yaml}
@@ -1701,7 +1701,7 @@ def _run_ansible_task_sync(
         "rosa_role_prefix": derived_cluster_name,
         "rosa_role_config_name": f"{derived_cluster_name}-roles",
         "rosa_network_name": f"{derived_cluster_name}-network",
-        "rosa_network_config_name": f"{derived_cluster_name}-network",
+        "rosa_network_name": f"{derived_cluster_name}-network",
         "network_cidr": extra_vars.get("network_cidr", "10.0.0.0/16"),
         "availability_zone_count": az_count,
         "create_rosa_roles": extra_vars.get("create_rosa_roles", "true"),
